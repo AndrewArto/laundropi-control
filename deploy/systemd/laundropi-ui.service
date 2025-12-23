@@ -1,0 +1,19 @@
+[Unit]
+Description=LaundroPi UI (vite preview on :3000)
+After=network.target laundropi-api.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+# Change this user/path if your username or checkout directory differs
+User=pi
+WorkingDirectory=%h/Projects/Laundry/laundropi-control
+Environment=HOST=0.0.0.0
+# Uncomment the next line if you want to rebuild UI on each start
+# ExecStartPre=/usr/bin/env npm run build
+ExecStart=/usr/bin/env npm run preview -- --host --port 3000
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

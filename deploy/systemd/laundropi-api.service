@@ -1,0 +1,16 @@
+[Unit]
+Description=LaundroPi API (server.js)
+After=network.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+# Change this user/path if your username or checkout directory differs
+User=pi
+WorkingDirectory=%h/Projects/Laundry/laundropi-control
+ExecStart=/usr/bin/env node server.js
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

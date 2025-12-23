@@ -1,0 +1,30 @@
+{
+  "relays": [
+    { "id": 1, "name": "Main Hall Lights", "gpioPin": 5,  "type": "LIGHT",  "iconType": "LIGHT",  "colorGroup": "blue", "isOn": true, "channelNumber": 1, "isHidden": false },
+    { "id": 2, "name": "Rear Hall Lights", "gpioPin": 6,  "type": "LIGHT",  "iconType": "LIGHT",  "colorGroup": "blue", "isOn": true, "channelNumber": 2, "isHidden": false },
+    { "id": 3, "name": "Entrance Sign",    "gpioPin": 13, "type": "SIGN",   "iconType": "SIGN",   "colorGroup": "pink", "isOn": false, "channelNumber": 3, "isHidden": false },
+    { "id": 4, "name": "Window Neon",      "gpioPin": 16, "type": "SIGN",   "iconType": "SIGN",   "colorGroup": "pink", "isOn": false, "channelNumber": 4, "isHidden": false },
+    { "id": 5, "name": "Front Door Lock",  "gpioPin": 19, "type": "DOOR",   "iconType": "DOOR",   "colorGroup": "green","isOn": false, "channelNumber": 5, "isHidden": false },
+    { "id": 6, "name": "Back Door Lock",   "gpioPin": 20, "type": "DOOR",   "iconType": "DOOR",   "colorGroup": "green","isOn": false, "channelNumber": 6, "isHidden": false },
+    { "id": 7, "name": "Vending Machine",  "gpioPin": 12, "type": "MACHINE","iconType": "MACHINE","colorGroup": null,  "isOn": true, "channelNumber": null, "isHidden": true },
+    { "id": 8, "name": "Office Fan",       "gpioPin": 26, "type": "OTHER",  "iconType": "OTHER",  "colorGroup": "orange","isOn": false, "channelNumber": 8, "isHidden": false }
+  ],
+  "schedules": [
+    {
+      "relayIds": [1, 2, 3, 4, 5],
+      "time": "07:30",
+      "action": "ON",
+      "days": ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"],
+      "active": true,
+      "id": "1764936365084"
+    },
+    {
+      "relayIds": [1, 2, 3, 4, 5, 6, 7, 8],
+      "time": "23:00",
+      "action": "OFF",
+      "days": ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"],
+      "active": true,
+      "id": "1764936375971"
+    }
+  ]
+}

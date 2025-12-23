@@ -1,0 +1,29 @@
+/* Global tweaks for layout stability on mobile */
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+body {
+  overflow-x: hidden;
+}
+
+input[type="time"] {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  display: block;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.time-input {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  display: block;
+  box-sizing: border-box;
+  -webkit-appearance: none;
+  appearance: none;
+  min-height: 48px;
+  height: 48px;
+}
