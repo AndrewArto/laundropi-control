@@ -911,12 +911,16 @@ const App: React.FC = () => {
 
                   <div className="space-y-2">
                     {visibleByLaundry.map(l => {
+                      const relaysToShow = editingGroupId === group.id
+                        ? l.visibleRelays
+                        : l.visibleRelays.filter(relay => selectedSet.has(selectionKey(l.id, relay.id)));
+                      if (!relaysToShow.length && editingGroupId !== group.id) return null;
                       return (
                         <div key={`group-${group.id}-${l.id}`} className="bg-slate-900/40 border border-slate-700 rounded-lg p-3">
                           <div className="text-xs text-slate-300 mb-2">{l.name}</div>
                           <div className="flex gap-2 flex-wrap">
-                            {l.visibleRelays.length === 0 && <span className="text-xs text-slate-500">No relays</span>}
-                            {l.visibleRelays.map(relay => {
+                            {relaysToShow.length === 0 && <span className="text-xs text-slate-500">No relays</span>}
+                            {relaysToShow.map(relay => {
                               const key = selectionKey(l.id, relay.id);
                               const selected = selectedSet.has(key);
                               return (
