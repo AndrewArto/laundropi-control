@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { LayoutDashboard, CalendarClock, Settings, Trash2, Cpu, Server, Pencil, Lock } from 'lucide-react';
+import { LayoutDashboard, CalendarClock, Settings, Trash2, Cpu, Server, Pencil, Lock, Plus } from 'lucide-react';
 import RelayCard from './components/RelayCard';
 import { Relay, Schedule, RelayType, RelayGroup } from './types';
 import { ApiService } from './services/api';
@@ -44,6 +44,12 @@ const to24h = (val?: string | null): string | null => {
   return null;
 };
 
+const normalizeTimeInput = (val: string): string => {
+  const digits = val.replace(/\D/g, '').slice(0, 4);
+  if (digits.length <= 2) return digits;
+  return `${digits.slice(0, 2)}:${digits.slice(2)}`;
+};
+
 const App: React.FC = () => {
   console.log('[LaundroPi] App mounted render cycle start');
 
@@ -74,9 +80,11 @@ const App: React.FC = () => {
   const [newGroupDays, setNewGroupDays] = useState<string[]>([...DAYS_OF_WEEK]);
   const [editingGroupId, setEditingGroupId] = useState<string | null>(null);
   const [groupSelectionTouched, setGroupSelectionTouched] = useState(false);
+  const [isNewGroupVisible, setIsNewGroupVisible] = useState(false);
   const latestRelaysRef = React.useRef<Relay[]>([]);
   const [isRelayEditMode, setIsRelayEditMode] = useState(false);
   const isRelayEditModeRef = React.useRef(false);
+  const editingGroupIdRef = React.useRef<string | null>(null);
   const isAuthenticatedRef = React.useRef(false);
   const [relayNameDrafts, setRelayNameDrafts] = useState<Record<number, string>>({});
   const [relayVisibility, setRelayVisibility] = useState<Record<number, boolean>>({});
@@ -219,7 +227,11 @@ const App: React.FC = () => {
     if (!isAuthenticated) return;
     setIsLoading(true);
     fetchLaundries();
-    const poller = setInterval(fetchLaundries, 10000);
+    const poller = setInterval(() => {
+      if (!isRelayEditModeRef.current && !editingGroupIdRef.current) {
+        fetchLaundries();
+      }
+    }, 2000);
     return () => clearInterval(poller);
   }, [isAuthenticated]);
 
@@ -230,6 +242,10 @@ const App: React.FC = () => {
   useEffect(() => {
     isRelayEditModeRef.current = isRelayEditMode;
   }, [isRelayEditMode]);
+
+  useEffect(() => {
+    editingGroupIdRef.current = editingGroupId;
+  }, [editingGroupId]);
 
   useEffect(() => {
     relayVisibilityRef.current = relayVisibility;
@@ -306,6 +322,8 @@ const App: React.FC = () => {
     setNewGroupOffTime('');
     setNewGroupDays([...DAYS_OF_WEEK]);
     setGroupSelectionTouched(false);
+    setEditingGroupId(null);
+    editingGroupIdRef.current = null;
     setIsLoading(false);
     if (typeof window !== 'undefined') {
       try {
@@ -526,6 +544,7 @@ const App: React.FC = () => {
     setNewGroupOnTime('');
     setNewGroupOffTime('');
     setNewGroupDays([...DAYS_OF_WEEK]);
+    setIsNewGroupVisible(false);
   };
 
   const handleUpdateGroup = async (groupId: string, updates: Partial<RelayGroup>) => {
@@ -699,11 +718,32 @@ const App: React.FC = () => {
     const selectionSet = new Set(newGroupSelections.map(sel => selectionKey(sel.agentId, sel.relayId)));
     return (
       <div className="space-y-6 max-w-full overflow-hidden">
-        <div className="space-y-3 max-w-full overflow-hidden">
-          <div className="flex items-center gap-2">
-            <CalendarClock className="w-5 h-5 text-emerald-400" />
-            <h2 className="text-xl font-bold text-white">Groups & Schedules</h2>
+          <div className="space-y-3 max-w-full overflow-hidden">
+          <div className="flex items-center gap-2 justify-between">
+            <div className="flex items-center gap-2">
+              <CalendarClock className="w-5 h-5 text-emerald-400" />
+              <h2 className="text-xl font-bold text-white">Groups & Schedules</h2>
+            </div>
+            <button
+              onClick={() => {
+                setIsNewGroupVisible(v => !v);
+                if (!isNewGroupVisible) {
+                  setNewGroupName('New Group');
+                  setNewGroupSelections([]);
+                  setGroupSelectionTouched(false);
+                  setNewGroupOnTime('');
+                  setNewGroupOffTime('');
+                  setNewGroupDays([...DAYS_OF_WEEK]);
+                }
+              }}
+              disabled={controlsDisabled}
+              className="flex items-center gap-2 px-3 py-2 text-sm font-semibold rounded-lg border border-indigo-500 text-indigo-200 bg-indigo-500/10 hover:bg-indigo-500/20 disabled:opacity-50"
+            >
+              <Plus className="w-4 h-4" />
+              {isNewGroupVisible ? 'Close' : 'Add Group'}
+            </button>
           </div>
+          {isNewGroupVisible && (
           <div className="bg-slate-800 border border-slate-700 rounded-xl p-4 space-y-4 max-w-full w-full box-border">
             <div className="grid gap-3">
               <input
@@ -795,7 +835,7 @@ const App: React.FC = () => {
                     maxLength={5}
                     placeholder="HH:MM"
                     value={newGroupOnTime}
-                    onChange={(e) => setNewGroupOnTime(e.target.value)}
+                    onChange={(e) => setNewGroupOnTime(normalizeTimeInput(e.target.value))}
                     onBlur={(e) => setNewGroupOnTime(to24h(e.target.value) || '')}
                     disabled={controlsDisabled}
                     className="time-input w-full max-w-full min-w-0 box-border bg-slate-900/50 border border-slate-700 rounded-xl px-3 py-3 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all"
@@ -811,7 +851,7 @@ const App: React.FC = () => {
                     maxLength={5}
                     placeholder="HH:MM"
                     value={newGroupOffTime}
-                    onChange={(e) => setNewGroupOffTime(e.target.value)}
+                    onChange={(e) => setNewGroupOffTime(normalizeTimeInput(e.target.value))}
                     onBlur={(e) => setNewGroupOffTime(to24h(e.target.value) || '')}
                     disabled={controlsDisabled}
                     className="time-input w-full max-w-full min-w-0 box-border bg-slate-900/50 border border-slate-700 rounded-xl px-3 py-3 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all"
@@ -863,6 +903,7 @@ const App: React.FC = () => {
               </button>
             </div>
           </div>
+          )}
         </div>
 
         <div className="space-y-3">
@@ -976,7 +1017,11 @@ const App: React.FC = () => {
                         maxLength={5}
                         placeholder="HH:MM"
                         value={group.onTime || ''}
-                        onChange={(e) => editingGroupId === group.id && setGroups(prev => prev.map(g => g.id === group.id ? { ...g, onTime: e.target.value } : g))}
+                        onChange={(e) => {
+                          if (editingGroupId !== group.id) return;
+                          const next = normalizeTimeInput(e.target.value);
+                          setGroups(prev => prev.map(g => g.id === group.id ? { ...g, onTime: next } : g));
+                        }}
                         onBlur={(e) => {
                           if (editingGroupId !== group.id) return;
                           const val = to24h(e.target.value);
@@ -997,7 +1042,11 @@ const App: React.FC = () => {
                         maxLength={5}
                         placeholder="HH:MM"
                         value={group.offTime || ''}
-                        onChange={(e) => editingGroupId === group.id && setGroups(prev => prev.map(g => g.id === group.id ? { ...g, offTime: e.target.value } : g))}
+                        onChange={(e) => {
+                          if (editingGroupId !== group.id) return;
+                          const next = normalizeTimeInput(e.target.value);
+                          setGroups(prev => prev.map(g => g.id === group.id ? { ...g, offTime: next } : g));
+                        }}
                         onBlur={(e) => {
                           if (editingGroupId !== group.id) return;
                           const val = to24h(e.target.value);

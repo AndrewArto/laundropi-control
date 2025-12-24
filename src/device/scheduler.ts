@@ -60,13 +60,26 @@ class Scheduler {
 
   private tick() {
     const now = new Date();
-    const day = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][now.getDay()] as DayCode;
+    const daysOrder: DayCode[] = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const day = daysOrder[now.getDay()];
+    const prevDay = daysOrder[(now.getDay() + 6) % 7];
     const hh = String(now.getHours()).padStart(2, '0');
     const mm = String(now.getMinutes()).padStart(2, '0');
     const current = `${hh}:${mm}`;
 
     this.schedule.forEach(rule => {
-      const shouldBeOn = rule.entries.some(entry => entry.days.includes(day) && current >= entry.from && current < entry.to);
+      const shouldBeOn = rule.entries.some(entry => {
+        const from = entry.from;
+        const to = entry.to;
+        if (from <= to) {
+          // Same-day window
+          return entry.days.includes(day) && current >= from && current < to;
+        }
+        // Overnight window (e.g., 22:00 -> 06:00)
+        const startsToday = entry.days.includes(day) && current >= from;
+        const continuesFromPrev = entry.days.includes(prevDay) && current < to;
+        return startsToday || continuesFromPrev;
+      });
       const nextState: 'on' | 'off' = shouldBeOn ? 'on' : 'off';
       const prevState = this.lastStates.get(rule.relayId);
       if (prevState !== nextState) {
