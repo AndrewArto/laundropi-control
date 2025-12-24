@@ -15,6 +15,27 @@ const AUTH_STORAGE_KEY = 'laundropi-auth-v1';
 const AUTH_USERNAME = (import.meta as any).env?.VITE_APP_USER ?? 'admin';
 const AUTH_PASSWORD = (import.meta as any).env?.VITE_APP_PASSWORD ?? 'laundropi';
 
+const to24h = (val?: string | null): string | null => {
+  if (!val) return null;
+  const raw = val.trim();
+  const ampm = raw.match(/^(\d{1,2}):(\d{2})(?::\d{2})?\s*(AM|PM)$/i);
+  if (ampm) {
+    let hh = parseInt(ampm[1], 10);
+    const mm = ampm[2];
+    const suffix = ampm[3].toUpperCase();
+    if (suffix === 'PM' && hh !== 12) hh += 12;
+    if (suffix === 'AM' && hh === 12) hh = 0;
+    return `${String(hh).padStart(2, '0')}:${mm}`;
+  }
+  const hhmm = raw.match(/^(\d{1,2}):(\d{2})(?::\d{2})?$/);
+  if (hhmm) {
+    const hh = Math.min(Math.max(parseInt(hhmm[1], 10), 0), 23);
+    const mm = Math.min(Math.max(parseInt(hhmm[2], 10), 0), 59);
+    return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
+  }
+  return null;
+};
+
 const App: React.FC = () => {
   console.log('[LaundroPi] App mounted render cycle start');
 
@@ -41,6 +62,8 @@ const App: React.FC = () => {
   const [relayNameDrafts, setRelayNameDrafts] = useState<Record<number, string>>({});
   const [relayVisibility, setRelayVisibility] = useState<Record<number, boolean>>({});
   const relayVisibilityRef = React.useRef<Record<number, boolean>>({});
+  const [serverOnline, setServerOnline] = useState(true);
+  const controlsDisabled = !serverOnline;
 
   const applyVisibility = (list: Relay[]) => {
     const visMap = relayVisibilityRef.current;
@@ -85,6 +108,7 @@ const App: React.FC = () => {
         return;
       }
       const data = await ApiService.getStatus();
+      setServerOnline(true);
       if (!isAuthenticatedRef.current) {
         setIsLoading(false);
         return;
@@ -96,11 +120,16 @@ const App: React.FC = () => {
       latestRelaysRef.current = data.relays;
       setRelays(data.relays);
       setSchedules(data.schedules);
-      setGroups(data.groups || []);
+      setGroups(prev => {
+        if (data.groups && data.groups.length > 0) return data.groups;
+        // keep existing client-side groups if server has none yet
+        return prev;
+      });
       setIsMockMode(data.isMock);
       setIsLoading(false);
     } catch (err) {
       console.error('Critical Failure:', err);
+      setServerOnline(false);
       setIsLoading(false);
     }
   };
@@ -109,7 +138,7 @@ const App: React.FC = () => {
     if (!isAuthenticated) return;
     setIsLoading(true);
     fetchData();
-    const poller = setInterval(fetchData, 2000);
+    const poller = setInterval(fetchData, 10000);
     return () => clearInterval(poller);
   }, [isAuthenticated]);
 
@@ -202,8 +231,13 @@ const App: React.FC = () => {
       setRelayNameDrafts(drafts);
       setRelayVisibility(visibility);
     }
+    // Adjust default new group times to empty if server provided meta without times
+    if (!groupSelectionTouched && !newGroupOnTime && !newGroupOffTime) {
+      setNewGroupOnTime('');
+      setNewGroupOffTime('');
+    }
     console.log('[LaundroPi] relays loaded:', relays.length, 'visible:', relays.filter(r => !r.isHidden).length);
-  }, [relays, newGroupRelayIds.length, groupSelectionTouched, isRelayEditMode]);
+  }, [relays, newGroupRelayIds.length, groupSelectionTouched, isRelayEditMode, newGroupOnTime, newGroupOffTime]);
 
   // Drop hidden relays from schedules
   useEffect(() => {
@@ -228,15 +262,17 @@ const App: React.FC = () => {
   }, [relays]);
 
   const handleToggleRelay = async (id: number) => {
-    const updated = await ApiService.toggleRelay(id);
-    if (updated && updated.length) {
-      const merged = applyVisibility(updated);
-      setRelays(merged);
-      latestRelaysRef.current = merged;
-    }
+    if (!serverOnline) return;
+    const current = relays.find(r => r.id === id);
+    const nextState = current?.isOn ? 'OFF' : 'ON';
+    setRelays(prev => prev.map(r => r.id === id ? { ...r, isOn: !r.isOn } : r));
+    latestRelaysRef.current = latestRelaysRef.current.map(r => r.id === id ? { ...r, isOn: !r.isOn } : r);
+    await ApiService.setRelayState(id, nextState === 'ON' ? 'on' : 'off');
+    fetchData(true);
   };
 
   const handleBatchControl = async (ids: number[], action: 'ON' | 'OFF') => {
+    if (!serverOnline) return;
     setRelays(prev => {
       const next = prev.map(r => ids.includes(r.id) ? { ...r, isOn: action === 'ON' } : r);
       const merged = applyVisibility(next);
@@ -247,6 +283,7 @@ const App: React.FC = () => {
   };
 
   const handleRenameRelay = async (id: number) => {
+    if (!serverOnline) return;
     const name = (relayNameDrafts[id] || '').trim();
     if (!name) return;
     setRelays(prev => prev.map(r => r.id === id ? { ...r, name } : r));
@@ -260,6 +297,7 @@ const App: React.FC = () => {
   };
 
   const handleToggleVisibility = async (id: number) => {
+    if (!serverOnline) return;
     const newHidden = !relayVisibility[id];
     setRelayVisibility(prev => ({ ...prev, [id]: newHidden }));
     relayVisibilityRef.current = { ...relayVisibilityRef.current, [id]: newHidden };
@@ -312,13 +350,15 @@ const App: React.FC = () => {
 
   const handleAddGroup = async () => {
     if (!newGroupName.trim() || newGroupRelayIds.length === 0) return;
+    const onTime24 = to24h(newGroupOnTime);
+    const offTime24 = to24h(newGroupOffTime);
     const payload: Omit<RelayGroup, 'id'> = {
       name: newGroupName.trim(),
       relayIds: newGroupRelayIds,
-      onTime: newGroupOnTime || null,
-      offTime: newGroupOffTime || null,
+      onTime: onTime24,
+      offTime: offTime24,
       days: newGroupDays,
-      active: Boolean(newGroupOnTime || newGroupOffTime)
+      active: Boolean(onTime24 || offTime24)
     };
     const added = await ApiService.addGroup(payload);
     setGroups(prev => [...prev, added]);
@@ -339,7 +379,13 @@ const App: React.FC = () => {
     const sanitizedRelayIds = updates.relayIds
       ? updates.relayIds.filter(id => visibleSet.has(id))
       : existing.relayIds.filter(id => visibleSet.has(id));
-    const next: RelayGroup = { ...existing, ...updates, relayIds: sanitizedRelayIds };
+    const next: RelayGroup = {
+      ...existing,
+      ...updates,
+      relayIds: sanitizedRelayIds,
+      onTime: updates.onTime === undefined ? existing.onTime : to24h(updates.onTime),
+      offTime: updates.offTime === undefined ? existing.offTime : to24h(updates.offTime),
+    };
     const saved = await ApiService.updateGroup(groupId, {
       name: next.name,
       relayIds: next.relayIds,
@@ -357,23 +403,19 @@ const App: React.FC = () => {
   };
 
   const handleToggleGroupPower = async (id: string, action: 'ON' | 'OFF') => {
-    const updatedRelays = await ApiService.toggleGroup(id, action);
+    if (!serverOnline) return;
+    const group = groups.find(g => g.id === id);
+    const memberSet = new Set(group?.relayIds || []);
     setRelays(prev => {
-      const merged = applyVisibility(updatedRelays);
-      const group = groups.find(g => g.id === id);
-      const memberSet = new Set(group?.relayIds || []);
-      const corrected = merged.map(r => {
-        const prevRelay = prev.find(p => p.id === r.id);
-        if (!prevRelay) return r;
-        // Do not change hidden relays or relays outside the group membership
-        if (r.isHidden || !memberSet.has(r.id)) {
-          return { ...r, isOn: prevRelay.isOn };
-        }
-        return r;
-      });
-      latestRelaysRef.current = corrected;
-      return corrected;
+      const updated = prev.map(r => (memberSet.has(r.id) ? { ...r, isOn: action === 'ON' } : r));
+      latestRelaysRef.current = updated;
+      return updated;
     });
+    try {
+      await ApiService.toggleGroup(id, action);
+    } catch (err) {
+      console.error('Group toggle failed', err);
+    }
   };
 
   const renderDashboard = () => (
@@ -396,7 +438,8 @@ const App: React.FC = () => {
                   return next;
                 });
               }}
-              className={`px-3 py-1 text-xs rounded-md border transition-colors flex items-center gap-1 ${isRelayEditMode ? 'border-indigo-500 text-indigo-300 bg-indigo-500/10' : 'border-slate-600 text-slate-300 hover:border-slate-500'}`}
+              disabled={controlsDisabled}
+              className={`px-3 py-1 text-xs rounded-md border transition-colors flex items-center gap-1 ${isRelayEditMode ? 'border-indigo-500 text-indigo-300 bg-indigo-500/10' : 'border-slate-600 text-slate-300 hover:border-slate-500'} ${controlsDisabled ? 'opacity-50 cursor-not-allowed' : ''}`}
             >
               <Pencil className="w-4 h-4" />
               {isRelayEditMode ? 'Done' : 'Edit'}
@@ -425,7 +468,8 @@ const App: React.FC = () => {
               onNameSave={handleRenameRelay}
               isHidden={relay.isHidden}
               onToggleVisibility={handleToggleVisibility}
-              onIconChange={handleIconChange}/>
+              onIconChange={handleIconChange}
+              isDisabled={controlsDisabled}/>
           ))}
         </div>
       </div>
@@ -446,6 +490,7 @@ const App: React.FC = () => {
               <input
                 value={newGroupName}
                 onChange={(e) => setNewGroupName(e.target.value)}
+                disabled={controlsDisabled}
                 className="w-full bg-slate-900/60 border border-slate-700 rounded-md px-3 py-2 text-sm text-slate-100 focus:outline-none focus:ring-1 focus:ring-indigo-500"
                 placeholder="Group name"
               />
@@ -456,6 +501,7 @@ const App: React.FC = () => {
                     <button
                       onClick={() => setNewGroupRelayIds(visibleRelays.map(r => r.id))}
                       onMouseDown={() => setGroupSelectionTouched(true)}
+                      disabled={controlsDisabled}
                       className="px-2 py-1 rounded-md border border-slate-600 text-slate-300 hover:border-slate-500 hover:text-white transition-colors"
                     >
                       Select all
@@ -463,6 +509,7 @@ const App: React.FC = () => {
                     <button
                       onClick={() => setNewGroupRelayIds([])}
                       onMouseDown={() => setGroupSelectionTouched(true)}
+                      disabled={controlsDisabled}
                       className="px-2 py-1 rounded-md border border-slate-600 text-slate-300 hover:border-slate-500 hover:text-white transition-colors"
                     >
                       Deselect all
@@ -477,6 +524,7 @@ const App: React.FC = () => {
                         setGroupSelectionTouched(true);
                         setNewGroupRelayIds(prev => prev.includes(relay.id) ? prev.filter(id => id !== relay.id) : [...prev, relay.id]);
                       }}
+                      disabled={controlsDisabled}
                       className={`px-3 py-2 rounded-lg text-xs font-medium border transition-colors ${newGroupRelayIds.includes(relay.id) ? 'bg-indigo-600 text-white border-indigo-500' : 'bg-slate-900/40 text-slate-300 border-slate-700 hover:border-slate-600'}`}
                     >
                       {relay.name}
@@ -489,20 +537,32 @@ const App: React.FC = () => {
                 <div className="min-w-0 w-full overflow-hidden">
                   <label className="text-sm text-slate-300 block mb-1">On time (optional)</label>
                   <input
-                    type="time"
+                    type="text"
+                    inputMode="numeric"
+                    pattern="^([01]?\\d|2[0-3]):[0-5]\\d$"
+                    maxLength={5}
+                    placeholder="HH:MM"
                     value={newGroupOnTime}
                     onChange={(e) => setNewGroupOnTime(e.target.value)}
-                    className="time-input w-full max-w-full min-w-0 box-border bg-slate-900/50 border border-slate-700 rounded-xl px-3 py-3 text-sm text-slate-100 placeholder-slate-300 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all"
+                    onBlur={(e) => setNewGroupOnTime(to24h(e.target.value) || '')}
+                    disabled={controlsDisabled}
+                    className="time-input w-full max-w-full min-w-0 box-border bg-slate-900/50 border border-slate-700 rounded-xl px-3 py-3 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all"
                     style={{ color: '#dbeafe', WebkitTextFillColor: '#dbeafe' }}
                   />
                 </div>
                 <div className="min-w-0 w-full overflow-hidden">
                   <label className="text-sm text-slate-300 block mb-1">Off time (optional)</label>
                   <input
-                    type="time"
+                    type="text"
+                    inputMode="numeric"
+                    pattern="^([01]?\\d|2[0-3]):[0-5]\\d$"
+                    maxLength={5}
+                    placeholder="HH:MM"
                     value={newGroupOffTime}
                     onChange={(e) => setNewGroupOffTime(e.target.value)}
-                    className="time-input w-full max-w-full min-w-0 box-border bg-slate-900/50 border border-slate-700 rounded-xl px-3 py-3 text-sm text-slate-100 placeholder-slate-300 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all"
+                    onBlur={(e) => setNewGroupOffTime(to24h(e.target.value) || '')}
+                    disabled={controlsDisabled}
+                    className="time-input w-full max-w-full min-w-0 box-border bg-slate-900/50 border border-slate-700 rounded-xl px-3 py-3 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all"
                     style={{ color: '#dbeafe', WebkitTextFillColor: '#dbeafe' }}
                   />
                 </div>
@@ -514,12 +574,14 @@ const App: React.FC = () => {
                   <div className="flex gap-2 text-xs">
                     <button
                       onClick={() => setNewGroupDays([...DAYS_OF_WEEK])}
+                      disabled={controlsDisabled}
                       className="px-2 py-1 rounded-md border border-slate-600 text-slate-300 hover:border-slate-500 hover:text-white transition-colors"
                     >
                       Select all
                     </button>
                     <button
                       onClick={() => setNewGroupDays([])}
+                      disabled={controlsDisabled}
                       className="px-2 py-1 rounded-md border border-slate-600 text-slate-300 hover:border-slate-500 hover:text-white transition-colors"
                     >
                       Deselect all
@@ -531,6 +593,7 @@ const App: React.FC = () => {
                     <button
                       key={day}
                       onClick={() => setNewGroupDays(prev => prev.includes(day) ? prev.filter(d => d !== day) : [...prev, day])}
+                      disabled={controlsDisabled}
                       className={`px-3 py-2 rounded-lg text-xs font-semibold border transition-colors ${newGroupDays.includes(day) ? 'bg-indigo-600 text-white border-indigo-500' : 'bg-slate-900/40 text-slate-300 border-slate-700 hover:border-slate-600'}`}
                     >
                       {day}
@@ -542,7 +605,7 @@ const App: React.FC = () => {
               <button
                 onClick={handleAddGroup}
                 className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-sm font-semibold transition-colors disabled:opacity-50"
-                disabled={!newGroupName.trim() || newGroupRelayIds.length === 0}
+                disabled={!newGroupName.trim() || newGroupRelayIds.length === 0 || controlsDisabled}
               >
                 Save Group
               </button>
@@ -577,12 +640,14 @@ const App: React.FC = () => {
                     <div className="flex gap-2 items-center">
                       <button
                         onClick={() => handleToggleGroupPower(group.id, 'ON')}
+                        disabled={controlsDisabled}
                         className="px-3 py-2 rounded-md text-xs font-semibold border border-emerald-500 text-emerald-200 bg-emerald-500/10"
                       >
                         ON
                       </button>
                       <button
                         onClick={() => handleToggleGroupPower(group.id, 'OFF')}
+                        disabled={controlsDisabled}
                         className="px-3 py-2 rounded-md text-xs font-semibold border border-red-500 text-red-200 bg-red-500/10"
                       >
                         OFF
@@ -602,6 +667,7 @@ const App: React.FC = () => {
                           setGroups(prev => prev.map(g => g.id === group.id ? { ...g, relayIds: next } : g));
                           handleUpdateGroup(group.id, { relayIds: next });
                         }}
+                        disabled={controlsDisabled || editingGroupId !== group.id}
                         className={`px-3 py-2 rounded-lg text-xs font-medium border transition-colors ${
                           selectedRelayIds.includes(relay.id) ? 'bg-indigo-600 text-white border-indigo-500' : 'bg-slate-900/40 text-slate-300 border-slate-700 hover:border-slate-600'
                         } ${editingGroupId === group.id ? '' : 'opacity-60 cursor-not-allowed'}`}
@@ -615,16 +681,20 @@ const App: React.FC = () => {
                     <div className="min-w-0 w-full overflow-hidden">
                       <label className="text-sm text-slate-300 block mb-1">On time</label>
                       <input
-                        type="time"
+                        type="text"
+                        inputMode="numeric"
+                        pattern="^([01]?\\d|2[0-3]):[0-5]\\d$"
+                        maxLength={5}
+                        placeholder="HH:MM"
                         value={group.onTime || ''}
                         onChange={(e) => editingGroupId === group.id && setGroups(prev => prev.map(g => g.id === group.id ? { ...g, onTime: e.target.value } : g))}
-                        onBlur={(e) => editingGroupId === group.id && handleUpdateGroup(group.id, { onTime: e.target.value || null })}
-                        onInput={(e) => {
+                        onBlur={(e) => {
                           if (editingGroupId !== group.id) return;
-                          const val = (e.target as HTMLInputElement).value;
+                          const val = to24h(e.target.value);
+                          setGroups(prev => prev.map(g => g.id === group.id ? { ...g, onTime: val || '' } : g));
                           handleUpdateGroup(group.id, { onTime: val || null });
                         }}
-                        disabled={editingGroupId !== group.id}
+                        disabled={editingGroupId !== group.id || controlsDisabled}
                         className={`time-input w-full max-w-full min-w-0 box-border bg-slate-900/50 border border-slate-700 rounded-xl px-3 py-3 text-sm text-slate-100 placeholder-slate-300 focus:outline-none focus:border-indigo-200 focus:ring-1 focus:ring-indigo-200 disabled:text-slate-100 disabled:placeholder-slate-200 disabled:opacity-100 transition-all ${editingGroupId === group.id ? '' : 'opacity-60 cursor-not-allowed'}`}
                         style={{ color: '#dbeafe', WebkitTextFillColor: '#dbeafe' }}
                       />
@@ -632,16 +702,20 @@ const App: React.FC = () => {
                     <div className="min-w-0 w-full overflow-hidden">
                       <label className="text-sm text-slate-300 block mb-1">Off time</label>
                       <input
-                        type="time"
+                        type="text"
+                        inputMode="numeric"
+                        pattern="^([01]?\\d|2[0-3]):[0-5]\\d$"
+                        maxLength={5}
+                        placeholder="HH:MM"
                         value={group.offTime || ''}
                         onChange={(e) => editingGroupId === group.id && setGroups(prev => prev.map(g => g.id === group.id ? { ...g, offTime: e.target.value } : g))}
-                        onBlur={(e) => editingGroupId === group.id && handleUpdateGroup(group.id, { offTime: e.target.value || null })}
-                        onInput={(e) => {
+                        onBlur={(e) => {
                           if (editingGroupId !== group.id) return;
-                          const val = (e.target as HTMLInputElement).value;
+                          const val = to24h(e.target.value);
+                          setGroups(prev => prev.map(g => g.id === group.id ? { ...g, offTime: val || '' } : g));
                           handleUpdateGroup(group.id, { offTime: val || null });
                         }}
-                        disabled={editingGroupId !== group.id}
+                        disabled={editingGroupId !== group.id || controlsDisabled}
                         className={`time-input w-full max-w-full min-w-0 box-border bg-slate-900/50 border border-slate-700 rounded-xl px-3 py-3 text-sm text-slate-100 placeholder-slate-300 focus:outline-none focus:border-indigo-200 focus:ring-1 focus:ring-indigo-200 disabled:text-slate-100 disabled:placeholder-slate-200 disabled:opacity-100 transition-all ${editingGroupId === group.id ? '' : 'opacity-60 cursor-not-allowed'}`}
                         style={{ color: '#dbeafe', WebkitTextFillColor: '#dbeafe' }}
                       />
@@ -657,10 +731,11 @@ const App: React.FC = () => {
                             key={day}
                             onClick={() => {
                               if (editingGroupId !== group.id) return;
-                              const nextDays = active ? group.days.filter(d => d !== day) : [...(group.days || []), day];
-                              setGroups(prev => prev.map(g => g.id === group.id ? { ...g, days: nextDays } : g));
-                              handleUpdateGroup(group.id, { days: nextDays });
-                            }}
+                          const nextDays = active ? group.days.filter(d => d !== day) : [...(group.days || []), day];
+                          setGroups(prev => prev.map(g => g.id === group.id ? { ...g, days: nextDays } : g));
+                          handleUpdateGroup(group.id, { days: nextDays });
+                        }}
+                            disabled={editingGroupId !== group.id || controlsDisabled}
                             className={`text-[10px] uppercase px-3 py-1 rounded border ${
                               active ? 'text-indigo-200 bg-indigo-500/20 border-indigo-500/50' : 'text-slate-500 bg-slate-900/40 border-slate-700'
                             } ${editingGroupId === group.id ? '' : 'opacity-60 cursor-not-allowed'}`}
@@ -676,23 +751,26 @@ const App: React.FC = () => {
                           type="checkbox"
                           checked={group.active}
                           onChange={(e) => handleUpdateGroup(group.id, { active: e.target.checked })}
+                          disabled={controlsDisabled}
                         />
                         Schedule active
                       </label>
                       <div className="flex gap-2">
                         <button
-                          onClick={() => setEditingGroupId(editingGroupId === group.id ? null : group.id)}
-                          className={`p-2 rounded-lg ${editingGroupId === group.id ? 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/40' : 'text-slate-400 hover:text-white hover:bg-slate-700/50'}`}
-                          aria-label="Edit group"
-                        >
-                          <Pencil className="w-5 h-5" />
-                        </button>
-                        <button
-                          onClick={() => handleDeleteGroup(group.id)}
-                          className="p-2 text-slate-500 hover:text-red-400 hover:bg-red-400/10 rounded-lg transition-colors"
-                        >
-                          <Trash2 className="w-5 h-5" />
-                        </button>
+                      onClick={() => setEditingGroupId(editingGroupId === group.id ? null : group.id)}
+                      disabled={controlsDisabled}
+                      className={`p-2 rounded-lg ${editingGroupId === group.id ? 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/40' : 'text-slate-400 hover:text-white hover:bg-slate-700/50'}`}
+                      aria-label="Edit group"
+                    >
+                      <Pencil className="w-5 h-5" />
+                    </button>
+                    <button
+                      onClick={() => handleDeleteGroup(group.id)}
+                      disabled={controlsDisabled}
+                      className="p-2 text-slate-500 hover:text-red-400 hover:bg-red-400/10 rounded-lg transition-colors"
+                    >
+                      <Trash2 className="w-5 h-5" />
+                    </button>
                       </div>
                     </div>
                   </div>
@@ -784,9 +862,9 @@ const App: React.FC = () => {
             </div>
           </div>
           <div className="flex items-center gap-3">
-             <div className="text-right">
+                <div className="text-right">
                 <div className="text-xl font-mono text-white font-medium">
-                  {currentTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  {currentTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })}
                 </div>
                 <div className="flex items-center justify-end gap-2 text-xs text-slate-500">
                   {currentTime.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })}
@@ -797,14 +875,19 @@ const App: React.FC = () => {
                className="flex items-center gap-2 px-3 py-2 text-xs font-semibold border border-slate-700 rounded-md text-slate-300 hover:text-white hover:border-indigo-500 transition-colors"
              >
                <Lock className="w-4 h-4" />
-               Выйти
-             </button>
+               Log out
+            </button>
           </div>
         </div>
       </header>
 
       {/* Main Content */}
       <main className="max-w-3xl w-full mx-auto px-4 py-6 overflow-hidden box-border">
+        {!serverOnline && (
+          <div className="mb-4 bg-amber-500/10 border border-amber-500/40 text-amber-200 px-3 py-2 rounded-lg text-sm">
+            Server unreachable. Controls are temporarily disabled until connection is restored.
+          </div>
+        )}
         {activeTab === Tab.DASHBOARD && renderDashboard()}
         {activeTab === Tab.SCHEDULE && renderScheduler()}
         {activeTab === Tab.SETTINGS && (

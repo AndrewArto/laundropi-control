@@ -12,6 +12,7 @@ interface RelayCardProps {
   onToggleVisibility?: (id: number) => void;
   isHidden?: boolean;
   onIconChange?: (id: number, iconType: RelayType) => void;
+  isDisabled?: boolean;
 }
 
 const iconOptions: { key: RelayType; icon: React.ReactNode }[] = [
@@ -21,7 +22,7 @@ const iconOptions: { key: RelayType; icon: React.ReactNode }[] = [
   { key: RelayType.MACHINE, icon: <Zap className="w-5 h-5" /> },
 ];
 
-const RelayCard: React.FC<RelayCardProps> = ({ relay, onToggle, isEditing = false, nameValue, onNameChange, onNameSave, onToggleVisibility, isHidden, onIconChange }) => {
+const RelayCard: React.FC<RelayCardProps> = ({ relay, onToggle, isEditing = false, nameValue, onNameChange, onNameSave, onToggleVisibility, isHidden, onIconChange, isDisabled }) => {
   const getIcon = () => {
     const iconKind = relay.iconType || relay.type;
     switch (iconKind) {
@@ -37,12 +38,12 @@ const RelayCard: React.FC<RelayCardProps> = ({ relay, onToggle, isEditing = fals
     : 'N/A';
 
   return (
-    <div className={`p-4 rounded-xl border transition-all duration-200 ${
+    <div className={`p-4 rounded-xl border transition-all duration-200 ${isDisabled ? 'opacity-50 pointer-events-none' : ''} ${
       relay.isOn 
         ? 'bg-slate-800 border-indigo-500/50 shadow-[0_0_15px_rgba(99,102,241,0.15)]' 
         : 'bg-slate-800/50 border-slate-700'
     }`}>
-      <div className="flex justify-between items-start mb-2">
+      <div className="flex justify-between items-start mb-2 opacity-100">
         <div className={`p-2 rounded-lg ${relay.isOn ? 'bg-indigo-500/10' : 'bg-slate-700/30'}`}>
           {getIcon()}
         </div>
@@ -50,7 +51,7 @@ const RelayCard: React.FC<RelayCardProps> = ({ relay, onToggle, isEditing = fals
           <button
             onClick={() => onToggle(relay.id)}
             className="focus:outline-none focus:ring-2 focus:ring-indigo-500 rounded-full"
-            disabled={relay.isLocked}
+            disabled={relay.isLocked || isDisabled}
           >
             {relay.isOn ? (
               <ToggleRight className="w-10 h-10 text-indigo-500 transition-colors" />
@@ -68,17 +69,19 @@ const RelayCard: React.FC<RelayCardProps> = ({ relay, onToggle, isEditing = fals
               value={nameValue ?? relay.name}
               onChange={e => onNameChange?.(relay.id, e.target.value)}
               onBlur={() => onNameSave?.(relay.id)}
-            className="w-full bg-slate-900/60 border border-slate-700 rounded-md px-2 py-1 text-sm text-slate-100 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-           />
+              disabled={isDisabled}
+              className="w-full bg-slate-900/60 border border-slate-700 rounded-md px-2 py-1 text-sm text-slate-100 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:opacity-60"
+            />
             <div className="flex gap-2">
               <div className="flex-1 grid grid-cols-2 gap-1 text-[11px]">
                 {iconOptions.map(opt => (
                   <button
                     key={opt.key}
                     onClick={() => onIconChange?.(relay.id, opt.key)}
+                    disabled={isDisabled}
                     className={`px-2 py-1 rounded-md border flex items-center justify-center ${
                       (relay.iconType || relay.type) === opt.key ? 'border-indigo-500 text-indigo-200 bg-indigo-500/10' : 'border-slate-700 text-slate-300 hover:border-indigo-500'
-                    }`}
+                    } ${isDisabled ? 'opacity-50 cursor-not-allowed' : ''}`}
                   >
                     {opt.icon}
                   </button>
@@ -86,9 +89,10 @@ const RelayCard: React.FC<RelayCardProps> = ({ relay, onToggle, isEditing = fals
               </div>
               <button
                 onClick={() => onToggleVisibility?.(relay.id)}
+                disabled={isDisabled}
                 className={`w-10 h-9 flex items-center justify-center rounded-md border transition-colors ${
                   isHidden ? 'border-amber-500 text-amber-300 bg-amber-500/10' : 'border-emerald-600 text-emerald-200 bg-emerald-500/10'
-                }`}
+                } ${isDisabled ? 'opacity-50 cursor-not-allowed' : ''}`}
                 title={isHidden ? 'Show in dashboard' : 'Hide from dashboard'}
               >
                 {isHidden ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}

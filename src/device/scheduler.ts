@@ -1,4 +1,4 @@
-import fs from 'fs';
+import * as fs from 'fs';
 
 export type DayCode = 'Mon' | 'Tue' | 'Wed' | 'Thu' | 'Fri' | 'Sat' | 'Sun';
 
@@ -7,12 +7,13 @@ export interface ScheduleEntry {
   entries: { days: DayCode[]; from: string; to: string }[];
 }
 
-// Very lightweight polling scheduler; replace with cron later.
 class Scheduler {
   private schedule: ScheduleEntry[] = [];
   private timer: NodeJS.Timeout | null = null;
+  private lastStates: Map<number, 'on' | 'off'> = new Map();
   private persistPath: string;
   private applyFn: (relayId: number, state: 'on' | 'off') => void;
+  private debug = process.env.SCHEDULE_DEBUG === '1' || process.env.SCHEDULE_DEBUG === 'true';
 
   constructor(applyFn: (relayId: number, state: 'on' | 'off') => void, persistPath = '/tmp/laundropi-schedule.json') {
     this.applyFn = applyFn;
@@ -32,12 +33,18 @@ class Scheduler {
 
   setSchedule(schedule: ScheduleEntry[]) {
     this.schedule = schedule;
+    this.lastStates.clear();
     this.persistSchedule();
+    if (this.debug) {
+      console.log('[scheduler] setSchedule', JSON.stringify(schedule, null, 2));
+    }
   }
 
   startScheduler() {
     if (this.timer) return;
-    this.timer = setInterval(() => this.tick(), 5_000);
+    // Tick every second for better on-time accuracy
+    this.timer = setInterval(() => this.tick(), 1_000);
+    this.tick(); // immediate evaluation
   }
 
   stopScheduler() {
@@ -59,14 +66,16 @@ class Scheduler {
     const current = `${hh}:${mm}`;
 
     this.schedule.forEach(rule => {
-      rule.entries.forEach(entry => {
-        if (!entry.days.includes(day)) return;
-        if (current >= entry.from && current < entry.to) {
-          this.applyFn(rule.relayId, 'on');
-        } else if (current >= entry.to) {
-          this.applyFn(rule.relayId, 'off');
+      const shouldBeOn = rule.entries.some(entry => entry.days.includes(day) && current >= entry.from && current < entry.to);
+      const nextState: 'on' | 'off' = shouldBeOn ? 'on' : 'off';
+      const prevState = this.lastStates.get(rule.relayId);
+      if (prevState !== nextState) {
+        if (this.debug) {
+          console.log('[scheduler] transition', { relayId: rule.relayId, from: prevState, to: nextState, current, rule: rule.entries });
         }
-      });
+        this.applyFn(rule.relayId, nextState);
+        this.lastStates.set(rule.relayId, nextState);
+      }
     });
   }
 

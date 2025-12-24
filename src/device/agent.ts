@@ -1,7 +1,8 @@
-import WebSocket from 'ws';
-import dotenv from 'dotenv';
+import WebSocket = require('ws');
+import * as dotenv from 'dotenv';
 import { gpio } from './gpio';
 import { createScheduler, ScheduleEntry } from './scheduler';
+import { RELAYS_CONFIG } from './config';
 
 dotenv.config();
 
@@ -26,6 +27,7 @@ function connect() {
       agentId: AGENT_ID,
       secret: AGENT_SECRET,
       version: '1.0.0',
+      relays: RELAYS_CONFIG,
     });
     startHeartbeat();
   });
@@ -58,9 +60,14 @@ function handleMessage(msg: IncomingMessage) {
   console.log('[agent] incoming message', msg);
   if (msg.type === 'set_relay') {
     gpio.setRelayState(msg.relayId, msg.state);
+    console.log(`[agent] set_relay relay=${msg.relayId} state=${msg.state}`);
+    // Push immediate status so UI doesn't wait for heartbeat tick
+    sendStatus();
   }
   if (msg.type === 'update_schedule') {
     scheduler.setSchedule(msg.schedules);
+    console.log(`[agent] update_schedule entries=${msg.schedules.length}`);
+    sendStatus();
   }
 }
 
@@ -69,18 +76,22 @@ function send(payload: any) {
   ws.send(JSON.stringify(payload));
 }
 
+function sendStatus() {
+  send({
+    type: 'heartbeat',
+    agentId: AGENT_ID,
+    status: {
+      relays: gpio.getSnapshot(),
+      time: new Date().toISOString(),
+      meta: RELAYS_CONFIG,
+    },
+  });
+}
+
 function startHeartbeat() {
   if (heartbeatTimer) return;
-  heartbeatTimer = setInterval(() => {
-    send({
-      type: 'heartbeat',
-      agentId: AGENT_ID,
-      status: {
-        relays: gpio.getSnapshot(),
-        time: new Date().toISOString(),
-      },
-    });
-  }, 5000);
+  heartbeatTimer = setInterval(sendStatus, 2000);
+  sendStatus(); // initial
 }
 
 function stopHeartbeat() {

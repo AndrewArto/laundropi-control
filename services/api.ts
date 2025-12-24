@@ -1,260 +1,163 @@
 
 import { Relay, Schedule, RelayType, RelayGroup } from '../types';
-import { INITIAL_RELAYS, MOCK_SCHEDULES } from '../constants';
 
 const API_BASE = (() => {
   if (typeof window === 'undefined') return '/api';
-  // When served from vite preview on :3000, API lives on :3001
   const { hostname, port, protocol } = window.location;
   if (port === '3000') {
-    return `${protocol}//${hostname}:3001/api`;
+    return `${protocol}//${hostname}:4000/api`;
   }
   return '/api';
 })();
 
-// --- INTERNAL MOCK SERVER STATE ---
-// This allows the app to function fully in the browser preview
-// by simulating the backend database in memory. When running in
-// the browser and the backend is unreachable, we persist this mock
-// state to localStorage so reloads keep visibility/name/icon edits.
-const STORAGE_KEY = 'laundropi-mock-state';
+const AGENT_ID = (import.meta as any).env?.VITE_AGENT_ID || 'dev-agent';
 
-const loadMockState = () => {
-  if (typeof window === 'undefined') return null;
-  try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) return null;
-    return JSON.parse(raw);
-  } catch {
-    return null;
+const request = async (input: RequestInfo | URL, init?: RequestInit) => {
+  const res = await fetch(input, init);
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`API ${res.status}: ${text}`);
   }
+  return res;
 };
 
-const persistMockState = (state: typeof mockState) => {
-  if (typeof window === 'undefined') return;
-  try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-  } catch {
-    // ignore
+const normalizeTime = (val?: string | null) => {
+  if (!val) return null;
+  const raw = val.trim();
+  const ampm = raw.match(/^(\d{1,2}):(\d{2})(?::\d{2})?\s*(AM|PM)$/i);
+  if (ampm) {
+    let hh = parseInt(ampm[1], 10);
+    const mm = ampm[2];
+    const suffix = ampm[3].toUpperCase();
+    if (suffix === 'PM' && hh !== 12) hh += 12;
+    if (suffix === 'AM' && hh === 12) hh = 0;
+    return `${String(hh).padStart(2, '0')}:${mm}`;
   }
+  const hhmm = raw.match(/^(\d{1,2}):(\d{2})(?::\d{2})?$/);
+  if (hhmm) {
+    const hh = Math.min(Math.max(parseInt(hhmm[1], 10), 0), 23);
+    const mm = Math.min(Math.max(parseInt(hhmm[2], 10), 0), 59);
+    return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
+  }
+  return null;
 };
-
-let mockState = loadMockState() || {
-  relays: JSON.parse(JSON.stringify(INITIAL_RELAYS)) as Relay[],
-  schedules: JSON.parse(JSON.stringify(MOCK_SCHEDULES)) as Schedule[],
-  groups: [] as RelayGroup[],
-  isOffline: false
-};
-
-let lastGoodState: { relays: Relay[]; schedules: Schedule[]; groups: RelayGroup[]; isMock: boolean } | null = null;
-
-// Helper to simulate network delay for realism
-const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 export const ApiService = {
-  async getStatus(): Promise<{ relays: Relay[], schedules: Schedule[], groups: RelayGroup[], isMock: boolean }> {
-    try {
-      // 1. Try Real Server
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 2000); // 2s timeout
-      
-      const res = await fetch(`${API_BASE}/status`, { signal: controller.signal });
-      clearTimeout(timeoutId);
-      
-      if (!res.ok) throw new Error(`Server returned ${res.status}`);
-      const data = await res.json();
-      const isHardware = Boolean(data.isHardware);
-      
-      // Sync mock state with real state so if we go offline, we have latest
-      mockState.relays = data.relays;
-      mockState.schedules = data.schedules;
-      mockState.groups = data.groups || [];
-      mockState.isOffline = false;
-      lastGoodState = { relays: [...data.relays], schedules: [...data.schedules], groups: [...(data.groups || [])], isMock: !isHardware };
-      persistMockState(mockState);
-      
-      return { ...data, isMock: !isHardware };
-    } catch (error) {
-      // 2. Fallback to last good; if none, bubble error so caller can keep current UI state
-      if (lastGoodState) {
-        console.warn('[API] Status fetch failed, using last known good state.');
-        return { 
-          relays: [...lastGoodState.relays],
-          schedules: [...lastGoodState.schedules],
-          groups: [...lastGoodState.groups],
-          isMock: lastGoodState.isMock
-        };
-      }
-      throw error;
-    }
+  async getStatus(): Promise<{ relays: Relay[], schedules: Schedule[], groups: RelayGroup[], isMock: boolean, agentId?: string, lastHeartbeat?: number | null }> {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 2000);
+    const res = await request(`${API_BASE}/dashboard?agentId=${encodeURIComponent(AGENT_ID)}`, { signal: controller.signal });
+    clearTimeout(timeoutId);
+    return await res.json();
   },
 
-  async toggleRelay(id: number): Promise<Relay[]> {
-    try {
-      const res = await fetch(`${API_BASE}/relays/${id}`, { method: 'POST' });
-      if (!res.ok) throw new Error('Failed to toggle relay');
-      const data = await res.json();
-      return data.relays || [];
-    } catch (error) {
-      throw error;
-    }
+  async setRelayState(id: number, state: 'on' | 'off'): Promise<void> {
+    await request(`${API_BASE}/agents/${AGENT_ID}/relays/${id}/state`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ state })
+    });
   },
 
   async batchControl(ids: number[], action: 'ON' | 'OFF'): Promise<void> {
-    try {
-      const res = await fetch(`${API_BASE}/relays/batch`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ids, action })
-      });
-      if (!res.ok) throw new Error('Failed to batch control');
-    } catch (error) {
-      throw error;
-    }
+    await Promise.all(ids.map(id => this.setRelayState(id, action === 'ON' ? 'on' : 'off')));
   },
 
   async renameRelay(id: number, name: string): Promise<Relay> {
-    try {
-      const res = await fetch(`${API_BASE}/relays/${id}/name`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name })
-      });
-      if (!res.ok) throw new Error('Failed to rename relay');
-      return await res.json();
-    } catch (error) {
-      throw error;
-    }
+    await request(`${API_BASE}/agents/${AGENT_ID}/relays/${id}/meta`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name })
+    });
+    return { id, name } as Relay;
   },
 
   async setRelayIcon(id: number, iconType: RelayType): Promise<Relay> {
-    try {
-      const res = await fetch(`${API_BASE}/relays/${id}/icon`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ iconType })
-      });
-      if (!res.ok) throw new Error('Failed to set icon');
-      return await res.json();
-    } catch (error) {
-      throw error;
-    }
-  },
-
-  async setRelayColorGroup(id: number, colorGroup: Relay['colorGroup']): Promise<Relay> {
-    try {
-      const res = await fetch(`${API_BASE}/relays/${id}/group`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ colorGroup })
-      });
-      if (!res.ok) throw new Error('Failed to set color group');
-      return await res.json();
-    } catch (error) {
-      throw error;
-    }
+    await request(`${API_BASE}/agents/${AGENT_ID}/relays/${id}/meta`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ iconType })
+    });
+    return { id, iconType } as Relay;
   },
 
   async setRelayVisibility(id: number, isHidden: boolean): Promise<Relay> {
-    try {
-      const res = await fetch(`${API_BASE}/relays/${id}/visibility`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ isHidden })
-      });
-      if (!res.ok) throw new Error('Failed to set visibility');
-      return await res.json();
-    } catch (error) {
-      throw error;
-    }
+    await request(`${API_BASE}/agents/${AGENT_ID}/relays/${id}/meta`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ isHidden })
+    });
+    return { id, isHidden } as Relay;
   },
 
   async addSchedule(schedule: Omit<Schedule, 'id'>): Promise<Schedule> {
-    try {
-      const res = await fetch(`${API_BASE}/schedules`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(schedule)
-      });
-      if (!res.ok) throw new Error('Failed to add schedule');
-      return await res.json();
-    } catch (error) {
-      throw error;
-    }
+    const res = await request(`${API_BASE}/agents/${AGENT_ID}/schedules`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ...schedule,
+        time: undefined,
+        from: normalizeTime((schedule as any).from) || null,
+        to: normalizeTime((schedule as any).to) || null,
+      })
+    });
+    return await res.json();
   },
 
-  async deleteSchedule(id: string): Promise<void> {
-    try {
-      const res = await fetch(`${API_BASE}/schedules/${id}`, { method: 'DELETE' });
-      if (!res.ok) throw new Error('Failed to delete schedule');
-    } catch (error) {
-      throw error;
-    }
+  async deleteSchedule(_id: string): Promise<void> {
+    await request(`${API_BASE}/agents/${AGENT_ID}/schedules/${_id}`, { method: 'DELETE' });
   },
 
   async updateSchedule(id: string, schedule: Omit<Schedule, 'id'>): Promise<Schedule> {
-    try {
-      const res = await fetch(`${API_BASE}/schedules/${id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(schedule)
-      });
-      if (!res.ok) throw new Error('Failed to update schedule');
-      return await res.json();
-    } catch (error) {
-      throw error;
-    }
+    const res = await request(`${API_BASE}/agents/${AGENT_ID}/schedules/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ...schedule,
+        time: undefined,
+        from: normalizeTime((schedule as any).from) || null,
+        to: normalizeTime((schedule as any).to) || null,
+      })
+    });
+    return await res.json();
   },
 
   async addGroup(group: Omit<RelayGroup, 'id'>): Promise<RelayGroup> {
-    try {
-      const res = await fetch(`${API_BASE}/groups`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(group)
-      });
-      if (!res.ok) throw new Error('Failed to add group');
-      return await res.json();
-    } catch (error) {
-      throw error;
-    }
+    const res = await request(`${API_BASE}/agents/${AGENT_ID}/groups`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ...group,
+        onTime: normalizeTime(group.onTime as any),
+        offTime: normalizeTime(group.offTime as any),
+      })
+    });
+    return await res.json();
   },
 
   async updateGroup(id: string, group: Omit<RelayGroup, 'id'>): Promise<RelayGroup> {
-    try {
-      const res = await fetch(`${API_BASE}/groups/${id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(group)
-      });
-      if (!res.ok) throw new Error('Failed to update group');
-      return await res.json();
-    } catch (error) {
-      throw error;
-    }
+    const res = await request(`${API_BASE}/agents/${AGENT_ID}/groups/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ...group,
+        onTime: normalizeTime(group.onTime as any),
+        offTime: normalizeTime(group.offTime as any),
+      })
+    });
+    return await res.json();
   },
 
-  async deleteGroup(id: string): Promise<void> {
-    try {
-      const res = await fetch(`${API_BASE}/groups/${id}`, { method: 'DELETE' });
-      if (!res.ok) throw new Error('Failed to delete group');
-    } catch (error) {
-      throw error;
-    }
+  async deleteGroup(_id: string): Promise<void> {
+    await request(`${API_BASE}/agents/${AGENT_ID}/groups/${_id}`, { method: 'DELETE' });
   },
 
-  async toggleGroup(id: string, action: 'ON' | 'OFF'): Promise<Relay[]> {
-    try {
-      const res = await fetch(`${API_BASE}/groups/${id}/action`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action })
-      });
-      if (!res.ok) throw new Error('Failed to toggle group');
-      const data = await res.json();
-      return data.relays || [];
-    } catch (error) {
-      throw error;
-    }
+  async toggleGroup(_id: string, _action: 'ON' | 'OFF'): Promise<Relay[]> {
+    await request(`${API_BASE}/agents/${AGENT_ID}/groups/${_id}/action`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: _action })
+    });
+    return [];
   }
 };
