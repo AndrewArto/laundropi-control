@@ -3,7 +3,7 @@ import express = require('express');
 import cors = require('cors');
 import { WebSocketServer, WebSocket } from 'ws';
 import * as dotenv from 'dotenv';
-import { listAgents, updateHeartbeat, saveMeta, getAgent, updateRelayMeta, listSchedules, upsertSchedule, deleteSchedule, listGroups, upsertGroup, deleteGroup, GroupRow } from './db';
+import { listAgents, updateHeartbeat, saveMeta, getAgent, updateRelayMeta, listSchedules, upsertSchedule, deleteSchedule, listGroups, upsertGroup, deleteGroup, GroupRow, deleteAgent } from './db';
 
 dotenv.config();
 
@@ -121,6 +121,13 @@ app.post('/api/agents', (req, res) => {
   const { agentId, secret } = req.body || {};
   if (!agentId || !secret) return res.status(400).json({ error: 'agentId and secret required' });
   saveMeta(agentId, secret, null);
+  res.json({ ok: true });
+});
+
+app.delete('/api/agents/:id', (req, res) => {
+  deleteAgent(req.params.id);
+  agents.delete(req.params.id);
+  relayStateCache.delete(req.params.id);
   res.json({ ok: true });
 });
 

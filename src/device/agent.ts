@@ -6,7 +6,15 @@ import { RELAYS_CONFIG } from './config';
 
 dotenv.config();
 
-const AGENT_ID = process.env.AGENT_ID || 'agent-dev';
+const argv = process.argv.slice(2);
+const parseArg = (flag: string): string | undefined => {
+  const idx = argv.findIndex(a => a === flag);
+  if (idx !== -1 && argv[idx + 1]) return argv[idx + 1];
+  const kv = argv.find(a => a.startsWith(`${flag}=`));
+  return kv ? kv.split('=').slice(1).join('=') : undefined;
+};
+
+const AGENT_ID = parseArg('--id') || process.env.AGENT_ID || 'agent-dev';
 const AGENT_SECRET = process.env.AGENT_SECRET || 'secret';
 const AGENT_WS_URL = process.env.AGENT_WS_URL || 'ws://localhost:4000/agent';
 

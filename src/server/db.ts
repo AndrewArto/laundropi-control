@@ -222,3 +222,10 @@ export function upsertGroup(row: GroupRow) {
 export function deleteGroup(agentId: string, id: string) {
   db.prepare('DELETE FROM groups WHERE agentId = ? AND id = ?').run(agentId, id);
 }
+
+// --- AGENTS ---
+export function deleteAgent(agentId: string) {
+  db.prepare('DELETE FROM agents WHERE agentId = ?').run(agentId);
+  db.prepare('DELETE FROM schedules WHERE agentId = ?').run(agentId);
+  db.prepare('DELETE FROM groups WHERE agentId = ?').run(agentId);
+}

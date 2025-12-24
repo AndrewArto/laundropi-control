@@ -14,6 +14,14 @@ enum Tab {
 const AUTH_STORAGE_KEY = 'laundropi-auth-v1';
 const AUTH_USERNAME = (import.meta as any).env?.VITE_APP_USER ?? 'admin';
 const AUTH_PASSWORD = (import.meta as any).env?.VITE_APP_PASSWORD ?? 'laundropi';
+const AGENT_STALE_MS = 30_000;
+const DEFAULT_AGENT_ID = (import.meta as any).env?.VITE_AGENT_ID ?? 'dev-agent';
+const LAUNDRY_NAMES_KEY = 'laundropi-laundry-names';
+const DEFAULT_AGENT_SECRET = (import.meta as any).env?.VITE_AGENT_SECRET ?? 'secret';
+const DEFAULT_LAUNDRIES = [
+  { id: 'Brandoa_1', name: 'Brandoa_1' },
+  { id: 'Brandoa_2', name: 'Brandoa_2' },
+];
 
 const to24h = (val?: string | null): string | null => {
   if (!val) return null;
@@ -39,6 +47,15 @@ const to24h = (val?: string | null): string | null => {
 const App: React.FC = () => {
   console.log('[LaundroPi] App mounted render cycle start');
 
+  type Laundry = {
+    id: string;
+    name: string;
+    relays: Relay[];
+    isOnline: boolean;
+    isMock: boolean;
+    lastHeartbeat: number | null;
+  };
+
   const [activeTab, setActiveTab] = useState<Tab>(Tab.DASHBOARD);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [authLogin, setAuthLogin] = useState('');
@@ -63,7 +80,15 @@ const App: React.FC = () => {
   const [relayVisibility, setRelayVisibility] = useState<Record<number, boolean>>({});
   const relayVisibilityRef = React.useRef<Record<number, boolean>>({});
   const [serverOnline, setServerOnline] = useState(true);
-  const controlsDisabled = !serverOnline;
+  const [agentId, setAgentId] = useState<string | null>(null);
+  const [agentHeartbeat, setAgentHeartbeat] = useState<number | null>(null);
+  const agentOnline = agentHeartbeat !== null && (Date.now() - agentHeartbeat) < AGENT_STALE_MS;
+  const controlsDisabled = !serverOnline || !agentOnline;
+  const [laundries, setLaundries] = useState<Laundry[]>([]);
+  const primaryAgentId = agentId || laundries[0]?.id || DEFAULT_AGENT_ID;
+  const [isAddingLaundry, setIsAddingLaundry] = useState(false);
+  const [newLaundryInput, setNewLaundryInput] = useState('');
+  const [newLaundrySecret, setNewLaundrySecret] = useState(DEFAULT_AGENT_SECRET);
 
   const applyVisibility = (list: Relay[]) => {
     const visMap = relayVisibilityRef.current;
@@ -101,44 +126,69 @@ const App: React.FC = () => {
   }, []);
 
   // Fetch data
-  const fetchData = async (force = false) => {
+  const fetchLaundries = async (force = false) => {
     try {
       if (isRelayEditModeRef.current && !force) {
         setIsLoading(false);
         return;
       }
-      const data = await ApiService.getStatus();
+      let primaryData: { schedules: Schedule[]; groups: RelayGroup[] } | null = null;
+      const items: Laundry[] = await Promise.all(DEFAULT_LAUNDRIES.map(async (template) => {
+        try {
+          const data = await ApiService.getStatus(template.id);
+          const lastHb = data.lastHeartbeat ?? null;
+          const online = lastHb ? (Date.now() - lastHb) < AGENT_STALE_MS : true;
+          if (!primaryData) {
+            primaryData = { schedules: data.schedules, groups: data.groups };
+          }
+          return {
+            id: template.id,
+            name: template.name,
+            relays: data.relays,
+            isOnline: online,
+            isMock: data.isMock,
+            lastHeartbeat: lastHb,
+          };
+        } catch (e) {
+          return {
+            id: template.id,
+            name: template.name,
+            relays: [],
+            isOnline: false,
+            isMock: true,
+            lastHeartbeat: null,
+          };
+        }
+      }));
+
       setServerOnline(true);
       if (!isAuthenticatedRef.current) {
         setIsLoading(false);
         return;
       }
-      const serverVis: Record<number, boolean> = {};
-      data.relays.forEach(r => { serverVis[r.id] = !!r.isHidden; });
-      relayVisibilityRef.current = serverVis;
-      setRelayVisibility(serverVis);
-      latestRelaysRef.current = data.relays;
-      setRelays(data.relays);
-      setSchedules(data.schedules);
-      setGroups(prev => {
-        if (data.groups && data.groups.length > 0) return data.groups;
-        // keep existing client-side groups if server has none yet
-        return prev;
-      });
-      setIsMockMode(data.isMock);
+
+      setLaundries(items);
+      if (primaryData) {
+        setSchedules(primaryData.schedules);
+        setGroups(prev => {
+          if (primaryData?.groups && primaryData.groups.length > 0) return primaryData.groups;
+          return prev;
+        });
+      }
       setIsLoading(false);
     } catch (err) {
       console.error('Critical Failure:', err);
       setServerOnline(false);
       setIsLoading(false);
+      setAgentHeartbeat(null);
     }
   };
 
   useEffect(() => {
     if (!isAuthenticated) return;
     setIsLoading(true);
-    fetchData();
-    const poller = setInterval(fetchData, 10000);
+    fetchLaundries();
+    const poller = setInterval(fetchLaundries, 10000);
     return () => clearInterval(poller);
   }, [isAuthenticated]);
 
@@ -153,6 +203,21 @@ const App: React.FC = () => {
   useEffect(() => {
     relayVisibilityRef.current = relayVisibility;
   }, [relayVisibility]);
+
+  useEffect(() => {
+    const primary = laundries[0];
+    if (primary) {
+      setRelays(primary.relays);
+      setIsMockMode(primary.isMock);
+      setAgentId(primary.id);
+      setAgentHeartbeat(primary.lastHeartbeat);
+    } else {
+      setRelays([]);
+      setAgentId(null);
+      setAgentHeartbeat(null);
+      setIsMockMode(true);
+    }
+  }, [laundries]);
 
   const handleLoginSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -169,6 +234,7 @@ const App: React.FC = () => {
       setRelayVisibility({});
       relayVisibilityRef.current = {};
       latestRelaysRef.current = [];
+      setLaundries([]);
       setNewGroupRelayIds([]);
       setGroupSelectionTouched(false);
       setIsLoading(true);
@@ -200,6 +266,10 @@ const App: React.FC = () => {
     setRelayVisibility({});
     relayVisibilityRef.current = {};
     latestRelaysRef.current = [];
+    setLaundries([]);
+    setLaundryNames({});
+    setAgentId(null);
+    setAgentHeartbeat(null);
     setNewGroupName('New Group');
     setNewGroupRelayIds([]);
     setNewGroupOnTime('');
@@ -261,33 +331,53 @@ const App: React.FC = () => {
     })));
   }, [relays]);
 
-  const handleToggleRelay = async (id: number) => {
+  const updateLaundryRelays = (id: string, updater: (relays: Relay[]) => Relay[]) => {
+    setLaundries(prev => prev.map(l => l.id === id ? { ...l, relays: updater(l.relays) } : l));
+  };
+
+  const handleAddLaundry = async () => {};
+
+  const handleRemoveLaundry = (_id: string) => {};
+
+  const handleRenameLaundry = async (_id: string, _name: string) => {};
+
+  const handleToggleRelay = async (id: number, agent: string = primaryAgentId) => {
     if (!serverOnline) return;
-    const current = relays.find(r => r.id === id);
+    const laundry = laundries.find(l => l.id === agent);
+    const current = laundry?.relays.find(r => r.id === id);
     const nextState = current?.isOn ? 'OFF' : 'ON';
-    setRelays(prev => prev.map(r => r.id === id ? { ...r, isOn: !r.isOn } : r));
-    latestRelaysRef.current = latestRelaysRef.current.map(r => r.id === id ? { ...r, isOn: !r.isOn } : r);
-    await ApiService.setRelayState(id, nextState === 'ON' ? 'on' : 'off');
-    fetchData(true);
+    updateLaundryRelays(agent, rels => rels.map(r => r.id === id ? { ...r, isOn: !r.isOn } : r));
+    if (agent === primaryAgentId) {
+      setRelays(prev => prev.map(r => r.id === id ? { ...r, isOn: !r.isOn } : r));
+      latestRelaysRef.current = latestRelaysRef.current.map(r => r.id === id ? { ...r, isOn: !r.isOn } : r);
+    }
+    await ApiService.setRelayState(agent, id, nextState === 'ON' ? 'on' : 'off');
+    fetchLaundries(true);
   };
 
-  const handleBatchControl = async (ids: number[], action: 'ON' | 'OFF') => {
+  const handleBatchControl = async (ids: number[], action: 'ON' | 'OFF', agent: string = primaryAgentId) => {
     if (!serverOnline) return;
-    setRelays(prev => {
-      const next = prev.map(r => ids.includes(r.id) ? { ...r, isOn: action === 'ON' } : r);
-      const merged = applyVisibility(next);
-      latestRelaysRef.current = merged;
-      return merged;
-    });
-    await ApiService.batchControl(ids, action);
+    updateLaundryRelays(agent, rels => rels.map(r => ids.includes(r.id) ? { ...r, isOn: action === 'ON' } : r));
+    if (agent === primaryAgentId) {
+      setRelays(prev => {
+        const next = prev.map(r => ids.includes(r.id) ? { ...r, isOn: action === 'ON' } : r);
+        const merged = applyVisibility(next);
+        latestRelaysRef.current = merged;
+        return merged;
+      });
+    }
+    await ApiService.batchControl(agent, ids, action);
   };
 
-  const handleRenameRelay = async (id: number) => {
+  const handleRenameRelay = async (id: number, agent: string = primaryAgentId) => {
     if (!serverOnline) return;
     const name = (relayNameDrafts[id] || '').trim();
     if (!name) return;
-    setRelays(prev => prev.map(r => r.id === id ? { ...r, name } : r));
-    await ApiService.renameRelay(id, name);
+    updateLaundryRelays(agent, rels => rels.map(r => r.id === id ? { ...r, name } : r));
+    if (agent === primaryAgentId) {
+      setRelays(prev => prev.map(r => r.id === id ? { ...r, name } : r));
+    }
+    await ApiService.renameRelay(agent, id, name);
     // keep latest ref in sync so exiting edit doesn't revert names
     latestRelaysRef.current = latestRelaysRef.current.map(r => r.id === id ? { ...r, name } : r);
   };
@@ -296,56 +386,65 @@ const App: React.FC = () => {
     setRelayNameDrafts(prev => ({ ...prev, [id]: name }));
   };
 
-  const handleToggleVisibility = async (id: number) => {
+  const handleToggleVisibility = async (id: number, agent: string = primaryAgentId) => {
     if (!serverOnline) return;
     const newHidden = !relayVisibility[id];
     setRelayVisibility(prev => ({ ...prev, [id]: newHidden }));
     relayVisibilityRef.current = { ...relayVisibilityRef.current, [id]: newHidden };
     // Update relays locally; if unhidden, default to OFF
-    setRelays(prev => {
-      const next = prev.map(r => {
-        if (r.id !== id) return r;
-        return { ...r, isHidden: newHidden, isOn: newHidden ? r.isOn : false };
+    if (agent === primaryAgentId) {
+      setRelays(prev => {
+        const next = prev.map(r => {
+          if (r.id !== id) return r;
+          return { ...r, isHidden: newHidden, isOn: newHidden ? r.isOn : false };
+        });
+        latestRelaysRef.current = next;
+        return next;
       });
-      latestRelaysRef.current = next;
-      return next;
-    });
-    // Adjust schedules
-    setSchedules(prev => prev.map(s => ({ ...s, relayIds: s.relayIds.filter(rid => rid !== id) })));
+      // Adjust schedules
+      setSchedules(prev => prev.map(s => ({ ...s, relayIds: s.relayIds.filter(rid => rid !== id) })));
 
-    // Adjust groups: remove hidden relay; add back to all groups when unhidden
-    setGroups(prev => {
-      const updatedGroups = prev.map(g => {
-        const exists = (g.relayIds || []).includes(id);
-        if (newHidden && exists) {
-          return { ...g, relayIds: g.relayIds.filter(rid => rid !== id) };
-        }
-        if (!newHidden && !exists) {
-          return { ...g, relayIds: [...(g.relayIds || []), id] };
-        }
-        return g;
+      // Adjust groups: remove hidden relay; add back to all groups when unhidden
+      setGroups(prev => {
+        const updatedGroups = prev.map(g => {
+          const exists = (g.relayIds || []).includes(id);
+          if (newHidden && exists) {
+            return { ...g, relayIds: g.relayIds.filter(rid => rid !== id) };
+          }
+          if (!newHidden && !exists) {
+            return { ...g, relayIds: [...(g.relayIds || []), id] };
+          }
+          return g;
+        });
+        // Persist changes to server asynchronously
+        updatedGroups.forEach((g, idx) => {
+          const prevGroup = prev[idx];
+          if (JSON.stringify(prevGroup?.relayIds || []) !== JSON.stringify(g.relayIds || [])) {
+            handleUpdateGroup(g.id, { relayIds: g.relayIds || [] });
+          }
+        });
+        return updatedGroups;
       });
-      // Persist changes to server asynchronously
-      updatedGroups.forEach((g, idx) => {
-        const prevGroup = prev[idx];
-        if (JSON.stringify(prevGroup?.relayIds || []) !== JSON.stringify(g.relayIds || [])) {
-          handleUpdateGroup(g.id, { relayIds: g.relayIds || [] });
-        }
-      });
-      return updatedGroups;
-    });
+    }
 
-    const updated = await ApiService.setRelayVisibility(id, newHidden);
-    setRelays(prev => prev.map(r => r.id === id ? { ...r, isHidden: updated.isHidden } : r));
-    latestRelaysRef.current = latestRelaysRef.current.map(r => r.id === id ? { ...r, isHidden: updated.isHidden } : r);
-    // Force refresh from server to persist state even while in edit mode
-    await fetchData(true);
+    updateLaundryRelays(agent, rels => rels.map(r => r.id === id ? { ...r, isHidden: newHidden } : r));
+
+    const updated = await ApiService.setRelayVisibility(agent, id, newHidden);
+    updateLaundryRelays(agent, rels => rels.map(r => r.id === id ? { ...r, isHidden: updated.isHidden } : r));
+    if (agent === primaryAgentId) {
+      setRelays(prev => prev.map(r => r.id === id ? { ...r, isHidden: updated.isHidden } : r));
+      latestRelaysRef.current = latestRelaysRef.current.map(r => r.id === id ? { ...r, isHidden: updated.isHidden } : r);
+    }
+    await fetchLaundries(true);
   };
 
-  const handleIconChange = async (id: number, iconType: Relay['iconType']) => {
+  const handleIconChange = async (id: number, iconType: Relay['iconType'], agent: string = primaryAgentId) => {
     if (!iconType) return;
-    setRelays(prev => prev.map(r => r.id === id ? { ...r, iconType } : r));
-    await ApiService.setRelayIcon(id, iconType as RelayType);
+    updateLaundryRelays(agent, rels => rels.map(r => r.id === id ? { ...r, iconType } : r));
+    if (agent === primaryAgentId) {
+      setRelays(prev => prev.map(r => r.id === id ? { ...r, iconType } : r));
+    }
+    await ApiService.setRelayIcon(agent, id, iconType as RelayType);
   };
 
   const handleAddGroup = async () => {
@@ -360,7 +459,7 @@ const App: React.FC = () => {
       days: newGroupDays,
       active: Boolean(onTime24 || offTime24)
     };
-    const added = await ApiService.addGroup(payload);
+    const added = await ApiService.addGroup(primaryAgentId, payload);
     setGroups(prev => [...prev, added]);
     setActiveTab(Tab.SCHEDULE);
     // reset form
@@ -386,7 +485,7 @@ const App: React.FC = () => {
       onTime: updates.onTime === undefined ? existing.onTime : to24h(updates.onTime),
       offTime: updates.offTime === undefined ? existing.offTime : to24h(updates.offTime),
     };
-    const saved = await ApiService.updateGroup(groupId, {
+    const saved = await ApiService.updateGroup(primaryAgentId, groupId, {
       name: next.name,
       relayIds: next.relayIds,
       onTime: next.onTime || null,
@@ -399,7 +498,7 @@ const App: React.FC = () => {
 
   const handleDeleteGroup = async (id: string) => {
     setGroups(prev => prev.filter(g => g.id !== id));
-    await ApiService.deleteGroup(id);
+    await ApiService.deleteGroup(primaryAgentId, id);
   };
 
   const handleToggleGroupPower = async (id: string, action: 'ON' | 'OFF') => {
@@ -412,7 +511,7 @@ const App: React.FC = () => {
       return updated;
     });
     try {
-      await ApiService.toggleGroup(id, action);
+      await ApiService.toggleGroup(primaryAgentId, id, action);
     } catch (err) {
       console.error('Group toggle failed', err);
     }
@@ -420,59 +519,92 @@ const App: React.FC = () => {
 
   const renderDashboard = () => (
     <div className="space-y-6">
-      <div>
-        <div className="flex justify-between items-center mb-4">
-          <h2 className="text-xl font-bold text-white flex items-center gap-2">
-            <LayoutDashboard className="w-5 h-5 text-indigo-400" />
-            System Status
-          </h2>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => {
-                setIsRelayEditMode(prev => {
-                  const next = !prev;
-                  if (!next) {
-                    // Leaving edit: fetch latest from server (persisted changes remain)
-                    fetchData();
-                  }
-                  return next;
-                });
-              }}
-              disabled={controlsDisabled}
-              className={`px-3 py-1 text-xs rounded-md border transition-colors flex items-center gap-1 ${isRelayEditMode ? 'border-indigo-500 text-indigo-300 bg-indigo-500/10' : 'border-slate-600 text-slate-300 hover:border-slate-500'} ${controlsDisabled ? 'opacity-50 cursor-not-allowed' : ''}`}
-            >
-              <Pencil className="w-4 h-4" />
-              {isRelayEditMode ? 'Done' : 'Edit'}
-            </button>
-            {isMockMode ? (
-               <span className="text-xs text-amber-400 flex items-center gap-1 bg-amber-400/10 px-2 py-1 rounded-full border border-amber-400/20">
-                 <Server className="w-3 h-3" /> Simulation Mode
-               </span>
-            ) : (
-              <span className="text-xs text-emerald-400 flex items-center gap-1 bg-emerald-400/10 px-2 py-1 rounded-full border border-emerald-400/20">
-                 <Cpu className="w-3 h-3" /> Hardware Connected
-              </span>
-            )}
-          </div>
-        </div>
-        
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          {(isRelayEditMode ? relays : relays.filter(r => !r.isHidden)).map(relay => (
-            <RelayCard
-              key={relay.id}
-              relay={relay}
-              onToggle={handleToggleRelay}
-              isEditing={isRelayEditMode}
-              nameValue={relayNameDrafts[relay.id] ?? relay.name}
-              onNameChange={handleRelayNameInput}
-              onNameSave={handleRenameRelay}
-              isHidden={relay.isHidden}
-              onToggleVisibility={handleToggleVisibility}
-              onIconChange={handleIconChange}
-              isDisabled={controlsDisabled}/>
-          ))}
+      <div className="flex justify-between items-center">
+        <h2 className="text-xl font-bold text-white flex items-center gap-2">
+          <LayoutDashboard className="w-5 h-5 text-indigo-400" />
+          Control
+        </h2>
+        <div className="flex gap-2 flex-wrap items-center">
+          <button
+            onClick={() => {
+              setIsRelayEditMode(prev => {
+                const next = !prev;
+                if (!next) {
+                  fetchLaundries(true);
+                }
+                return next;
+              });
+            }}
+            disabled={!serverOnline}
+            className={`px-3 py-2 text-xs rounded-md border transition-colors flex items-center gap-1 ${isRelayEditMode ? 'border-indigo-500 text-indigo-300 bg-indigo-500/10' : 'border-slate-600 text-slate-300 hover:border-slate-500'} ${!serverOnline ? 'opacity-50 cursor-not-allowed' : ''}`}
+          >
+            <Pencil className="w-4 h-4" />
+            {isRelayEditMode ? 'Done' : 'Edit'}
+          </button>
         </div>
       </div>
+
+      {laundries.map((laundry, idx) => {
+        const fresh = laundry.lastHeartbeat ? (Date.now() - laundry.lastHeartbeat) < AGENT_STALE_MS : false;
+        const online = serverOnline && laundry.isOnline && fresh;
+        const relaysList = laundry.relays;
+        const visibleRelays = isRelayEditMode ? relaysList : relaysList.filter(r => !r.isHidden);
+        const disabled = !online;
+        const mock = laundry.isMock || !online;
+        return (
+          <div key={laundry.id} className="bg-slate-800 border border-slate-700 rounded-xl p-4 space-y-4">
+            <div className="flex items-center gap-3 flex-wrap">
+              <div className="text-sm font-semibold text-white">{laundry.name}</div>
+              <span className={`text-xs px-2 py-1 rounded-full border ${online ? 'border-emerald-400 text-emerald-200 bg-emerald-500/10' : 'border-red-400 text-red-200 bg-red-500/10'}`}>
+                {online ? 'Online' : 'Offline'}
+              </span>
+              <span className={`text-xs px-2 py-1 rounded-full border flex items-center gap-1 ${mock ? 'border-amber-400 text-amber-200 bg-amber-500/10' : 'border-emerald-400 text-emerald-200 bg-emerald-500/10'}`}>
+                {mock ? <Server className="w-3 h-3" /> : <Cpu className="w-3 h-3" />}
+                {mock ? 'Mock mode' : 'Hardware'}
+              </span>
+              <div className="flex gap-2 ml-auto">
+                <button
+                  onClick={() => handleBatchControl(relaysList.map(r => r.id), 'ON', laundry.id)}
+                  disabled={!online}
+                  className="px-3 py-2 rounded-md text-xs font-semibold border border-emerald-500 text-emerald-200 bg-emerald-500/10 disabled:opacity-50"
+                >
+                  ON
+                </button>
+                <button
+                  onClick={() => handleBatchControl(relaysList.map(r => r.id), 'OFF', laundry.id)}
+                  disabled={!online}
+                  className="px-3 py-2 rounded-md text-xs font-semibold border border-red-500 text-red-200 bg-red-500/10 disabled:opacity-50"
+                >
+                  OFF
+                </button>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              {visibleRelays.length === 0 && (
+                <div className="text-sm text-slate-500 bg-slate-900/40 border border-slate-700 rounded-lg p-3 col-span-2">
+                  No relays reported for this agent.
+                </div>
+              )}
+              {visibleRelays.map(relay => (
+                <RelayCard
+                  key={`${laundry.id}-${relay.id}`}
+                  relay={relay}
+                  onToggle={() => handleToggleRelay(relay.id, laundry.id)}
+                  isEditing={isRelayEditMode}
+                  nameValue={relayNameDrafts[relay.id] ?? relay.name}
+                  onNameChange={(rid, name) => handleRelayNameInput(rid, name)}
+                  onNameSave={(rid) => handleRenameRelay(rid, laundry.id)}
+                  isHidden={relay.isHidden}
+                  onToggleVisibility={(rid) => handleToggleVisibility(rid, laundry.id)}
+                  onIconChange={(rid, icon) => handleIconChange(rid, icon, laundry.id)}
+                  isDisabled={disabled}
+                />
+              ))}
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 
@@ -525,8 +657,12 @@ const App: React.FC = () => {
                         setNewGroupRelayIds(prev => prev.includes(relay.id) ? prev.filter(id => id !== relay.id) : [...prev, relay.id]);
                       }}
                       disabled={controlsDisabled}
-                      className={`px-3 py-2 rounded-lg text-xs font-medium border transition-colors ${newGroupRelayIds.includes(relay.id) ? 'bg-indigo-600 text-white border-indigo-500' : 'bg-slate-900/40 text-slate-300 border-slate-700 hover:border-slate-600'}`}
+                      className={`px-3 py-2 rounded-lg text-xs font-medium border transition-colors flex items-center gap-2 ${newGroupRelayIds.includes(relay.id) ? 'bg-indigo-600 text-white border-indigo-500' : 'bg-slate-900/40 text-slate-300 border-slate-700 hover:border-slate-600'}`}
                     >
+                      <span
+                        className="w-2 h-2 rounded-full"
+                        style={relay.isOn ? { backgroundColor: '#34d399', boxShadow: '0 0 8px rgba(52, 211, 153, 0.7)' } : { backgroundColor: '#64748b' }}
+                      />
                       {relay.name}
                     </button>
                   ))}
@@ -668,10 +804,14 @@ const App: React.FC = () => {
                           handleUpdateGroup(group.id, { relayIds: next });
                         }}
                         disabled={controlsDisabled || editingGroupId !== group.id}
-                        className={`px-3 py-2 rounded-lg text-xs font-medium border transition-colors ${
+                        className={`px-3 py-2 rounded-lg text-xs font-medium border transition-colors flex items-center gap-2 ${
                           selectedRelayIds.includes(relay.id) ? 'bg-indigo-600 text-white border-indigo-500' : 'bg-slate-900/40 text-slate-300 border-slate-700 hover:border-slate-600'
                         } ${editingGroupId === group.id ? '' : 'opacity-60 cursor-not-allowed'}`}
                       >
+                        <span
+                          className="w-2 h-2 rounded-full"
+                          style={relay.isOn ? { backgroundColor: '#34d399', boxShadow: '0 0 8px rgba(52, 211, 153, 0.7)' } : { backgroundColor: '#64748b' }}
+                        />
                         {relay.name}
                       </button>
                     ))}
@@ -839,7 +979,7 @@ const App: React.FC = () => {
     );
   }
 
-  if (isLoading && relays.length === 0) {
+  if (isLoading && laundries.length === 0) {
     console.log('[LaundroPi] render branch: loading screen', { isLoading, relaysLen: relays.length, activeTab });
     return <div className="min-h-screen flex items-center justify-center bg-slate-900 text-slate-500">Loading LaundroPi...</div>;
   }
@@ -854,11 +994,26 @@ const App: React.FC = () => {
             <h1 className="text-xl font-bold bg-gradient-to-r from-indigo-400 to-cyan-400 bg-clip-text text-transparent">
               LaundroPi
             </h1>
-            <div className="flex items-center gap-2">
-              <span className={`w-2 h-2 rounded-full ${!isMockMode ? 'bg-green-500 animate-pulse' : 'bg-amber-500'}`}></span>
-              <p className="text-xs text-slate-500">
-                {!isMockMode ? 'Connected to Pi' : 'Mock mode (no GPIO)'}
-              </p>
+            <div className="flex items-center gap-3 flex-wrap">
+              {laundries.map(l => {
+                const fresh = l.lastHeartbeat ? (Date.now() - l.lastHeartbeat) < AGENT_STALE_MS : false;
+                const online = l.isOnline && fresh;
+                const mock = l.isMock || !online;
+                return (
+                  <div key={l.id} className="flex items-center gap-2 px-2 py-1 rounded-md border border-slate-700 bg-slate-900/50">
+                    <span className={`w-2 h-2 rounded-full ${online ? 'bg-emerald-400 animate-pulse' : 'bg-red-500'}`}></span>
+                    <div className="flex flex-col leading-tight">
+                      <p className="text-xs text-slate-300 flex items-center gap-1">
+                        {mock ? <Server className="w-3 h-3" /> : <Cpu className="w-3 h-3" />}
+                        {l.name} ({l.id}) {online ? 'online' : 'offline'}
+                      </p>
+                      <p className="text-[11px] text-slate-500">
+                        {mock ? 'Mock mode (no GPIO)' : 'Hardware connected'}
+                      </p>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </div>
           <div className="flex items-center gap-3">
@@ -886,6 +1041,11 @@ const App: React.FC = () => {
         {!serverOnline && (
           <div className="mb-4 bg-amber-500/10 border border-amber-500/40 text-amber-200 px-3 py-2 rounded-lg text-sm">
             Server unreachable. Controls are temporarily disabled until connection is restored.
+          </div>
+        )}
+        {serverOnline && !agentOnline && (
+          <div className="mb-4 bg-red-500/10 border border-red-500/40 text-red-200 px-3 py-2 rounded-lg text-sm">
+            Agent {agentId || ''} is offline. Controls are disabled until it reconnects.
           </div>
         )}
         {activeTab === Tab.DASHBOARD && renderDashboard()}

@@ -11,6 +11,7 @@ const API_BASE = (() => {
 })();
 
 const AGENT_ID = (import.meta as any).env?.VITE_AGENT_ID || 'dev-agent';
+const AGENT_SECRET = (import.meta as any).env?.VITE_AGENT_SECRET || 'secret';
 
 const request = async (input: RequestInfo | URL, init?: RequestInit) => {
   const res = await fetch(input, init);
@@ -43,28 +44,46 @@ const normalizeTime = (val?: string | null) => {
 };
 
 export const ApiService = {
-  async getStatus(): Promise<{ relays: Relay[], schedules: Schedule[], groups: RelayGroup[], isMock: boolean, agentId?: string, lastHeartbeat?: number | null }> {
+  async listAgents(): Promise<{ agentId: string; lastHeartbeat: number | null; online: boolean }[]> {
+    const res = await request(`${API_BASE}/agents`);
+    return await res.json();
+  },
+
+  async registerAgent(agentId: string, secret: string): Promise<void> {
+    await request(`${API_BASE}/agents`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agentId, secret: secret || AGENT_SECRET })
+    });
+  },
+
+  async deleteAgent(agentId: string): Promise<void> {
+    await request(`${API_BASE}/agents/${agentId}`, { method: 'DELETE' });
+  },
+
+  async getStatus(agentId?: string): Promise<{ relays: Relay[], schedules: Schedule[], groups: RelayGroup[], isMock: boolean, agentId?: string, lastHeartbeat?: number | null }> {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 2000);
-    const res = await request(`${API_BASE}/dashboard?agentId=${encodeURIComponent(AGENT_ID)}`, { signal: controller.signal });
+    const id = agentId || AGENT_ID;
+    const res = await request(`${API_BASE}/dashboard?agentId=${encodeURIComponent(id)}`, { signal: controller.signal });
     clearTimeout(timeoutId);
     return await res.json();
   },
 
-  async setRelayState(id: number, state: 'on' | 'off'): Promise<void> {
-    await request(`${API_BASE}/agents/${AGENT_ID}/relays/${id}/state`, {
+  async setRelayState(agentId: string, id: number, state: 'on' | 'off'): Promise<void> {
+    await request(`${API_BASE}/agents/${agentId}/relays/${id}/state`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ state })
     });
   },
 
-  async batchControl(ids: number[], action: 'ON' | 'OFF'): Promise<void> {
-    await Promise.all(ids.map(id => this.setRelayState(id, action === 'ON' ? 'on' : 'off')));
+  async batchControl(agentId: string, ids: number[], action: 'ON' | 'OFF'): Promise<void> {
+    await Promise.all(ids.map(id => this.setRelayState(agentId, id, action === 'ON' ? 'on' : 'off')));
   },
 
-  async renameRelay(id: number, name: string): Promise<Relay> {
-    await request(`${API_BASE}/agents/${AGENT_ID}/relays/${id}/meta`, {
+  async renameRelay(agentId: string, id: number, name: string): Promise<Relay> {
+    await request(`${API_BASE}/agents/${agentId}/relays/${id}/meta`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name })
@@ -72,8 +91,8 @@ export const ApiService = {
     return { id, name } as Relay;
   },
 
-  async setRelayIcon(id: number, iconType: RelayType): Promise<Relay> {
-    await request(`${API_BASE}/agents/${AGENT_ID}/relays/${id}/meta`, {
+  async setRelayIcon(agentId: string, id: number, iconType: RelayType): Promise<Relay> {
+    await request(`${API_BASE}/agents/${agentId}/relays/${id}/meta`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ iconType })
@@ -81,8 +100,8 @@ export const ApiService = {
     return { id, iconType } as Relay;
   },
 
-  async setRelayVisibility(id: number, isHidden: boolean): Promise<Relay> {
-    await request(`${API_BASE}/agents/${AGENT_ID}/relays/${id}/meta`, {
+  async setRelayVisibility(agentId: string, id: number, isHidden: boolean): Promise<Relay> {
+    await request(`${API_BASE}/agents/${agentId}/relays/${id}/meta`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ isHidden })
@@ -90,8 +109,8 @@ export const ApiService = {
     return { id, isHidden } as Relay;
   },
 
-  async addSchedule(schedule: Omit<Schedule, 'id'>): Promise<Schedule> {
-    const res = await request(`${API_BASE}/agents/${AGENT_ID}/schedules`, {
+  async addSchedule(agentId: string, schedule: Omit<Schedule, 'id'>): Promise<Schedule> {
+    const res = await request(`${API_BASE}/agents/${agentId}/schedules`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -104,12 +123,12 @@ export const ApiService = {
     return await res.json();
   },
 
-  async deleteSchedule(_id: string): Promise<void> {
-    await request(`${API_BASE}/agents/${AGENT_ID}/schedules/${_id}`, { method: 'DELETE' });
+  async deleteSchedule(agentId: string, _id: string): Promise<void> {
+    await request(`${API_BASE}/agents/${agentId}/schedules/${_id}`, { method: 'DELETE' });
   },
 
-  async updateSchedule(id: string, schedule: Omit<Schedule, 'id'>): Promise<Schedule> {
-    const res = await request(`${API_BASE}/agents/${AGENT_ID}/schedules/${id}`, {
+  async updateSchedule(agentId: string, id: string, schedule: Omit<Schedule, 'id'>): Promise<Schedule> {
+    const res = await request(`${API_BASE}/agents/${agentId}/schedules/${id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -122,8 +141,8 @@ export const ApiService = {
     return await res.json();
   },
 
-  async addGroup(group: Omit<RelayGroup, 'id'>): Promise<RelayGroup> {
-    const res = await request(`${API_BASE}/agents/${AGENT_ID}/groups`, {
+  async addGroup(agentId: string, group: Omit<RelayGroup, 'id'>): Promise<RelayGroup> {
+    const res = await request(`${API_BASE}/agents/${agentId}/groups`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -135,8 +154,8 @@ export const ApiService = {
     return await res.json();
   },
 
-  async updateGroup(id: string, group: Omit<RelayGroup, 'id'>): Promise<RelayGroup> {
-    const res = await request(`${API_BASE}/agents/${AGENT_ID}/groups/${id}`, {
+  async updateGroup(agentId: string, id: string, group: Omit<RelayGroup, 'id'>): Promise<RelayGroup> {
+    const res = await request(`${API_BASE}/agents/${agentId}/groups/${id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -148,12 +167,12 @@ export const ApiService = {
     return await res.json();
   },
 
-  async deleteGroup(_id: string): Promise<void> {
-    await request(`${API_BASE}/agents/${AGENT_ID}/groups/${_id}`, { method: 'DELETE' });
+  async deleteGroup(agentId: string, _id: string): Promise<void> {
+    await request(`${API_BASE}/agents/${agentId}/groups/${_id}`, { method: 'DELETE' });
   },
 
-  async toggleGroup(_id: string, _action: 'ON' | 'OFF'): Promise<Relay[]> {
-    await request(`${API_BASE}/agents/${AGENT_ID}/groups/${_id}/action`, {
+  async toggleGroup(agentId: string, _id: string, _action: 'ON' | 'OFF'): Promise<Relay[]> {
+    await request(`${API_BASE}/agents/${agentId}/groups/${_id}/action`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: _action })
