@@ -28,10 +28,18 @@ export interface Schedule {
   active: boolean;
 }
 
+export interface RelayGroupEntry {
+  agentId: string;
+  relayIds: number[];
+}
+
 export interface RelayGroup {
   id: string;
   name: string;
-  relayIds: number[];
+  // entries are grouped by agent so a single group can span multiple laundries
+  entries: RelayGroupEntry[];
+  // relayIds is kept for backward-compatibility with older payloads
+  relayIds?: number[];
   onTime?: string | null;
   offTime?: string | null;
   days: string[];

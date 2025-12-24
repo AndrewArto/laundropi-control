@@ -56,6 +56,8 @@ const App: React.FC = () => {
     lastHeartbeat: number | null;
   };
 
+  type RelaySelection = { agentId: string; relayId: number };
+
   const [activeTab, setActiveTab] = useState<Tab>(Tab.DASHBOARD);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [authLogin, setAuthLogin] = useState('');
@@ -66,7 +68,7 @@ const App: React.FC = () => {
   const [groups, setGroups] = useState<RelayGroup[]>([]);
   const [currentTime, setCurrentTime] = useState(new Date());
   const [newGroupName, setNewGroupName] = useState('New Group');
-  const [newGroupRelayIds, setNewGroupRelayIds] = useState<number[]>([]);
+  const [newGroupSelections, setNewGroupSelections] = useState<RelaySelection[]>([]);
   const [newGroupOnTime, setNewGroupOnTime] = useState<string>('');
   const [newGroupOffTime, setNewGroupOffTime] = useState<string>('');
   const [newGroupDays, setNewGroupDays] = useState<string[]>([...DAYS_OF_WEEK]);
@@ -93,6 +95,33 @@ const App: React.FC = () => {
   const applyVisibility = (list: Relay[]) => {
     const visMap = relayVisibilityRef.current;
     return list.map(r => visMap[r.id] !== undefined ? { ...r, isHidden: visMap[r.id] } : r);
+  };
+
+  const selectionKey = (agentId: string, relayId: number) => `${agentId}__${relayId}`;
+  const dedupeSelections = (items: RelaySelection[]) => {
+    const map = new Map<string, RelaySelection>();
+    items.forEach(sel => {
+      const key = selectionKey(sel.agentId, sel.relayId);
+      map.set(key, sel);
+    });
+    return Array.from(map.values());
+  };
+
+  const normalizeGroupPayload = (g: any, fallbackAgentId: string): RelayGroup => {
+    const entries = Array.isArray(g?.entries) && g.entries.length
+      ? g.entries.map((e: any) => ({
+          agentId: e.agentId,
+          relayIds: Array.isArray(e.relayIds) ? e.relayIds.map((rid: any) => Number(rid)) : [],
+        })).filter((e: any) => e.agentId)
+      : [{
+          agentId: g.agentId || fallbackAgentId,
+          relayIds: Array.isArray(g.relayIds) ? g.relayIds.map((rid: any) => Number(rid)) : [],
+        }];
+    return {
+      ...g,
+      entries,
+      relayIds: Array.isArray(g.relayIds) ? g.relayIds : entries.flatMap((e: any) => e.relayIds),
+    };
   };
 
   const [isMockMode, setIsMockMode] = useState(true);
@@ -171,7 +200,9 @@ const App: React.FC = () => {
       if (primaryData) {
         setSchedules(primaryData.schedules);
         setGroups(prev => {
-          if (primaryData?.groups && primaryData.groups.length > 0) return primaryData.groups;
+          if (primaryData?.groups && primaryData.groups.length > 0) {
+            return primaryData.groups.map(g => normalizeGroupPayload(g, items[0]?.id || primaryAgentId || DEFAULT_AGENT_ID));
+          }
           return prev;
         });
       }
@@ -235,7 +266,7 @@ const App: React.FC = () => {
       relayVisibilityRef.current = {};
       latestRelaysRef.current = [];
       setLaundries([]);
-      setNewGroupRelayIds([]);
+      setNewGroupSelections([]);
       setGroupSelectionTouched(false);
       setIsLoading(true);
       if (typeof window !== 'undefined') {
@@ -267,11 +298,10 @@ const App: React.FC = () => {
     relayVisibilityRef.current = {};
     latestRelaysRef.current = [];
     setLaundries([]);
-    setLaundryNames({});
     setAgentId(null);
     setAgentHeartbeat(null);
     setNewGroupName('New Group');
-    setNewGroupRelayIds([]);
+    setNewGroupSelections([]);
     setNewGroupOnTime('');
     setNewGroupOffTime('');
     setNewGroupDays([...DAYS_OF_WEEK]);
@@ -289,8 +319,11 @@ const App: React.FC = () => {
   // Sync drafts and visibility
   useEffect(() => {
     // Only prefill new-group selection when untouched (avoid clobbering user edits on polls)
-    if (!groupSelectionTouched && newGroupRelayIds.length === 0) {
-      setNewGroupRelayIds(relays.filter(r => !r.isHidden).map(r => r.id));
+    if (!groupSelectionTouched && newGroupSelections.length === 0 && laundries.length) {
+      const visible = laundries.flatMap(l =>
+        (l.relays || []).filter(r => !r.isHidden).map(r => ({ agentId: l.id, relayId: r.id }))
+      );
+      setNewGroupSelections(dedupeSelections(visible));
     }
     // Avoid overwriting draft names while in relay edit mode
     if (!isRelayEditMode) {
@@ -307,7 +340,7 @@ const App: React.FC = () => {
       setNewGroupOffTime('');
     }
     console.log('[LaundroPi] relays loaded:', relays.length, 'visible:', relays.filter(r => !r.isHidden).length);
-  }, [relays, newGroupRelayIds.length, groupSelectionTouched, isRelayEditMode, newGroupOnTime, newGroupOffTime]);
+  }, [relays, laundries, newGroupSelections.length, groupSelectionTouched, isRelayEditMode, newGroupOnTime, newGroupOffTime]);
 
   // Drop hidden relays from schedules
   useEffect(() => {
@@ -323,13 +356,20 @@ const App: React.FC = () => {
 
   // Drop hidden relays from groups so toggles don't touch hidden devices
   useEffect(() => {
-    if (!relays.length) return;
-    const visibleSet = new Set(relays.filter(r => !r.isHidden).map(r => r.id));
-    setGroups(prev => prev.map(g => ({
-      ...g,
-      relayIds: (g.relayIds || []).filter(id => visibleSet.has(id))
-    })));
-  }, [relays]);
+    if (!laundries.length) return;
+    const visibleMap = new Map<string, Set<number>>();
+    laundries.forEach(l => {
+      visibleMap.set(l.id, new Set((l.relays || []).filter(r => !r.isHidden).map(r => r.id)));
+    });
+    setGroups(prev => prev.map(g => {
+      const entries = (g.entries || []).map(e => {
+        const allowed = visibleMap.get(e.agentId);
+        const relayIds = allowed ? e.relayIds.filter(id => allowed.has(id)) : [];
+        return { ...e, relayIds };
+      }).filter(e => e.relayIds.length);
+      return { ...g, entries, relayIds: entries.flatMap(e => e.relayIds) };
+    }));
+  }, [laundries]);
 
   const updateLaundryRelays = (id: string, updater: (relays: Relay[]) => Relay[]) => {
     setLaundries(prev => prev.map(l => l.id === id ? { ...l, relays: updater(l.relays) } : l));
@@ -407,20 +447,28 @@ const App: React.FC = () => {
       // Adjust groups: remove hidden relay; add back to all groups when unhidden
       setGroups(prev => {
         const updatedGroups = prev.map(g => {
-          const exists = (g.relayIds || []).includes(id);
-          if (newHidden && exists) {
-            return { ...g, relayIds: g.relayIds.filter(rid => rid !== id) };
+          const hasEntry = (g.entries || []).some(e => e.agentId === agent);
+          let nextEntries = (g.entries || []).map(e => {
+            if (e.agentId !== agent) return e;
+            const has = e.relayIds.includes(id);
+            if (newHidden && has) {
+              return { ...e, relayIds: e.relayIds.filter(rid => rid !== id) };
+            }
+            if (!newHidden && !has) {
+              return { ...e, relayIds: [...e.relayIds, id] };
+            }
+            return e;
+          }).filter(e => e.relayIds.length);
+          if (!newHidden && !hasEntry) {
+            nextEntries = [...nextEntries, { agentId: agent, relayIds: [id] }];
           }
-          if (!newHidden && !exists) {
-            return { ...g, relayIds: [...(g.relayIds || []), id] };
-          }
-          return g;
+          return { ...g, entries: nextEntries, relayIds: nextEntries.flatMap(e => e.relayIds) };
         });
         // Persist changes to server asynchronously
         updatedGroups.forEach((g, idx) => {
           const prevGroup = prev[idx];
-          if (JSON.stringify(prevGroup?.relayIds || []) !== JSON.stringify(g.relayIds || [])) {
-            handleUpdateGroup(g.id, { relayIds: g.relayIds || [] });
+          if (JSON.stringify(prevGroup?.entries || []) !== JSON.stringify(g.entries || [])) {
+            handleUpdateGroup(g.id, { entries: g.entries });
           }
         });
         return updatedGroups;
@@ -448,23 +496,32 @@ const App: React.FC = () => {
   };
 
   const handleAddGroup = async () => {
-    if (!newGroupName.trim() || newGroupRelayIds.length === 0) return;
+    const selections = dedupeSelections(newGroupSelections);
+    if (!newGroupName.trim() || selections.length === 0) return;
     const onTime24 = to24h(newGroupOnTime);
     const offTime24 = to24h(newGroupOffTime);
+    const entriesMap = new Map<string, number[]>();
+    selections.forEach(sel => {
+      const list = entriesMap.get(sel.agentId) || [];
+      list.push(sel.relayId);
+      entriesMap.set(sel.agentId, list);
+    });
+    const entries = Array.from(entriesMap.entries()).map(([agentId, relayIds]) => ({ agentId, relayIds }));
     const payload: Omit<RelayGroup, 'id'> = {
       name: newGroupName.trim(),
-      relayIds: newGroupRelayIds,
+      entries,
+      relayIds: entries.flatMap(e => e.relayIds),
       onTime: onTime24,
       offTime: offTime24,
       days: newGroupDays,
       active: Boolean(onTime24 || offTime24)
     };
     const added = await ApiService.addGroup(primaryAgentId, payload);
-    setGroups(prev => [...prev, added]);
+    setGroups(prev => [...prev, normalizeGroupPayload(added, primaryAgentId)]);
     setActiveTab(Tab.SCHEDULE);
     // reset form
     setNewGroupName('New Group');
-    setNewGroupRelayIds([]);
+    setNewGroupSelections([]);
     setGroupSelectionTouched(false);
     setNewGroupOnTime('');
     setNewGroupOffTime('');
@@ -474,26 +531,44 @@ const App: React.FC = () => {
   const handleUpdateGroup = async (groupId: string, updates: Partial<RelayGroup>) => {
     const existing = groups.find(g => g.id === groupId);
     if (!existing) return;
-    const visibleSet = new Set(relays.filter(r => !r.isHidden).map(r => r.id));
-    const sanitizedRelayIds = updates.relayIds
-      ? updates.relayIds.filter(id => visibleSet.has(id))
-      : existing.relayIds.filter(id => visibleSet.has(id));
+    const visibleMap = new Map<string, Set<number>>();
+    laundries.forEach(l => {
+      visibleMap.set(l.id, new Set((l.relays || []).filter(r => !r.isHidden).map(r => r.id)));
+    });
+
+    const requestedEntries = Array.isArray((updates as any)?.entries) ? (updates as any).entries as RelayGroup['entries'] : undefined;
+    const fallbackRelayIds = updates.relayIds ?? existing.relayIds ?? [];
+
+    let entries: RelayGroup['entries'] = requestedEntries && requestedEntries.length
+      ? requestedEntries.map(e => ({ agentId: e.agentId, relayIds: Array.isArray(e.relayIds) ? e.relayIds.map(Number) : [] }))
+      : (existing.entries && existing.entries.length
+        ? existing.entries
+        : [{ agentId: primaryAgentId, relayIds: fallbackRelayIds.map(Number) }]);
+
+    entries = entries.map(e => {
+      const allowed = visibleMap.get(e.agentId);
+      const relayIds = allowed ? Array.from(new Set(e.relayIds.filter(id => allowed.has(id)))) : [];
+      return { ...e, relayIds };
+    }).filter(e => e.relayIds.length);
+
     const next: RelayGroup = {
       ...existing,
       ...updates,
-      relayIds: sanitizedRelayIds,
+      entries,
+      relayIds: entries.flatMap(e => e.relayIds),
       onTime: updates.onTime === undefined ? existing.onTime : to24h(updates.onTime),
       offTime: updates.offTime === undefined ? existing.offTime : to24h(updates.offTime),
     };
     const saved = await ApiService.updateGroup(primaryAgentId, groupId, {
       name: next.name,
+      entries: next.entries,
       relayIds: next.relayIds,
       onTime: next.onTime || null,
       offTime: next.offTime || null,
       days: next.days,
       active: next.active
     });
-    setGroups(prev => prev.map(g => g.id === groupId ? saved : g));
+    setGroups(prev => prev.map(g => g.id === groupId ? normalizeGroupPayload(saved, primaryAgentId) : g));
   };
 
   const handleDeleteGroup = async (id: string) => {
@@ -504,12 +579,20 @@ const App: React.FC = () => {
   const handleToggleGroupPower = async (id: string, action: 'ON' | 'OFF') => {
     if (!serverOnline) return;
     const group = groups.find(g => g.id === id);
-    const memberSet = new Set(group?.relayIds || []);
-    setRelays(prev => {
-      const updated = prev.map(r => (memberSet.has(r.id) ? { ...r, isOn: action === 'ON' } : r));
-      latestRelaysRef.current = updated;
-      return updated;
+    const targetEntries = group?.entries || [];
+    const desiredOn = action === 'ON';
+
+    targetEntries.forEach(entry => {
+      updateLaundryRelays(entry.agentId, rels => rels.map(r => entry.relayIds.includes(r.id) ? { ...r, isOn: desiredOn } : r));
+      if (entry.agentId === primaryAgentId) {
+        setRelays(prev => {
+          const updated = prev.map(r => entry.relayIds.includes(r.id) ? { ...r, isOn: desiredOn } : r);
+          latestRelaysRef.current = updated;
+          return updated;
+        });
+      }
     });
+
     try {
       await ApiService.toggleGroup(primaryAgentId, id, action);
     } catch (err) {
@@ -609,7 +692,11 @@ const App: React.FC = () => {
   );
 
   const renderScheduler = () => {
-    const visibleRelays = relays.filter(r => !r.isHidden);
+    const visibleByLaundry = laundries.map(l => ({
+      ...l,
+      visibleRelays: (l.relays || []).filter(r => !r.isHidden),
+    }));
+    const selectionSet = new Set(newGroupSelections.map(sel => selectionKey(sel.agentId, sel.relayId)));
     return (
       <div className="space-y-6 max-w-full overflow-hidden">
         <div className="space-y-3 max-w-full overflow-hidden">
@@ -627,45 +714,74 @@ const App: React.FC = () => {
                 placeholder="Group name"
               />
               <div>
-                <div className="flex items-center justify-between mb-2">
-                  <p className="text-sm text-slate-300">Devices</p>
-                  <div className="flex gap-2 text-xs">
-                    <button
-                      onClick={() => setNewGroupRelayIds(visibleRelays.map(r => r.id))}
-                      onMouseDown={() => setGroupSelectionTouched(true)}
-                      disabled={controlsDisabled}
-                      className="px-2 py-1 rounded-md border border-slate-600 text-slate-300 hover:border-slate-500 hover:text-white transition-colors"
-                    >
-                      Select all
-                    </button>
-                    <button
-                      onClick={() => setNewGroupRelayIds([])}
-                      onMouseDown={() => setGroupSelectionTouched(true)}
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="text-sm text-slate-300">Laundries</p>
+                    <div className="flex gap-2 text-xs">
+                      <button
+                        onClick={() => {
+                          setGroupSelectionTouched(true);
+                          const allVisible = visibleByLaundry.flatMap(l => l.visibleRelays.map(r => ({ agentId: l.id, relayId: r.id })));
+                          setNewGroupSelections(dedupeSelections(allVisible));
+                        }}
+                        disabled={controlsDisabled}
+                        className="px-2 py-1 rounded-md border border-slate-600 text-slate-300 hover:border-slate-500 hover:text-white transition-colors"
+                      >
+                        Select all
+                      </button>
+                      <button
+                      onClick={() => setNewGroupSelections([])}
                       disabled={controlsDisabled}
                       className="px-2 py-1 rounded-md border border-slate-600 text-slate-300 hover:border-slate-500 hover:text-white transition-colors"
                     >
                       Deselect all
                     </button>
-                  </div>
+                    </div>
                 </div>
-                <div className="flex gap-2 flex-wrap">
-                  {visibleRelays.map(relay => (
-                    <button
-                      key={relay.id}
-                      onClick={() => {
-                        setGroupSelectionTouched(true);
-                        setNewGroupRelayIds(prev => prev.includes(relay.id) ? prev.filter(id => id !== relay.id) : [...prev, relay.id]);
-                      }}
-                      disabled={controlsDisabled}
-                      className={`px-3 py-2 rounded-lg text-xs font-medium border transition-colors flex items-center gap-2 ${newGroupRelayIds.includes(relay.id) ? 'bg-indigo-600 text-white border-indigo-500' : 'bg-slate-900/40 text-slate-300 border-slate-700 hover:border-slate-600'}`}
-                    >
-                      <span
-                        className="w-2 h-2 rounded-full"
-                        style={relay.isOn ? { backgroundColor: '#34d399', boxShadow: '0 0 8px rgba(52, 211, 153, 0.7)' } : { backgroundColor: '#64748b' }}
-                      />
-                      {relay.name}
-                    </button>
-                  ))}
+                <div className="space-y-3">
+                  {visibleByLaundry.map(l => {
+                    const fresh = l.lastHeartbeat ? (Date.now() - l.lastHeartbeat) < AGENT_STALE_MS : false;
+                    const online = serverOnline && l.isOnline && fresh;
+                    return (
+                      <div key={`laundry-select-${l.id}`} className="bg-slate-900/40 border border-slate-700 rounded-lg p-3 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="text-sm text-slate-200">{l.name}</span>
+                          <span className={`text-[11px] px-2 py-0.5 rounded-full border ${online ? 'border-emerald-500 text-emerald-200 bg-emerald-500/10' : 'border-slate-600 text-slate-400'}`}>
+                            {online ? 'Online' : 'Offline'}
+                          </span>
+                        </div>
+                        <div className="flex gap-2 flex-wrap">
+                          {l.visibleRelays.length === 0 && <span className="text-xs text-slate-500">No relays</span>}
+                          {l.visibleRelays.map(relay => {
+                            const key = selectionKey(l.id, relay.id);
+                            const selected = selectionSet.has(key);
+                            return (
+                              <button
+                                key={`${l.id}-relay-${relay.id}`}
+                                onClick={() => {
+                                  setGroupSelectionTouched(true);
+                                  setNewGroupSelections(prev => {
+                                    const exists = prev.some(s => selectionKey(s.agentId, s.relayId) === key);
+                                    const next = exists
+                                      ? prev.filter(s => selectionKey(s.agentId, s.relayId) !== key)
+                                      : [...prev, { agentId: l.id, relayId: relay.id }];
+                                    return dedupeSelections(next);
+                                  });
+                                }}
+                                disabled={controlsDisabled}
+                                className={`px-3 py-2 rounded-lg text-xs font-medium border transition-colors flex items-center gap-2 ${
+                                  selected ? 'bg-indigo-600 text-white border-indigo-500' : 'bg-slate-900/40 text-slate-300 border-slate-700 hover:border-slate-600'
+                                } ${controlsDisabled ? 'opacity-60 cursor-not-allowed' : ''}`}
+                              >
+                                <span className={`w-2 h-2 rounded-full ${relay.isOn ? 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.7)]' : 'bg-slate-500'}`}></span>
+                                {relay.name}
+                                <span className="text-[10px] text-slate-400">#{relay.id}</span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
 
@@ -741,7 +857,7 @@ const App: React.FC = () => {
               <button
                 onClick={handleAddGroup}
                 className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-sm font-semibold transition-colors disabled:opacity-50"
-                disabled={!newGroupName.trim() || newGroupRelayIds.length === 0 || controlsDisabled}
+                disabled={!newGroupName.trim() || newGroupSelections.length === 0 || controlsDisabled}
               >
                 Save Group
               </button>
@@ -756,7 +872,9 @@ const App: React.FC = () => {
             </div>
           ) : (
             groups.map(group => {
-              const selectedRelayIds = group.relayIds || [];
+              const selectedSet = new Set(
+                (group.entries || []).flatMap(e => (e.relayIds || []).map(id => selectionKey(e.agentId, id)))
+              );
               return (
                 <div key={group.id} className="bg-slate-800 p-4 rounded-xl border border-slate-700 space-y-3">
                   <div className="flex justify-between gap-3 items-start">
@@ -791,30 +909,57 @@ const App: React.FC = () => {
                     </div>
                   </div>
 
-                  <div className="flex gap-2 flex-wrap">
-                    {visibleRelays.map(relay => (
-                      <button
-                        key={relay.id}
-                        onClick={() => {
-                          if (editingGroupId !== group.id) return;
-                          const next = selectedRelayIds.includes(relay.id)
-                            ? selectedRelayIds.filter(id => id !== relay.id)
-                            : [...selectedRelayIds, relay.id];
-                          setGroups(prev => prev.map(g => g.id === group.id ? { ...g, relayIds: next } : g));
-                          handleUpdateGroup(group.id, { relayIds: next });
-                        }}
-                        disabled={controlsDisabled || editingGroupId !== group.id}
-                        className={`px-3 py-2 rounded-lg text-xs font-medium border transition-colors flex items-center gap-2 ${
-                          selectedRelayIds.includes(relay.id) ? 'bg-indigo-600 text-white border-indigo-500' : 'bg-slate-900/40 text-slate-300 border-slate-700 hover:border-slate-600'
-                        } ${editingGroupId === group.id ? '' : 'opacity-60 cursor-not-allowed'}`}
-                      >
-                        <span
-                          className="w-2 h-2 rounded-full"
-                          style={relay.isOn ? { backgroundColor: '#34d399', boxShadow: '0 0 8px rgba(52, 211, 153, 0.7)' } : { backgroundColor: '#64748b' }}
-                        />
-                        {relay.name}
-                      </button>
-                    ))}
+                  <div className="space-y-2">
+                    {visibleByLaundry.map(l => {
+                      return (
+                        <div key={`group-${group.id}-${l.id}`} className="bg-slate-900/40 border border-slate-700 rounded-lg p-3">
+                          <div className="text-xs text-slate-300 mb-2">{l.name}</div>
+                          <div className="flex gap-2 flex-wrap">
+                            {l.visibleRelays.length === 0 && <span className="text-xs text-slate-500">No relays</span>}
+                            {l.visibleRelays.map(relay => {
+                              const key = selectionKey(l.id, relay.id);
+                              const selected = selectedSet.has(key);
+                              return (
+                                <button
+                                  key={key}
+                                  onClick={() => {
+                                    if (editingGroupId !== group.id) return;
+                                    setGroups(prev => prev.map(g => {
+                                      if (g.id !== group.id) return g;
+                                      const entriesMap = new Map<string, number[]>();
+                                      const baseEntries = g.entries && g.entries.length ? g.entries : [{ agentId: l.id, relayIds: [] }];
+                                      baseEntries.forEach(e => entriesMap.set(e.agentId, [...e.relayIds]));
+                                      const list = entriesMap.get(l.id) || [];
+                                      const exists = list.includes(relay.id);
+                                      const nextList = exists ? list.filter(r => r !== relay.id) : [...list, relay.id];
+                                      entriesMap.set(l.id, nextList);
+                                      const entriesArr = Array.from(entriesMap.entries()).map(([agentId, relayIds]) => ({
+                                        agentId,
+                                        relayIds: relayIds.filter(Boolean),
+                                      })).filter(e => e.relayIds.length);
+                                      const nextGroup = { ...g, entries: entriesArr, relayIds: entriesArr.flatMap(e => e.relayIds) };
+                                      handleUpdateGroup(group.id, { entries: entriesArr });
+                                      return nextGroup;
+                                    }));
+                                  }}
+                                  disabled={controlsDisabled || editingGroupId !== group.id}
+                                  className={`px-3 py-2 rounded-lg text-xs font-medium border transition-colors flex items-center gap-2 ${
+                                    selected ? 'bg-indigo-600 text-white border-indigo-500' : 'bg-slate-900/40 text-slate-300 border-slate-700 hover:border-slate-600'
+                                  } ${editingGroupId === group.id ? '' : 'opacity-60 cursor-not-allowed'}`}
+                                >
+                                  <span
+                                    className="w-2 h-2 rounded-full"
+                                    style={relay.isOn ? { backgroundColor: '#34d399', boxShadow: '0 0 8px rgba(52, 211, 153, 0.7)' } : { backgroundColor: '#64748b' }}
+                                  />
+                                  {relay.name}
+                                  <span className="text-[10px] text-slate-400">#{relay.id}</span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
 
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-full">
@@ -1005,7 +1150,7 @@ const App: React.FC = () => {
                     <div className="flex flex-col leading-tight">
                       <p className="text-xs text-slate-300 flex items-center gap-1">
                         {mock ? <Server className="w-3 h-3" /> : <Cpu className="w-3 h-3" />}
-                        {l.name} ({l.id}) {online ? 'online' : 'offline'}
+                        {l.name} {online ? 'online' : 'offline'}
                       </p>
                       <p className="text-[11px] text-slate-500">
                         {mock ? 'Mock mode (no GPIO)' : 'Hardware connected'}

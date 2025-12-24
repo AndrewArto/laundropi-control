@@ -3,7 +3,7 @@ import express = require('express');
 import cors = require('cors');
 import { WebSocketServer, WebSocket } from 'ws';
 import * as dotenv from 'dotenv';
-import { listAgents, updateHeartbeat, saveMeta, getAgent, updateRelayMeta, listSchedules, upsertSchedule, deleteSchedule, listGroups, upsertGroup, deleteGroup, GroupRow, deleteAgent } from './db';
+import { listAgents, updateHeartbeat, saveMeta, getAgent, updateRelayMeta, listSchedules, upsertSchedule, deleteSchedule, listGroups, listGroupsForMembership, upsertGroup, deleteGroup, GroupRow, deleteAgent } from './db';
 
 dotenv.config();
 
@@ -40,8 +40,18 @@ const normalizeTime = (val?: string | null): string | null => {
 const normalizeGroupTimes = (group: GroupRow): GroupRow => {
   const onTime = normalizeTime(group.onTime);
   const offTime = normalizeTime(group.offTime);
+  const entries = Array.isArray(group.entries)
+    ? group.entries.map(e => ({
+        agentId: e.agentId,
+        relayIds: Array.isArray(e.relayIds) ? e.relayIds.map((rid: any) => Number(rid)) : [],
+      })).filter(e => e.agentId && e.relayIds.length)
+    : (Array.isArray(group.relayIds) && group.relayIds.length
+      ? [{ agentId: group.agentId, relayIds: group.relayIds }]
+      : []);
   const normalized: GroupRow = {
     ...group,
+    agentId: group.agentId || entries[0]?.agentId || '',
+    entries,
     relayIds: Array.isArray(group.relayIds) ? group.relayIds : [],
     days: Array.isArray(group.days) ? group.days : [],
     onTime,
@@ -50,15 +60,16 @@ const normalizeGroupTimes = (group: GroupRow): GroupRow => {
   };
 
   // Persist cleanup so future reads return valid HH:mm strings
-  if (onTime !== group.onTime || offTime !== group.offTime) {
+  const entriesChanged = JSON.stringify(entries) !== JSON.stringify(group.entries || []);
+  if (onTime !== group.onTime || offTime !== group.offTime || entriesChanged) {
     upsertGroup(normalized);
   }
 
   return normalized;
 };
 
-const getNormalizedGroups = (agentId: string): GroupRow[] => {
-  return listGroups(agentId).map(normalizeGroupTimes);
+const getNormalizedGroups = (ownerId?: string): GroupRow[] => {
+  return listGroups(ownerId).map(normalizeGroupTimes);
 };
 
 const buildSchedulePayload = (agentId: string) => {
@@ -67,14 +78,18 @@ const buildSchedulePayload = (agentId: string) => {
     relayId: s.relayId,
     entries: [{ days: s.days, from: s.from, to: s.to }]
   }));
-  const groupBased = getNormalizedGroups(agentId)
-    .filter(g => g.active && g.onTime && g.offTime && (g.relayIds || []).length)
-    .flatMap(g =>
-      (g.relayIds || []).map(rid => ({
+  const groupBased = listGroupsForMembership(agentId)
+    .map(normalizeGroupTimes)
+    .filter(g => g.active && g.onTime && g.offTime)
+    .flatMap(g => {
+      const entry = (g.entries || []).find(e => e.agentId === agentId);
+      const relays = entry?.relayIds || [];
+      const days = g.days && g.days.length ? g.days : ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+      return relays.map(rid => ({
         relayId: rid,
-        entries: [{ days: g.days && g.days.length ? g.days : ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'], from: g.onTime!, to: g.offTime! }]
-      }))
-    );
+        entries: [{ days, from: g.onTime!, to: g.offTime! }]
+      }));
+    });
   return [...explicit, ...groupBased];
 };
 
@@ -165,9 +180,10 @@ app.get('/api/dashboard', (req, res) => {
     action: 'ON',
     active: s.active,
   }));
-  const groups = getNormalizedGroups(agentId).map(g => ({
+  const groups = getNormalizedGroups().map(g => ({
     id: g.id,
     name: g.name,
+    entries: g.entries || [{ agentId: g.agentId, relayIds: g.relayIds || [] }],
     relayIds: g.relayIds,
     onTime: g.onTime,
     offTime: g.offTime,
@@ -251,31 +267,55 @@ app.delete('/api/agents/:id/schedules/:sid', (req, res) => {
 
 // --- GROUPS API ---
 app.get('/api/agents/:id/groups', (req, res) => {
-  const list = getNormalizedGroups(req.params.id);
+  const list = getNormalizedGroups();
   res.json(list);
 });
 
 app.post('/api/agents/:id/groups', (req, res) => {
   const agentId = req.params.id;
-  const { name, relayIds, onTime, offTime, days, active } = req.body || {};
-  if (!name || !Array.isArray(relayIds) || relayIds.length === 0) return res.status(400).json({ error: 'name and relayIds required' });
+  const { name, entries, relayIds, onTime, offTime, days, active } = req.body || {};
+  const normalizedEntries = Array.isArray(entries) && entries.length
+    ? entries.map((e: any) => ({ agentId: e.agentId, relayIds: Array.isArray(e.relayIds) ? e.relayIds.map((rid: any) => Number(rid)) : [] }))
+    : [{ agentId, relayIds: Array.isArray(relayIds) ? relayIds.map((rid: any) => Number(rid)) : [] }];
+  const filteredEntries = normalizedEntries.filter((e: any) => e.agentId && Array.isArray(e.relayIds) && e.relayIds.length);
+  if (!name || filteredEntries.length === 0) return res.status(400).json({ error: 'name and entries required' });
   const id = req.body?.id || `${Date.now()}`;
-  const payload = { id, agentId, name, relayIds, onTime: normalizeTime(onTime), offTime: normalizeTime(offTime), days: days || [], active: Boolean(active) };
+  const payload: GroupRow = {
+    id,
+    agentId,
+    name,
+    relayIds: filteredEntries.flatMap((e: any) => e.relayIds),
+    entries: filteredEntries,
+    onTime: normalizeTime(onTime),
+    offTime: normalizeTime(offTime),
+    days: days || [],
+    active: Boolean(active)
+  };
   upsertGroup(payload);
   console.log(`[central] group created agent=${agentId} id=${id} name=${name}`);
-  pushSchedulesToAgent(agentId);
+  const targets = Array.from(new Set(filteredEntries.map((e: any) => e.agentId)));
+  targets.forEach(pushSchedulesToAgent);
   res.json(payload);
 });
 
 app.put('/api/agents/:id/groups/:gid', (req, res) => {
   const agentId = req.params.id;
   const gid = req.params.gid;
-  const existing = getNormalizedGroups(agentId).find(g => g.id === gid);
+  const existing = getNormalizedGroups().find(g => g.id === gid);
   if (!existing) return res.status(404).json({ error: 'group not found' });
+  const requestedEntries = Array.isArray(req.body?.entries) ? req.body.entries : existing.entries;
+  const normalizedEntries = Array.isArray(requestedEntries)
+    ? requestedEntries.map((e: any) => ({
+        agentId: e.agentId,
+        relayIds: Array.isArray(e.relayIds) ? e.relayIds.map((rid: any) => Number(rid)) : [],
+      }))
+    : existing.entries;
+  const filteredEntries = normalizedEntries.filter(e => e.agentId && e.relayIds.length);
   const payload = {
     ...existing,
     name: req.body?.name || existing.name,
-    relayIds: Array.isArray(req.body?.relayIds) ? req.body.relayIds : existing.relayIds,
+    entries: filteredEntries,
+    relayIds: filteredEntries.flatMap(e => e.relayIds),
     onTime: req.body?.onTime !== undefined ? normalizeTime(req.body.onTime) : existing.onTime,
     offTime: req.body?.offTime !== undefined ? normalizeTime(req.body.offTime) : existing.offTime,
     days: Array.isArray(req.body?.days) ? req.body.days : existing.days,
@@ -283,29 +323,39 @@ app.put('/api/agents/:id/groups/:gid', (req, res) => {
   };
   upsertGroup(payload);
   console.log(`[central] group updated agent=${agentId} id=${gid}`);
-  pushSchedulesToAgent(agentId);
+  const targets = Array.from(new Set(payload.entries.map(e => e.agentId)));
+  targets.forEach(pushSchedulesToAgent);
   res.json(payload);
 });
 
 app.delete('/api/agents/:id/groups/:gid', (req, res) => {
-  deleteGroup(req.params.id, req.params.gid);
-  console.log(`[central] group deleted agent=${req.params.id} id=${req.params.gid}`);
-  pushSchedulesToAgent(req.params.id);
+  const { id: agentId, gid } = { id: req.params.id, gid: req.params.gid };
+  const existing = getNormalizedGroups().find(g => g.id === gid);
+  deleteGroup(agentId, gid);
+  console.log(`[central] group deleted agent=${agentId} id=${gid}`);
+  const targets = existing ? Array.from(new Set(existing.entries.map(e => e.agentId))) : [agentId];
+  targets.forEach(pushSchedulesToAgent);
   res.json({ ok: true });
 });
 
 app.post('/api/agents/:id/groups/:gid/action', (req, res) => {
-  const agentId = req.params.id;
   const gid = req.params.gid;
   const action = req.body?.action === 'ON' ? 'on' : 'off';
-  const group = getNormalizedGroups(agentId).find(g => g.id === gid);
+  const group = getNormalizedGroups().find(g => g.id === gid);
   if (!group) return res.status(404).json({ error: 'group not found' });
-  const target = agents.get(agentId);
-  if (!target || target.socket.readyState !== WebSocket.OPEN) return res.status(404).json({ error: 'agent not connected' });
-  (group.relayIds || []).forEach(rid => {
-    target.socket.send(JSON.stringify({ type: 'set_relay', relayId: rid, state: action }));
+  const results: Record<string, string> = {};
+  (group.entries || []).forEach(entry => {
+    const target = agents.get(entry.agentId);
+    if (!target || target.socket.readyState !== WebSocket.OPEN) {
+      results[entry.agentId] = 'offline';
+      return;
+    }
+    entry.relayIds.forEach(rid => {
+      target.socket.send(JSON.stringify({ type: 'set_relay', relayId: rid, state: action }));
+    });
+    results[entry.agentId] = 'ok';
   });
-  res.json({ ok: true });
+  res.json({ ok: true, results });
 });
 
 const server = http.createServer(app);

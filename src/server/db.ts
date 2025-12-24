@@ -22,7 +22,8 @@ export type GroupRow = {
   id: string;
   agentId: string;
   name: string;
-  relayIds: number[];
+  relayIds?: number[];
+  entries: { agentId: string; relayIds: number[] }[];
   onTime?: string | null;
   offTime?: string | null;
   days: string[];
@@ -57,12 +58,20 @@ CREATE TABLE IF NOT EXISTS groups (
   agentId TEXT,
   name TEXT,
   relayIds TEXT,
+  entries TEXT,
   onTime TEXT,
   offTime TEXT,
   days TEXT,
   active INTEGER DEFAULT 1
 );
 `);
+
+// Best-effort migration: add entries column if missing (ignore errors)
+try {
+  db.prepare('ALTER TABLE groups ADD COLUMN entries TEXT').run();
+} catch (_) {
+  // column already exists
+}
 
 const upsertStmt = db.prepare(`
 INSERT INTO agents(agentId, secret, lastHeartbeat, lastStatus, lastMeta)
@@ -186,41 +195,73 @@ export function deleteSchedule(agentId: string, id: string) {
 }
 
 // --- GROUPS ---
-export function listGroups(agentId: string): GroupRow[] {
-  const rows = db.prepare('SELECT * FROM groups WHERE agentId = ?').all(agentId) as any[];
-  return rows.map(r => ({
-    id: r.id,
-    agentId: r.agentId,
-    name: r.name,
-    relayIds: JSON.parse(r.relayIds || '[]'),
-    onTime: r.onTime || null,
-    offTime: r.offTime || null,
-    days: JSON.parse(r.days || '[]'),
-    active: Boolean(r.active),
-  }));
+export function listGroups(agentId?: string): GroupRow[] {
+  const rows = agentId
+    ? db.prepare('SELECT * FROM groups WHERE agentId = ?').all(agentId)
+    : db.prepare('SELECT * FROM groups').all();
+  return rows.map((r: any) => {
+    const parsedEntries = r.entries ? JSON.parse(r.entries) : null;
+    const entries = Array.isArray(parsedEntries)
+      ? parsedEntries.map((e: any) => ({
+          agentId: e.agentId,
+          relayIds: Array.isArray(e.relayIds) ? e.relayIds : [],
+        }))
+      : [{
+          agentId: r.agentId,
+          relayIds: JSON.parse(r.relayIds || '[]'),
+        }];
+    return {
+      id: r.id,
+      agentId: r.agentId,
+      name: r.name,
+      relayIds: JSON.parse(r.relayIds || '[]'),
+      entries,
+      onTime: r.onTime || null,
+      offTime: r.offTime || null,
+      days: JSON.parse(r.days || '[]'),
+      active: Boolean(r.active),
+    } as GroupRow;
+  });
+}
+
+export function listGroupsForMembership(agentId: string): GroupRow[] {
+  return listGroups().map(g => ({
+    ...g,
+    entries: (g.entries || []).filter(e => e.agentId === agentId),
+  })).filter(g => g.entries.some(e => e.relayIds.length));
 }
 
 export function upsertGroup(row: GroupRow) {
+  const entries = Array.isArray(row.entries) && row.entries.length
+    ? row.entries.map(e => ({ agentId: e.agentId, relayIds: e.relayIds || [] }))
+    : [{ agentId: row.agentId, relayIds: row.relayIds || [] }];
+  const relayIdsCombined = entries.flatMap(e => e.relayIds || []);
   db.prepare(`
-    INSERT INTO groups(id, agentId, name, relayIds, onTime, offTime, days, active)
-    VALUES (@id, @agentId, @name, @relayIds, @onTime, @offTime, @days, @active)
+    INSERT INTO groups(id, agentId, name, relayIds, entries, onTime, offTime, days, active)
+    VALUES (@id, @agentId, @name, @relayIds, @entries, @onTime, @offTime, @days, @active)
     ON CONFLICT(id) DO UPDATE SET
       name=excluded.name,
       relayIds=excluded.relayIds,
+      entries=excluded.entries,
       onTime=excluded.onTime,
       offTime=excluded.offTime,
       days=excluded.days,
       active=excluded.active;
   `).run({
     ...row,
-    relayIds: JSON.stringify(row.relayIds || []),
+    relayIds: JSON.stringify(relayIdsCombined),
+    entries: JSON.stringify(entries),
     days: JSON.stringify(row.days || []),
     active: row.active ? 1 : 0,
   });
 }
 
 export function deleteGroup(agentId: string, id: string) {
-  db.prepare('DELETE FROM groups WHERE agentId = ? AND id = ?').run(agentId, id);
+  // Remove by owner hint first, then ensure deletion by id for backwards compatibility
+  if (agentId) {
+    db.prepare('DELETE FROM groups WHERE agentId = ? AND id = ?').run(agentId, id);
+  }
+  db.prepare('DELETE FROM groups WHERE id = ?').run(id);
 }
 
 // --- AGENTS ---

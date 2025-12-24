@@ -43,6 +43,17 @@ const normalizeTime = (val?: string | null) => {
   return null;
 };
 
+const toEntries = (agentId: string, group: Partial<RelayGroup>): { agentId: string; relayIds: number[] }[] => {
+  if (Array.isArray(group.entries) && group.entries.length) {
+    return group.entries.map(e => ({
+      agentId: e.agentId,
+      relayIds: Array.isArray(e.relayIds) ? e.relayIds.map(Number) : [],
+    }));
+  }
+  const ids = Array.isArray(group.relayIds) ? group.relayIds.map(Number) : [];
+  return ids.length ? [{ agentId, relayIds: ids }] : [];
+};
+
 export const ApiService = {
   async listAgents(): Promise<{ agentId: string; lastHeartbeat: number | null; online: boolean }[]> {
     const res = await request(`${API_BASE}/agents`);
@@ -142,11 +153,13 @@ export const ApiService = {
   },
 
   async addGroup(agentId: string, group: Omit<RelayGroup, 'id'>): Promise<RelayGroup> {
+    const entries = toEntries(agentId, group);
     const res = await request(`${API_BASE}/agents/${agentId}/groups`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         ...group,
+        entries,
         onTime: normalizeTime(group.onTime as any),
         offTime: normalizeTime(group.offTime as any),
       })
@@ -155,11 +168,13 @@ export const ApiService = {
   },
 
   async updateGroup(agentId: string, id: string, group: Omit<RelayGroup, 'id'>): Promise<RelayGroup> {
+    const entries = toEntries(agentId, group);
     const res = await request(`${API_BASE}/agents/${agentId}/groups/${id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         ...group,
+        entries,
         onTime: normalizeTime(group.onTime as any),
         offTime: normalizeTime(group.offTime as any),
       })
