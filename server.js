@@ -31,7 +31,7 @@ const CHANNEL_MAP = {
   4: 4,
   5: 5,
   6: 6,
-  7: undefined,
+  7: 7,
   8: 8,
 };
 const COLOR_GROUPS = ['blue','green','orange','pink'];
@@ -92,7 +92,7 @@ const INITIAL_RELAYS = [
   { id: 4, name: 'Window Neon', gpioPin: PIN_MAP[4], type: 'SIGN', iconType: 'SIGN', colorGroup: 'pink', isOn: false, channelNumber: 4, isHidden: false },
   { id: 5, name: 'Front Door Lock', gpioPin: PIN_MAP[5], type: 'DOOR', iconType: 'DOOR', colorGroup: 'green', isOn: false, channelNumber: 5, isHidden: false },
   { id: 6, name: 'Back Door Lock', gpioPin: PIN_MAP[6], type: 'DOOR', iconType: 'DOOR', colorGroup: 'green', isOn: false, channelNumber: 6, isHidden: false },
-  { id: 7, name: 'Vending Machine', gpioPin: PIN_MAP[7], type: 'MACHINE', iconType: 'MACHINE', colorGroup: null, isOn: true, channelNumber: undefined, isHidden: true },
+  { id: 7, name: 'Vending Machine', gpioPin: PIN_MAP[7], type: 'MACHINE', iconType: 'MACHINE', colorGroup: null, isOn: true, channelNumber: 7, isHidden: false },
   { id: 8, name: 'Office Fan', gpioPin: PIN_MAP[8], type: 'OTHER', iconType: 'OTHER', colorGroup: 'orange', isOn: false, channelNumber: 8, isHidden: false },
 ];
 

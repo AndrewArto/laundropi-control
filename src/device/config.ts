@@ -45,6 +45,6 @@ export const RELAYS_CONFIG: RelayConfig[] = [
   { id: 4, name: 'Window Neon', gpioPin: PIN_MAP[4], type: 'SIGN', iconType: 'SIGN', colorGroup: 'pink', channelNumber: 4, isHidden: false },
   { id: 5, name: 'Front Door Lock', gpioPin: PIN_MAP[5], type: 'DOOR', iconType: 'DOOR', colorGroup: 'green', channelNumber: 5, isHidden: false },
   { id: 6, name: 'Back Door Lock', gpioPin: PIN_MAP[6], type: 'DOOR', iconType: 'DOOR', colorGroup: 'green', channelNumber: 6, isHidden: false },
-  { id: 7, name: 'Vending Machine', gpioPin: PIN_MAP[7], type: 'MACHINE', iconType: 'MACHINE', colorGroup: null, channelNumber: undefined, isHidden: true },
+  { id: 7, name: 'Vending Machine', gpioPin: PIN_MAP[7], type: 'MACHINE', iconType: 'MACHINE', colorGroup: null, channelNumber: 7, isHidden: false },
   { id: 8, name: 'Office Fan', gpioPin: PIN_MAP[8], type: 'OTHER', iconType: 'OTHER', colorGroup: 'orange', channelNumber: 8, isHidden: false },
 ];
