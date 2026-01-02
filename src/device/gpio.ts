@@ -100,6 +100,14 @@ class GpioController {
     return RELAYS_CONFIG;
   }
 
+  isMock(): boolean {
+    return this.driver === 'mock';
+  }
+
+  getDriver(): Driver {
+    return this.driver;
+  }
+
   private writeToPin(relay: RelayConfig, state: RelayState) {
     if (this.driver === 'mock') return;
     const pinObj = this.pins.get(relay.id);

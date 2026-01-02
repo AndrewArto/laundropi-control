@@ -98,6 +98,8 @@ function sendStatus() {
       relays: gpio.getSnapshot(),
       time: new Date().toISOString(),
       meta: RELAYS_CONFIG,
+      isMock: gpio.isMock(),
+      driver: gpio.getDriver(),
       scheduleVersion,
     },
   });

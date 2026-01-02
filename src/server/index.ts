@@ -305,11 +305,13 @@ app.get('/api/dashboard', (req, res) => {
       colorGroup: meta.colorGroup || null,
     };
   });
+  const statusMock = rec?.lastStatus?.isMock;
+  const isMock = typeof statusMock === 'boolean' ? statusMock : true;
   res.json({
     relays,
     schedules,
     groups,
-    isMock: true,
+    isMock,
     agentId,
     lastHeartbeat: rec?.lastHeartbeat || null,
   });
