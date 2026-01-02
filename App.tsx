@@ -88,9 +88,9 @@ const App: React.FC = () => {
   const isRelayEditModeRef = React.useRef(false);
   const editingGroupIdRef = React.useRef<string | null>(null);
   const isAuthenticatedRef = React.useRef(false);
-  const [relayNameDrafts, setRelayNameDrafts] = useState<Record<number, string>>({});
-  const [relayVisibility, setRelayVisibility] = useState<Record<number, boolean>>({});
-  const relayVisibilityRef = React.useRef<Record<number, boolean>>({});
+  const [relayNameDrafts, setRelayNameDrafts] = useState<Record<string, string>>({});
+  const [relayVisibility, setRelayVisibility] = useState<Record<string, boolean>>({});
+  const relayVisibilityRef = React.useRef<Record<string, boolean>>({});
   const [serverOnline, setServerOnline] = useState(true);
   const [agentId, setAgentId] = useState<string | null>(null);
   const [agentHeartbeat, setAgentHeartbeat] = useState<number | null>(null);
@@ -103,12 +103,16 @@ const App: React.FC = () => {
   const [newLaundrySecret, setNewLaundrySecret] = useState(DEFAULT_AGENT_SECRET);
   const pendingRelayStatesRef = React.useRef<Map<string, { state: boolean; updatedAt: number }>>(new Map());
 
-  const applyVisibility = (list: Relay[]) => {
+  const applyVisibility = (agentId: string, list: Relay[]) => {
     const visMap = relayVisibilityRef.current;
-    return list.map(r => visMap[r.id] !== undefined ? { ...r, isHidden: visMap[r.id] } : r);
+    return list.map(r => {
+      const key = relayDraftKey(agentId, r.id);
+      return visMap[key] !== undefined ? { ...r, isHidden: visMap[key] } : r;
+    });
   };
 
   const selectionKey = (agentId: string, relayId: number) => `${agentId}__${relayId}`;
+  const relayDraftKey = (agentId: string, relayId: number) => `${agentId}::${relayId}`;
   const relayPendingKey = (agentId: string, relayId: number) => `${agentId}::${relayId}`;
   const markPendingRelayState = (agentId: string, relayId: number, isOn: boolean) => {
     pendingRelayStatesRef.current.set(relayPendingKey(agentId, relayId), { state: isOn, updatedAt: Date.now() });
@@ -409,10 +413,15 @@ const App: React.FC = () => {
     }
     // Avoid overwriting draft names while in relay edit mode
     if (!isRelayEditMode) {
-      const drafts: Record<number, string> = {};
-      const visibility: Record<number, boolean> = {};
-      relays.forEach(r => { drafts[r.id] = r.name; });
-      relays.forEach(r => { visibility[r.id] = Boolean(r.isHidden); });
+      const drafts: Record<string, string> = {};
+      const visibility: Record<string, boolean> = {};
+      laundries.forEach(l => {
+        (l.relays || []).forEach(r => {
+          const key = relayDraftKey(l.id, r.id);
+          drafts[key] = r.name;
+          visibility[key] = Boolean(r.isHidden);
+        });
+      });
       setRelayNameDrafts(drafts);
       setRelayVisibility(visibility);
     }
@@ -491,7 +500,7 @@ const App: React.FC = () => {
     if (agent === primaryAgentId) {
       setRelays(prev => {
         const next = prev.map(r => targetIds.includes(r.id) ? { ...r, isOn: action === 'ON' } : r);
-        const merged = applyVisibility(next);
+        const merged = applyVisibility(agent, next);
         latestRelaysRef.current = merged;
         return merged;
       });
@@ -501,7 +510,7 @@ const App: React.FC = () => {
 
   const handleRenameRelay = async (id: number, agent: string = primaryAgentId) => {
     if (!serverOnline) return;
-    const name = (relayNameDrafts[id] || '').trim();
+    const name = (relayNameDrafts[relayDraftKey(agent, id)] || '').trim();
     if (!name) return;
     updateLaundryRelays(agent, rels => rels.map(r => r.id === id ? { ...r, name } : r));
     if (agent === primaryAgentId) {
@@ -512,21 +521,25 @@ const App: React.FC = () => {
     latestRelaysRef.current = latestRelaysRef.current.map(r => r.id === id ? { ...r, name } : r);
   };
 
-  const handleRelayNameInput = (id: number, name: string) => {
-    setRelayNameDrafts(prev => ({ ...prev, [id]: name }));
+  const handleRelayNameInput = (agentId: string, id: number, name: string) => {
+    const key = relayDraftKey(agentId, id);
+    setRelayNameDrafts(prev => ({ ...prev, [key]: name }));
   };
 
   const handleToggleVisibility = async (id: number, agent: string = primaryAgentId) => {
     if (!serverOnline) return;
-    const newHidden = !relayVisibility[id];
-    setRelayVisibility(prev => ({ ...prev, [id]: newHidden }));
-    relayVisibilityRef.current = { ...relayVisibilityRef.current, [id]: newHidden };
+    const key = relayDraftKey(agent, id);
+    const currentHidden = relayVisibility[key];
+    const fallbackHidden = laundries.find(l => l.id === agent)?.relays.find(r => r.id === id)?.isHidden ?? false;
+    const nextHidden = currentHidden === undefined ? !fallbackHidden : !currentHidden;
+    setRelayVisibility(prev => ({ ...prev, [key]: nextHidden }));
+    relayVisibilityRef.current = { ...relayVisibilityRef.current, [key]: nextHidden };
     // Update relays locally; if unhidden, default to OFF
     if (agent === primaryAgentId) {
       setRelays(prev => {
         const next = prev.map(r => {
           if (r.id !== id) return r;
-          return { ...r, isHidden: newHidden, isOn: newHidden ? r.isOn : false };
+          return { ...r, isHidden: nextHidden, isOn: nextHidden ? r.isOn : false };
         });
         latestRelaysRef.current = next;
         return next;
@@ -541,15 +554,15 @@ const App: React.FC = () => {
           let nextEntries = (g.entries || []).map(e => {
             if (e.agentId !== agent) return e;
             const has = e.relayIds.includes(id);
-            if (newHidden && has) {
+            if (nextHidden && has) {
               return { ...e, relayIds: e.relayIds.filter(rid => rid !== id) };
             }
-            if (!newHidden && !has) {
+            if (!nextHidden && !has) {
               return { ...e, relayIds: [...e.relayIds, id] };
             }
             return e;
           }).filter(e => e.relayIds.length);
-          if (!newHidden && !hasEntry) {
+          if (!nextHidden && !hasEntry) {
             nextEntries = [...nextEntries, { agentId: agent, relayIds: [id] }];
           }
           return { ...g, entries: nextEntries, relayIds: nextEntries.flatMap(e => e.relayIds) };
@@ -565,9 +578,9 @@ const App: React.FC = () => {
       });
     }
 
-    updateLaundryRelays(agent, rels => rels.map(r => r.id === id ? { ...r, isHidden: newHidden } : r));
+    updateLaundryRelays(agent, rels => rels.map(r => r.id === id ? { ...r, isHidden: nextHidden } : r));
 
-    const updated = await ApiService.setRelayVisibility(agent, id, newHidden);
+    const updated = await ApiService.setRelayVisibility(agent, id, nextHidden);
     updateLaundryRelays(agent, rels => rels.map(r => r.id === id ? { ...r, isHidden: updated.isHidden } : r));
     if (agent === primaryAgentId) {
       setRelays(prev => prev.map(r => r.id === id ? { ...r, isHidden: updated.isHidden } : r));
@@ -768,8 +781,8 @@ const App: React.FC = () => {
                   relay={relay}
                   onToggle={() => handleToggleRelay(relay.id, laundry.id)}
                   isEditing={isRelayEditMode}
-                  nameValue={relayNameDrafts[relay.id] ?? relay.name}
-                  onNameChange={(rid, name) => handleRelayNameInput(rid, name)}
+                  nameValue={relayNameDrafts[relayDraftKey(laundry.id, relay.id)] ?? relay.name}
+                  onNameChange={(rid, name) => handleRelayNameInput(laundry.id, rid, name)}
                   onNameSave={(rid) => handleRenameRelay(rid, laundry.id)}
                   isHidden={relay.isHidden}
                   onToggleVisibility={(rid) => handleToggleVisibility(rid, laundry.id)}
