@@ -15,6 +15,7 @@ const AUTH_STORAGE_KEY = 'laundropi-auth-v1';
 const AUTH_USERNAME = (import.meta as any).env?.VITE_APP_USER ?? 'admin';
 const AUTH_PASSWORD = (import.meta as any).env?.VITE_APP_PASSWORD ?? 'laundropi';
 const AGENT_STALE_MS = 8_000;
+const PENDING_RELAY_TTL_MS = 5_000;
 const DEFAULT_AGENT_ID = (import.meta as any).env?.VITE_AGENT_ID ?? 'dev-agent';
 const LAUNDRY_NAMES_KEY = 'laundropi-laundry-names';
 const DEFAULT_AGENT_SECRET = (import.meta as any).env?.VITE_AGENT_SECRET ?? 'secret';
@@ -100,6 +101,7 @@ const App: React.FC = () => {
   const [isAddingLaundry, setIsAddingLaundry] = useState(false);
   const [newLaundryInput, setNewLaundryInput] = useState('');
   const [newLaundrySecret, setNewLaundrySecret] = useState(DEFAULT_AGENT_SECRET);
+  const pendingRelayStatesRef = React.useRef<Map<string, { state: boolean; updatedAt: number }>>(new Map());
 
   const applyVisibility = (list: Relay[]) => {
     const visMap = relayVisibilityRef.current;
@@ -107,6 +109,40 @@ const App: React.FC = () => {
   };
 
   const selectionKey = (agentId: string, relayId: number) => `${agentId}__${relayId}`;
+  const relayPendingKey = (agentId: string, relayId: number) => `${agentId}::${relayId}`;
+  const markPendingRelayState = (agentId: string, relayId: number, isOn: boolean) => {
+    pendingRelayStatesRef.current.set(relayPendingKey(agentId, relayId), { state: isOn, updatedAt: Date.now() });
+  };
+  const applyPendingRelayStates = (items: Laundry[]) => {
+    const pending = pendingRelayStatesRef.current;
+    if (!pending.size) return items;
+    const now = Date.now();
+    let mutated = false;
+    const merged = items.map(laundry => {
+      let relaysChanged = false;
+      const relays = (laundry.relays || []).map(relay => {
+        const key = relayPendingKey(laundry.id, relay.id);
+        const entry = pending.get(key);
+        if (!entry) return relay;
+        if (now - entry.updatedAt > PENDING_RELAY_TTL_MS) {
+          pending.delete(key);
+          return relay;
+        }
+        if (relay.isOn === entry.state) {
+          pending.delete(key);
+          return relay;
+        }
+        relaysChanged = true;
+        return { ...relay, isOn: entry.state };
+      });
+      if (relaysChanged) {
+        mutated = true;
+        return { ...laundry, relays };
+      }
+      return laundry;
+    });
+    return mutated ? merged : items;
+  };
   const dedupeSelections = (items: RelaySelection[]) => {
     const map = new Map<string, RelaySelection>();
     items.forEach(sel => {
@@ -205,7 +241,7 @@ const App: React.FC = () => {
         return;
       }
 
-      setLaundries(items);
+      setLaundries(applyPendingRelayStates(items));
       if (primaryData) {
         setSchedules(primaryData.schedules);
         setGroups(prev => {
@@ -433,6 +469,7 @@ const App: React.FC = () => {
     const laundry = laundries.find(l => l.id === agent);
     const current = laundry?.relays.find(r => r.id === id);
     const nextState = current?.isOn ? 'OFF' : 'ON';
+    markPendingRelayState(agent, id, nextState === 'ON');
     updateLaundryRelays(agent, rels => rels.map(r => r.id === id ? { ...r, isOn: !r.isOn } : r));
     if (agent === primaryAgentId) {
       setRelays(prev => prev.map(r => r.id === id ? { ...r, isOn: !r.isOn } : r));
@@ -444,6 +481,7 @@ const App: React.FC = () => {
 
   const handleBatchControl = async (ids: number[], action: 'ON' | 'OFF', agent: string = primaryAgentId) => {
     if (!serverOnline) return;
+    ids.forEach(id => markPendingRelayState(agent, id, action === 'ON'));
     updateLaundryRelays(agent, rels => rels.map(r => ids.includes(r.id) ? { ...r, isOn: action === 'ON' } : r));
     if (agent === primaryAgentId) {
       setRelays(prev => {
@@ -631,6 +669,7 @@ const App: React.FC = () => {
     const desiredOn = action === 'ON';
 
     targetEntries.forEach(entry => {
+      entry.relayIds.forEach(rid => markPendingRelayState(entry.agentId, rid, desiredOn));
       updateLaundryRelays(entry.agentId, rels => rels.map(r => entry.relayIds.includes(r.id) ? { ...r, isOn: desiredOn } : r));
       if (entry.agentId === primaryAgentId) {
         setRelays(prev => {
