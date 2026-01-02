@@ -17,7 +17,7 @@ const DEFAULT_PIN_MAP: Record<number, number> = {
   4: 16,
   5: 19,
   6: 20,
-  7: 12,
+  7: 21,
   8: 26,
 };
 
