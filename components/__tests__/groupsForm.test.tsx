@@ -1,0 +1,66 @@
+import React from 'react';
+import { describe, it, expect, beforeEach } from 'vitest';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import '@testing-library/jest-dom';
+
+const mocks = vi.hoisted(() => {
+  const addGroup = vi.fn().mockResolvedValue({ id: '1', name: 'g', entries: [], days: [], active: false });
+  const getStatus = vi.fn().mockImplementation(async () => {
+    const payload = {
+      relays: [{ id: 1, name: 'R1', gpioPin: 1, type: 'LIGHT', isOn: false }],
+      schedules: [],
+      groups: [],
+      isMock: true,
+      agentId: 'Brandoa_1',
+      lastHeartbeat: Date.now(),
+    };
+    return payload;
+  });
+  return { addGroup, getStatus };
+});
+
+vi.mock('../../services/api', () => ({
+  ApiService: {
+    addGroup: mocks.addGroup,
+    getStatus: mocks.getStatus,
+  },
+}));
+
+// Render App directly; for the test we only check the form logic
+import App from '../../App';
+
+describe('Groups form validation', () => {
+  beforeEach(() => {
+    vi.stubGlobal('localStorage', {
+      store: {} as Record<string, string>,
+      getItem(key: string) { return this.store[key]; },
+      setItem(key: string, val: string) { this.store[key] = val; },
+      removeItem(key: string) { delete this.store[key]; },
+      clear() { this.store = {}; },
+    });
+    // mark authenticated
+    (window.localStorage as any).setItem('laundropi-auth-v1', '');
+  });
+
+  it('does not submit when group name is empty', async () => {
+    render(<App />);
+    const loginInput = await screen.findByPlaceholderText(/логин/i);
+    const passInput = await screen.findByPlaceholderText(/пароль/i);
+    fireEvent.change(loginInput, { target: { value: 'admin' } });
+    fireEvent.change(passInput, { target: { value: 'laundropi' } });
+    fireEvent.click(screen.getByText(/Войти/i));
+
+    const groupsTab = await screen.findByText(/Groups/i, undefined, { timeout: 5000 });
+    fireEvent.click(groupsTab);
+
+    const addBtn = await screen.findByRole('button', { name: /Add Group/i, timeout: 5000 });
+    await waitFor(() => expect(addBtn).not.toBeDisabled(), { timeout: 5000 });
+    fireEvent.click(addBtn);
+
+    const nameInput = await screen.findByPlaceholderText(/Group name/i, undefined, { timeout: 2000 });
+    fireEvent.change(nameInput, { target: { value: '' } });
+
+    const saveBtn = screen.getByText(/Save Group/i);
+    expect(saveBtn).toBeDisabled();
+  });
+});

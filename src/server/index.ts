@@ -3,7 +3,8 @@ import express = require('express');
 import cors = require('cors');
 import { WebSocketServer, WebSocket } from 'ws';
 import * as dotenv from 'dotenv';
-import { listAgents, updateHeartbeat, saveMeta, getAgent, updateRelayMeta, listSchedules, upsertSchedule, deleteSchedule, listGroups, listGroupsForMembership, upsertGroup, deleteGroup, GroupRow, deleteAgent } from './db';
+import * as crypto from 'crypto';
+import { listAgents, updateHeartbeat, saveMeta, getAgent, updateRelayMeta, listSchedules, upsertSchedule, deleteSchedule, listGroups, listGroupsForMembership, upsertGroup, deleteGroup, GroupRow, deleteAgent, upsertAgent, upsertCommand, listPendingCommands, deleteCommand, updateCommandsForRelay, expireOldCommands } from './db';
 
 dotenv.config();
 
@@ -72,6 +73,91 @@ const getNormalizedGroups = (ownerId?: string): GroupRow[] => {
   return listGroups(ownerId).map(normalizeGroupTimes);
 };
 
+const desiredStateKey = (agentId: string, relayId: number) => `${agentId}::${relayId}`;
+
+const updateDesiredState = (agentId: string, relayId: number, desired: 'on' | 'off') => {
+  const agent = getAgent(agentId);
+  const desiredMap = new Map<string, 'on' | 'off'>();
+  if (agent?.desiredState) {
+    Object.entries(agent.desiredState).forEach(([k, v]) => {
+      if (v === 'on' || v === 'off') desiredMap.set(k, v);
+    });
+  }
+  desiredMap.set(desiredStateKey(agentId, relayId), desired);
+  upsertAgent({
+    agentId,
+    secret: agent?.secret || '',
+    lastHeartbeat: agent?.lastHeartbeat || null,
+    lastStatus: agent?.lastStatus || null,
+    lastMeta: agent?.lastMeta || null,
+    desiredState: Object.fromEntries(desiredMap),
+    reportedState: agent?.reportedState || null,
+  });
+};
+
+const reconcileOnConnect = (agentId: string) => {
+  const agent = getAgent(agentId);
+  if (!agent?.desiredState || !agents.has(agentId)) return;
+  const target = agents.get(agentId);
+  if (!target || target.socket.readyState !== WebSocket.OPEN) return;
+  const desiredEntries = Object.entries(agent.desiredState) as [string, any][];
+  desiredEntries.forEach(([key, val]) => {
+    const [aId, ridStr] = key.split('::');
+    if (aId !== agentId) return;
+    const rid = Number(ridStr);
+    if (!Number.isFinite(rid)) return;
+    if (val === 'on' || val === 'off') {
+      target.socket.send(JSON.stringify({ type: 'set_relay', relayId: rid, state: val }));
+    }
+  });
+};
+
+const reconcileOnHeartbeat = (agentId: string, reportedRelays: any[]) => {
+  const agent = getAgent(agentId);
+  if (!agent) return;
+  const desiredMap = new Map<string, 'on' | 'off'>();
+  if (agent.desiredState) {
+    Object.entries(agent.desiredState).forEach(([k, v]) => {
+      if (v === 'on' || v === 'off') desiredMap.set(k, v);
+    });
+  }
+  const reportedMap = new Map<number, string>();
+  reportedRelays.forEach((r: any) => {
+    if (r && typeof r.id === 'number' && (r.state === 'on' || r.state === 'off')) {
+      reportedMap.set(r.id, r.state);
+    }
+  });
+
+  const target = agents.get(agentId);
+  const socketReady = target?.socket.readyState === WebSocket.OPEN;
+
+  desiredMap.forEach((desired, key) => {
+    const [aId, ridStr] = key.split('::');
+    if (aId !== agentId) return;
+    const rid = Number(ridStr);
+    if (!Number.isFinite(rid)) return;
+    const reported = reportedMap.get(rid);
+    if (reported === desired) {
+      // ack and clear
+      updateCommandsForRelay(agentId, rid, 'acked');
+      desiredMap.delete(key);
+    } else if (socketReady) {
+      // resend
+      target!.socket.send(JSON.stringify({ type: 'set_relay', relayId: rid, state: desired }));
+      const cmdId = `${Date.now()}-${agentId}-${rid}`;
+      upsertCommand({ id: cmdId, agentId, relayId: rid, desiredState: desired, status: 'sent', createdAt: Date.now(), expiresAt: Date.now() + 30_000 });
+    }
+  });
+
+  expireOldCommands();
+
+  upsertAgent({
+    ...agent,
+    desiredState: Object.fromEntries(desiredMap),
+    reportedState: { relays: reportedRelays },
+  });
+};
+
 const buildSchedulePayload = (agentId: string) => {
   // Merge explicit schedules + derived from groups with on/off time
   const explicit = listSchedules(agentId).map(s => ({
@@ -89,7 +175,7 @@ const buildSchedulePayload = (agentId: string) => {
         relayId: rid,
         entries: [{ days, from: g.onTime!, to: g.offTime! }]
       }));
-    });
+  });
   return [...explicit, ...groupBased];
 };
 
@@ -97,10 +183,22 @@ const pushSchedulesToAgent = (agentId: string) => {
   const target = agents.get(agentId);
   if (target?.socket.readyState === WebSocket.OPEN) {
     const scheds = buildSchedulePayload(agentId);
+    const version = crypto.createHash('md5').update(JSON.stringify(scheds)).digest('hex');
+    const agent = getAgent(agentId);
+    upsertAgent({
+      agentId,
+      secret: agent?.secret || '',
+      lastHeartbeat: agent?.lastHeartbeat || null,
+      lastStatus: agent?.lastStatus || null,
+      lastMeta: agent?.lastMeta || null,
+      desiredState: agent?.desiredState || null,
+      reportedState: agent?.reportedState || null,
+      scheduleVersion: version,
+    });
     if (process.env.SCHEDULE_DEBUG === '1' || process.env.SCHEDULE_DEBUG === 'true') {
-      console.log('[central] pushSchedulesToAgent', agentId, JSON.stringify(scheds, null, 2));
+      console.log('[central] pushSchedulesToAgent', agentId, version, JSON.stringify(scheds, null, 2));
     }
-    target.socket.send(JSON.stringify({ type: 'update_schedule', schedules: scheds }));
+    target.socket.send(JSON.stringify({ type: 'update_schedule', schedules: scheds, version }));
   }
 };
 
@@ -165,6 +263,9 @@ app.post('/api/agents/:id/relays/:relayId/state', (req, res) => {
   }
   const state = req.body?.state === 'on' ? 'on' : 'off';
   target.socket.send(JSON.stringify({ type: 'set_relay', relayId: Number(relayId), state }));
+  updateDesiredState(id, Number(relayId), state);
+  const cmdId = `${Date.now()}-${id}-${relayId}`;
+  upsertCommand({ id: cmdId, agentId: id, relayId: Number(relayId), desiredState: state, status: 'sent', createdAt: Date.now(), expiresAt: Date.now() + 30_000 });
   res.json({ ok: true, sent: { relayId: Number(relayId), state } });
 });
 
@@ -346,14 +447,17 @@ app.post('/api/agents/:id/groups/:gid/action', (req, res) => {
   const results: Record<string, string> = {};
   (group.entries || []).forEach(entry => {
     const target = agents.get(entry.agentId);
-    if (!target || target.socket.readyState !== WebSocket.OPEN) {
-      results[entry.agentId] = 'offline';
-      return;
-    }
     entry.relayIds.forEach(rid => {
-      target.socket.send(JSON.stringify({ type: 'set_relay', relayId: rid, state: action }));
+      if (target && target.socket.readyState === WebSocket.OPEN) {
+        target.socket.send(JSON.stringify({ type: 'set_relay', relayId: rid, state: action }));
+        results[entry.agentId] = 'ok';
+      } else {
+        results[entry.agentId] = 'offline';
+      }
+      updateDesiredState(entry.agentId, rid, action);
+      const cmdId = `${Date.now()}-${entry.agentId}-${rid}`;
+      upsertCommand({ id: cmdId, agentId: entry.agentId, relayId: rid, desiredState: action as 'on' | 'off', status: target ? 'sent' : 'pending', createdAt: Date.now(), expiresAt: Date.now() + 30_000 });
     });
-    results[entry.agentId] = 'ok';
   });
   res.json({ ok: true, results });
 });
@@ -383,6 +487,7 @@ wss.on('connection', (socket) => {
         agents.set(agentId, { socket, lastHeartbeat: Date.now() });
         saveMeta(agentId, msg.secret, msg.relays || null);
         console.log('[central] agent connected', agentId);
+        reconcileOnConnect(agentId);
         return;
       }
 
@@ -395,6 +500,14 @@ wss.on('connection', (socket) => {
         const record = agents.get(agentId);
         if (record) record.lastHeartbeat = Date.now();
         updateHeartbeat(agentId, msg.status);
+        const agent = getAgent(agentId);
+        if (agent) {
+          upsertAgent({
+            ...agent,
+            reportedState: { relays: msg.status?.relays || [] },
+            scheduleVersion: msg.status?.scheduleVersion || agent.scheduleVersion || null,
+          });
+        }
         const relays = Array.isArray(msg.status?.relays) ? msg.status.relays : [];
         console.log(`[central] heartbeat ${agentId} time=${msg.status?.time}`);
 
@@ -409,6 +522,17 @@ wss.on('connection', (socket) => {
           }
         });
         relayStateCache.set(agentId, nextStates);
+
+        reconcileOnHeartbeat(agentId, relays);
+
+        // Schedule version reconciliation
+        const currentVersion = crypto.createHash('md5').update(JSON.stringify(buildSchedulePayload(agentId))).digest('hex');
+        const reportedVersion = msg.status?.scheduleVersion;
+        const knownVersion = agent?.scheduleVersion;
+        if ((reportedVersion && currentVersion !== reportedVersion) || (!reportedVersion && knownVersion && knownVersion !== currentVersion)) {
+          console.log('[central] schedule version mismatch, repushing', { agentId, currentVersion, reportedVersion: reportedVersion ?? knownVersion ?? 'n/a' });
+          pushSchedulesToAgent(agentId);
+        }
         return;
       }
 
@@ -432,7 +556,11 @@ wss.on('connection', (socket) => {
   });
 });
 
-server.listen(PORT, () => {
-  console.log(`[central] HTTP+WS listening on ${PORT}`);
-  console.log(`[central] WS endpoint ws://localhost:${PORT}/agent`);
-});
+if (process.env.NODE_ENV !== 'test') {
+  server.listen(PORT, () => {
+    console.log(`[central] HTTP+WS listening on ${PORT}`);
+    console.log(`[central] WS endpoint ws://localhost:${PORT}/agent`);
+  });
+}
+
+export { app, server };

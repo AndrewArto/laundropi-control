@@ -21,8 +21,13 @@ const AGENT_WS_URL = process.env.AGENT_WS_URL || 'ws://localhost:4000/agent';
 let ws: WebSocket | null = null;
 let heartbeatTimer: NodeJS.Timeout | null = null;
 
-const scheduler = createScheduler((relayId, state) => gpio.setRelayState(relayId, state));
+const scheduler = createScheduler(
+  (relayId, state) => gpio.setRelayState(relayId, state),
+  () => gpio.getSnapshot(),
+  '/tmp/laundropi-schedule.json'
+);
 scheduler.startScheduler();
+let scheduleVersion: string | null = null;
 
 function connect() {
   console.log(`[agent] connecting to ${AGENT_WS_URL} as ${AGENT_ID}`);
@@ -74,7 +79,8 @@ function handleMessage(msg: IncomingMessage) {
   }
   if (msg.type === 'update_schedule') {
     scheduler.setSchedule(msg.schedules);
-    console.log(`[agent] update_schedule entries=${msg.schedules.length}`);
+    scheduleVersion = (msg as any).version || null;
+    console.log(`[agent] update_schedule entries=${msg.schedules.length} version=${scheduleVersion || 'n/a'}`);
     sendStatus();
   }
 }
@@ -92,6 +98,7 @@ function sendStatus() {
       relays: gpio.getSnapshot(),
       time: new Date().toISOString(),
       meta: RELAYS_CONFIG,
+      scheduleVersion,
     },
   });
 }

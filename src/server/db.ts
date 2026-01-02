@@ -6,6 +6,9 @@ export type AgentRecord = {
   lastHeartbeat: number | null;
   lastStatus: any | null;
   lastMeta: any | null;
+  desiredState: any | null;
+  reportedState: any | null;
+  scheduleVersion: string | null;
 };
 
 export type ScheduleRow = {
@@ -30,6 +33,18 @@ export type GroupRow = {
   active: boolean;
 };
 
+export type CommandStatus = 'pending' | 'sent' | 'acked' | 'failed';
+
+export type CommandRow = {
+  id: string;
+  agentId: string;
+  relayId: number;
+  desiredState: 'on' | 'off';
+  status: CommandStatus;
+  createdAt: number;
+  expiresAt: number | null;
+};
+
 const dbPath = process.env.CENTRAL_DB_PATH || './central.db';
 const db = new Database(dbPath);
 
@@ -40,7 +55,10 @@ CREATE TABLE IF NOT EXISTS agents (
   secret TEXT,
   lastHeartbeat INTEGER,
   lastStatus TEXT,
-  lastMeta TEXT
+  lastMeta TEXT,
+  desiredState TEXT,
+  reportedState TEXT,
+  scheduleVersion TEXT
 );
 
 CREATE TABLE IF NOT EXISTS schedules (
@@ -64,6 +82,16 @@ CREATE TABLE IF NOT EXISTS groups (
   days TEXT,
   active INTEGER DEFAULT 1
 );
+
+CREATE TABLE IF NOT EXISTS commands (
+  id TEXT PRIMARY KEY,
+  agentId TEXT,
+  relayId INTEGER,
+  desiredState TEXT,
+  status TEXT,
+  createdAt INTEGER,
+  expiresAt INTEGER
+);
 `);
 
 // Best-effort migration: add entries column if missing (ignore errors)
@@ -73,14 +101,28 @@ try {
   // column already exists
 }
 
+// Migrate agents table to add desiredState/reportedState/scheduleVersion if missing
+const agentColumns = db.prepare(`PRAGMA table_info(agents)`).all() as any[];
+const agentColNames = new Set(agentColumns.map(c => c.name));
+try {
+  if (!agentColNames.has('desiredState')) db.prepare('ALTER TABLE agents ADD COLUMN desiredState TEXT').run();
+  if (!agentColNames.has('reportedState')) db.prepare('ALTER TABLE agents ADD COLUMN reportedState TEXT').run();
+  if (!agentColNames.has('scheduleVersion')) db.prepare('ALTER TABLE agents ADD COLUMN scheduleVersion TEXT').run();
+} catch (_) {
+  // ignore migration errors; subsequent reads handle missing columns
+}
+
 const upsertStmt = db.prepare(`
-INSERT INTO agents(agentId, secret, lastHeartbeat, lastStatus, lastMeta)
-VALUES (@agentId, @secret, @lastHeartbeat, @lastStatus, @lastMeta)
+INSERT INTO agents(agentId, secret, lastHeartbeat, lastStatus, lastMeta, desiredState, reportedState, scheduleVersion)
+VALUES (@agentId, @secret, @lastHeartbeat, @lastStatus, @lastMeta, @desiredState, @reportedState, @scheduleVersion)
 ON CONFLICT(agentId) DO UPDATE SET
   secret=excluded.secret,
   lastHeartbeat=excluded.lastHeartbeat,
   lastStatus=excluded.lastStatus,
-  lastMeta=excluded.lastMeta;
+  lastMeta=excluded.lastMeta,
+  desiredState=excluded.desiredState,
+  reportedState=excluded.reportedState,
+  scheduleVersion=excluded.scheduleVersion;
 `);
 
 export function upsertAgent(rec: AgentRecord) {
@@ -90,6 +132,9 @@ export function upsertAgent(rec: AgentRecord) {
     lastHeartbeat: rec.lastHeartbeat ?? null,
     lastStatus: rec.lastStatus ? JSON.stringify(rec.lastStatus) : null,
     lastMeta: rec.lastMeta ? JSON.stringify(rec.lastMeta) : null,
+    desiredState: rec.desiredState ? JSON.stringify(rec.desiredState) : null,
+    reportedState: rec.reportedState ? JSON.stringify(rec.reportedState) : null,
+    scheduleVersion: rec.scheduleVersion ?? null,
   });
 }
 
@@ -101,6 +146,9 @@ export function updateHeartbeat(agentId: string, status: any) {
     lastHeartbeat: Date.now(),
     lastStatus: status,
     lastMeta: existing?.lastMeta || null,
+    desiredState: existing?.desiredState || null,
+    reportedState: status || existing?.reportedState || null,
+    scheduleVersion: existing?.scheduleVersion || null,
   });
 }
 
@@ -123,6 +171,9 @@ export function saveMeta(agentId: string, secret: string, meta: any, preferIncom
     lastHeartbeat: existing?.lastHeartbeat || null,
     lastStatus: existing?.lastStatus || null,
     lastMeta: mergedMeta,
+    desiredState: existing?.desiredState || null,
+    reportedState: existing?.reportedState || null,
+    scheduleVersion: existing?.scheduleVersion || null,
   });
 }
 
@@ -135,6 +186,9 @@ export function getAgent(agentId: string): AgentRecord | null {
     lastHeartbeat: row.lastHeartbeat,
     lastStatus: row.lastStatus ? JSON.parse(row.lastStatus) : null,
     lastMeta: row.lastMeta ? JSON.parse(row.lastMeta) : null,
+    desiredState: row.desiredState ? JSON.parse(row.desiredState) : null,
+    reportedState: row.reportedState ? JSON.parse(row.reportedState) : null,
+    scheduleVersion: row.scheduleVersion || null,
   };
 }
 
@@ -146,6 +200,9 @@ export function listAgents(): AgentRecord[] {
     lastHeartbeat: row.lastHeartbeat,
     lastStatus: row.lastStatus ? JSON.parse(row.lastStatus) : null,
     lastMeta: row.lastMeta ? JSON.parse(row.lastMeta) : null,
+    desiredState: row.desiredState ? JSON.parse(row.desiredState) : null,
+    reportedState: row.reportedState ? JSON.parse(row.reportedState) : null,
+    scheduleVersion: row.scheduleVersion || null,
   }));
 }
 
@@ -262,6 +319,43 @@ export function deleteGroup(agentId: string, id: string) {
     db.prepare('DELETE FROM groups WHERE agentId = ? AND id = ?').run(agentId, id);
   }
   db.prepare('DELETE FROM groups WHERE id = ?').run(id);
+}
+
+// --- COMMAND JOURNAL ---
+export function upsertCommand(row: CommandRow) {
+  db.prepare(`
+    INSERT INTO commands(id, agentId, relayId, desiredState, status, createdAt, expiresAt)
+    VALUES (@id, @agentId, @relayId, @desiredState, @status, @createdAt, @expiresAt)
+    ON CONFLICT(id) DO UPDATE SET
+      status=excluded.status,
+      expiresAt=excluded.expiresAt;
+  `).run(row);
+}
+
+export function listPendingCommands(agentId: string): CommandRow[] {
+  const rows = db.prepare(`SELECT * FROM commands WHERE agentId = ? AND status IN ('pending','sent')`).all(agentId) as any[];
+  return rows.map(r => ({
+    id: r.id,
+    agentId: r.agentId,
+    relayId: r.relayId,
+    desiredState: r.desiredState,
+    status: r.status,
+    createdAt: r.createdAt,
+    expiresAt: r.expiresAt,
+  }));
+}
+
+export function deleteCommand(id: string) {
+  db.prepare('DELETE FROM commands WHERE id = ?').run(id);
+}
+
+export function updateCommandsForRelay(agentId: string, relayId: number, status: 'pending' | 'sent' | 'acked' | 'failed') {
+  db.prepare(`UPDATE commands SET status = @status WHERE agentId = @agentId AND relayId = @relayId AND status IN ('pending','sent')`)
+    .run({ agentId, relayId, status });
+}
+
+export function expireOldCommands(now = Date.now()) {
+  db.prepare(`UPDATE commands SET status = ? WHERE expiresAt IS NOT NULL AND expiresAt < ? AND status IN ('pending','sent')`).run('failed', now);
 }
 
 // --- AGENTS ---

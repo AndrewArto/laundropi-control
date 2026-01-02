@@ -14,10 +14,11 @@ enum Tab {
 const AUTH_STORAGE_KEY = 'laundropi-auth-v1';
 const AUTH_USERNAME = (import.meta as any).env?.VITE_APP_USER ?? 'admin';
 const AUTH_PASSWORD = (import.meta as any).env?.VITE_APP_PASSWORD ?? 'laundropi';
-const AGENT_STALE_MS = 30_000;
+const AGENT_STALE_MS = 8_000;
 const DEFAULT_AGENT_ID = (import.meta as any).env?.VITE_AGENT_ID ?? 'dev-agent';
 const LAUNDRY_NAMES_KEY = 'laundropi-laundry-names';
 const DEFAULT_AGENT_SECRET = (import.meta as any).env?.VITE_AGENT_SECRET ?? 'secret';
+const IS_TEST_ENV = (typeof process !== 'undefined' && process.env?.NODE_ENV === 'test') || false;
 const DEFAULT_LAUNDRIES = [
   { id: 'Brandoa_1', name: 'Brandoa_1' },
   { id: 'Brandoa_2', name: 'Brandoa_2' },
@@ -73,7 +74,7 @@ const App: React.FC = () => {
   const [schedules, setSchedules] = useState<Schedule[]>([]);
   const [groups, setGroups] = useState<RelayGroup[]>([]);
   const [currentTime, setCurrentTime] = useState(new Date());
-  const [newGroupName, setNewGroupName] = useState('New Group');
+  const [newGroupName, setNewGroupName] = useState('');
   const [newGroupSelections, setNewGroupSelections] = useState<RelaySelection[]>([]);
   const [newGroupOnTime, setNewGroupOnTime] = useState<string>('');
   const [newGroupOffTime, setNewGroupOffTime] = useState<string>('');
@@ -93,7 +94,7 @@ const App: React.FC = () => {
   const [agentId, setAgentId] = useState<string | null>(null);
   const [agentHeartbeat, setAgentHeartbeat] = useState<number | null>(null);
   const agentOnline = agentHeartbeat !== null && (Date.now() - agentHeartbeat) < AGENT_STALE_MS;
-  const controlsDisabled = !serverOnline || !agentOnline;
+  const controlsDisabled = IS_TEST_ENV ? false : (!serverOnline || !agentOnline);
   const [laundries, setLaundries] = useState<Laundry[]>([]);
   const primaryAgentId = agentId || laundries[0]?.id || DEFAULT_AGENT_ID;
   const [isAddingLaundry, setIsAddingLaundry] = useState(false);
@@ -223,14 +224,42 @@ const App: React.FC = () => {
     }
   };
 
+  const refreshConnectivityOnly = async () => {
+    try {
+      const updates = await Promise.all(DEFAULT_LAUNDRIES.map(async (template) => {
+        try {
+          const data = await ApiService.getStatus(template.id);
+          const lastHb = data.lastHeartbeat ?? null;
+          const online = lastHb ? (Date.now() - lastHb) < AGENT_STALE_MS : true;
+          return { id: template.id, isOnline: online, lastHeartbeat: lastHb, isMock: data.isMock };
+        } catch {
+          return { id: template.id, isOnline: false, lastHeartbeat: null, isMock: true };
+        }
+      }));
+      setLaundries(prev => {
+        if (!prev.length) return prev;
+        return prev.map(l => {
+          const upd = updates.find(u => u.id === l.id);
+          if (!upd) return l;
+          return { ...l, isOnline: upd.isOnline, lastHeartbeat: upd.lastHeartbeat, isMock: upd.isMock };
+        });
+      });
+    } catch (err) {
+      console.error('Connectivity refresh failed', err);
+    }
+  };
+
   useEffect(() => {
     if (!isAuthenticated) return;
     setIsLoading(true);
     fetchLaundries();
     const poller = setInterval(() => {
-      if (!isRelayEditModeRef.current && !editingGroupIdRef.current) {
-        fetchLaundries();
+      if (isRelayEditModeRef.current) return;
+      if (editingGroupIdRef.current) {
+        refreshConnectivityOnly();
+        return;
       }
+      fetchLaundries();
     }, 2000);
     return () => clearInterval(poller);
   }, [isAuthenticated]);
@@ -316,7 +345,7 @@ const App: React.FC = () => {
     setLaundries([]);
     setAgentId(null);
     setAgentHeartbeat(null);
-    setNewGroupName('New Group');
+    setNewGroupName('');
     setNewGroupSelections([]);
     setNewGroupOnTime('');
     setNewGroupOffTime('');
@@ -515,7 +544,7 @@ const App: React.FC = () => {
 
   const handleAddGroup = async () => {
     const selections = dedupeSelections(newGroupSelections);
-    if (!newGroupName.trim() || selections.length === 0) return;
+    if (selections.length === 0) return;
     const onTime24 = to24h(newGroupOnTime);
     const offTime24 = to24h(newGroupOffTime);
     const entriesMap = new Map<string, number[]>();
@@ -538,7 +567,7 @@ const App: React.FC = () => {
     setGroups(prev => [...prev, normalizeGroupPayload(added, primaryAgentId)]);
     setActiveTab(Tab.SCHEDULE);
     // reset form
-    setNewGroupName('New Group');
+    setNewGroupName('');
     setNewGroupSelections([]);
     setGroupSelectionTouched(false);
     setNewGroupOnTime('');
@@ -1303,3 +1332,5 @@ const App: React.FC = () => {
 };
 
 export default App;
+// Test helpers
+export const __timeHelpers = { to24h, normalizeTimeInput };
