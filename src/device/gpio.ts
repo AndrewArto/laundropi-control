@@ -3,7 +3,7 @@ import * as os from 'os';
 import { RELAYS_CONFIG, RelayConfig } from './config';
 
 type RelayState = 'on' | 'off';
-type Driver = 'mock' | 'onoff' | 'shell';
+type Driver = 'mock' | 'shell';
 
 class MockGpio {
   private val = 1;
@@ -14,14 +14,6 @@ class MockGpio {
     this.val = val;
     console.log(`[Mock] Pin ${this.pin} -> ${val}`);
   }
-}
-
-let GpioLib: any = null;
-try {
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  GpioLib = require('onoff').Gpio;
-} catch {
-  GpioLib = null;
 }
 
 class ShellGpio {
@@ -67,9 +59,8 @@ class GpioController {
   private pickDriver(): Driver {
     const forceMock = process.env.MOCK_GPIO === '1' || process.env.MOCK_GPIO === 'true';
     if (forceMock) return 'mock';
-    // Non-linux hosts should never try onoff/shell
+    // Non-linux hosts should never try GPIO shell drivers
     if (os.platform() !== 'linux') return 'mock';
-    if (GpioLib) return 'onoff';
     return 'shell';
   }
 
@@ -78,10 +69,7 @@ class GpioController {
     RELAYS_CONFIG.forEach(relay => {
       if (this.pins.has(relay.id)) return;
       try {
-        const pinObj =
-          this.driver === 'onoff'
-            ? new GpioLib(relay.gpioPin, 'out')
-            : new ShellGpio(relay.gpioPin);
+        const pinObj = new ShellGpio(relay.gpioPin);
         this.pins.set(relay.id, pinObj);
         this.writeToPin(relay, this.getRelayState(relay.id));
       } catch (err) {

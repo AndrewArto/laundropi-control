@@ -1291,7 +1291,7 @@ const App: React.FC = () => {
                <div className="text-left max-w-sm mx-auto bg-slate-900 p-4 rounded-lg font-mono text-xs text-slate-400 overflow-x-auto border border-amber-500/20">
                  <p className="mb-2 text-amber-400 font-bold">Not Connected to Hardware</p>
                  <p className="mb-2 text-slate-300">To start the backend server on your Pi:</p>
-                 <p className="text-emerald-400">1. npm install express onoff cors</p>
+                 <p className="text-emerald-400">1. npm install</p>
                  <p className="text-emerald-400">2. node server.js</p>
                </div>
              )}
