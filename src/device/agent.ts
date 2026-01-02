@@ -1,10 +1,8 @@
+import 'dotenv/config';
 import WebSocket = require('ws');
-import * as dotenv from 'dotenv';
 import { gpio } from './gpio';
 import { createScheduler, ScheduleEntry } from './scheduler';
 import { RELAYS_CONFIG } from './config';
-
-dotenv.config();
 
 const argv = process.argv.slice(2);
 const parseArg = (flag: string): string | undefined => {
