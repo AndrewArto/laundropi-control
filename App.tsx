@@ -480,17 +480,23 @@ const App: React.FC = () => {
 
   const handleBatchControl = async (ids: number[], action: 'ON' | 'OFF', agent: string = primaryAgentId) => {
     if (!serverOnline) return;
-    ids.forEach(id => markPendingRelayState(agent, id, action === 'ON'));
-    updateLaundryRelays(agent, rels => rels.map(r => ids.includes(r.id) ? { ...r, isOn: action === 'ON' } : r));
+    const laundry = laundries.find(l => l.id === agent);
+    const allowedIds = laundry
+      ? new Set((laundry.relays || []).filter(r => !r.isHidden).map(r => r.id))
+      : null;
+    const targetIds = allowedIds ? ids.filter(id => allowedIds.has(id)) : ids;
+    if (!targetIds.length) return;
+    targetIds.forEach(id => markPendingRelayState(agent, id, action === 'ON'));
+    updateLaundryRelays(agent, rels => rels.map(r => targetIds.includes(r.id) ? { ...r, isOn: action === 'ON' } : r));
     if (agent === primaryAgentId) {
       setRelays(prev => {
-        const next = prev.map(r => ids.includes(r.id) ? { ...r, isOn: action === 'ON' } : r);
+        const next = prev.map(r => targetIds.includes(r.id) ? { ...r, isOn: action === 'ON' } : r);
         const merged = applyVisibility(next);
         latestRelaysRef.current = merged;
         return merged;
       });
     }
-    await ApiService.batchControl(agent, ids, action);
+    await ApiService.batchControl(agent, targetIds, action);
   };
 
   const handleRenameRelay = async (id: number, agent: string = primaryAgentId) => {
@@ -717,6 +723,7 @@ const App: React.FC = () => {
         const fresh = laundry.lastHeartbeat ? (Date.now() - laundry.lastHeartbeat) < AGENT_STALE_MS : false;
         const online = serverOnline && laundry.isOnline && fresh;
         const relaysList = laundry.relays;
+        const batchRelayIds = relaysList.filter(r => !r.isHidden).map(r => r.id);
         const visibleRelays = isRelayEditMode ? relaysList : relaysList.filter(r => !r.isHidden);
         const disabled = !online;
         const mock = laundry.isMock || !online;
@@ -733,15 +740,15 @@ const App: React.FC = () => {
               </span>
               <div className="flex gap-2 ml-auto">
                 <button
-                  onClick={() => handleBatchControl(relaysList.map(r => r.id), 'ON', laundry.id)}
-                  disabled={!online}
+                  onClick={() => handleBatchControl(batchRelayIds, 'ON', laundry.id)}
+                  disabled={!online || batchRelayIds.length === 0}
                   className="px-3 py-2 rounded-md text-xs font-semibold border border-emerald-500 text-emerald-200 bg-emerald-500/10 disabled:opacity-50"
                 >
                   ON
                 </button>
                 <button
-                  onClick={() => handleBatchControl(relaysList.map(r => r.id), 'OFF', laundry.id)}
-                  disabled={!online}
+                  onClick={() => handleBatchControl(batchRelayIds, 'OFF', laundry.id)}
+                  disabled={!online || batchRelayIds.length === 0}
                   className="px-3 py-2 rounded-md text-xs font-semibold border border-red-500 text-red-200 bg-red-500/10 disabled:opacity-50"
                 >
                   OFF
