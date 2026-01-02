@@ -6,6 +6,12 @@
 - `laundropi-api.service` — запускает `node server.js` (API на 3001).
 - `laundropi-ui.service` — запускает `npm run preview -- --host --port 3000` (раздаёт собранный UI).
 
+## Новая архитектура (central + agent)
+- `laundropi-central.service` — запускает `src/server/index.ts` (WS + API на 4000).
+- `laundropi-agent.service` — запускает `src/device/agent.ts` (агент GPIO).
+
+Используйте эти юниты, если работаете с центральным сервером и агентами, а не со старым `server.js`.
+
 ## Подготовка
 1) Один раз установить зависимости и собрать UI:
 ```
@@ -34,4 +40,3 @@ journalctl -u laundropi-ui.service -f
 ```
 
 Фронт будет доступен на `:3000`, API на `:3001`.
-

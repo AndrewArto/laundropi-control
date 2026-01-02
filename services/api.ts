@@ -12,9 +12,12 @@ const API_BASE = (() => {
 
 const AGENT_ID = (import.meta as any).env?.VITE_AGENT_ID || 'dev-agent';
 const AGENT_SECRET = (import.meta as any).env?.VITE_AGENT_SECRET || 'secret';
+const UI_TOKEN = (import.meta as any).env?.VITE_UI_TOKEN || '';
 
 const request = async (input: RequestInfo | URL, init?: RequestInit) => {
-  const res = await fetch(input, init);
+  const headers = new Headers(init?.headers || {});
+  if (UI_TOKEN) headers.set('Authorization', `Bearer ${UI_TOKEN}`);
+  const res = await fetch(input, { ...init, headers });
   if (!res.ok) {
     const text = await res.text();
     throw new Error(`API ${res.status}: ${text}`);

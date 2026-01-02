@@ -8,8 +8,53 @@ import { listAgents, updateHeartbeat, saveMeta, getAgent, updateRelayMeta, listS
 
 dotenv.config();
 
+const asBool = (val: string | undefined, fallback = false) => {
+  if (val === undefined) return fallback;
+  return ['1', 'true', 'yes', 'on'].includes(val.toLowerCase());
+};
+
+const parseCsv = (val?: string) => (val || '')
+  .split(',')
+  .map((entry) => entry.trim())
+  .filter(Boolean);
+
+const parseAgentSecrets = (val?: string) => {
+  const map = new Map<string, string>();
+  parseCsv(val).forEach((pair) => {
+    const [agentId, secret] = pair.split(':').map((part) => part.trim());
+    if (agentId && secret) {
+      map.set(agentId, secret);
+    }
+  });
+  return map;
+};
+
+const ALLOW_INSECURE = asBool(process.env.ALLOW_INSECURE, false);
+const REQUIRE_UI_TOKEN = asBool(process.env.REQUIRE_UI_TOKEN, true) && !ALLOW_INSECURE;
+const UI_TOKEN = process.env.UI_TOKEN || '';
+const REQUIRE_CORS_ORIGINS = asBool(process.env.REQUIRE_CORS_ORIGINS, true) && !ALLOW_INSECURE;
+const CORS_ORIGINS = parseCsv(process.env.CORS_ORIGINS);
+const REQUIRE_KNOWN_AGENT = asBool(process.env.REQUIRE_KNOWN_AGENT, true) && !ALLOW_INSECURE;
+const ALLOW_DYNAMIC_AGENT_REGISTRATION = asBool(process.env.ALLOW_DYNAMIC_AGENT_REGISTRATION, false);
+const ALLOW_LEGACY_AGENT_SECRET = asBool(process.env.ALLOW_LEGACY_AGENT_SECRET, false);
+const AGENT_SECRET_MAP = parseAgentSecrets(process.env.AGENT_SECRETS);
+const LEGACY_AGENT_SECRET = process.env.CENTRAL_AGENT_SECRET || '';
+
+if (REQUIRE_UI_TOKEN && !UI_TOKEN) {
+  console.error('[central] UI_TOKEN is required when REQUIRE_UI_TOKEN is enabled.');
+  process.exit(1);
+}
+
+if (REQUIRE_CORS_ORIGINS && CORS_ORIGINS.length === 0) {
+  console.error('[central] CORS_ORIGINS must be set when REQUIRE_CORS_ORIGINS is enabled.');
+  process.exit(1);
+}
+
+if (!ALLOW_INSECURE && AGENT_SECRET_MAP.size === 0) {
+  console.warn('[central] AGENT_SECRETS is empty; only agents already stored in the DB can connect.');
+}
+
 const PORT = Number(process.env.CENTRAL_PORT || 4000);
-const AGENT_SECRET = process.env.CENTRAL_AGENT_SECRET || 'secret';
 const HEARTBEAT_STALE_MS = 30_000;
 
 type AgentSocketRecord = { socket: WebSocket; lastHeartbeat: number };
@@ -202,9 +247,43 @@ const pushSchedulesToAgent = (agentId: string) => {
   }
 };
 
+const isOriginAllowed = (origin?: string | null) => {
+  if (!origin) return true;
+  if (!REQUIRE_CORS_ORIGINS) return true;
+  return CORS_ORIGINS.includes(origin);
+};
+
 const app = express();
-app.use(cors());
+app.use(cors({
+  origin: (origin, cb) => {
+    if (isOriginAllowed(origin)) return cb(null, true);
+    return cb(new Error('Not allowed by CORS'));
+  },
+  optionsSuccessStatus: 204,
+}));
 app.use(express.json());
+
+const extractAuthToken = (req: express.Request) => {
+  const auth = req.headers.authorization || '';
+  if (auth.startsWith('Bearer ')) {
+    return auth.slice('Bearer '.length).trim();
+  }
+  const apiKey = req.headers['x-api-key'];
+  if (typeof apiKey === 'string') return apiKey;
+  if (Array.isArray(apiKey)) return apiKey[0];
+  return '';
+};
+
+const requireUiAuth: express.RequestHandler = (req, res, next) => {
+  if (!REQUIRE_UI_TOKEN) return next();
+  if (req.method === 'OPTIONS') return next();
+  if (!UI_TOKEN) return res.status(500).json({ error: 'UI_TOKEN not configured' });
+  const token = extractAuthToken(req);
+  if (token !== UI_TOKEN) return res.status(401).json({ error: 'unauthorized' });
+  return next();
+};
+
+app.use('/api', requireUiAuth);
 
 app.get('/api/agents', (_req, res) => {
   const list = listAgents().map(a => {
@@ -233,7 +312,14 @@ app.get('/api/agents/:id/status', (req, res) => {
 app.post('/api/agents', (req, res) => {
   const { agentId, secret } = req.body || {};
   if (!agentId || !secret) return res.status(400).json({ error: 'agentId and secret required' });
-  saveMeta(agentId, secret, null);
+  const expectedSecret = AGENT_SECRET_MAP.get(agentId);
+  if (expectedSecret && secret !== expectedSecret) {
+    return res.status(403).json({ error: 'agent secret mismatch' });
+  }
+  if (!expectedSecret && !ALLOW_DYNAMIC_AGENT_REGISTRATION) {
+    return res.status(403).json({ error: 'agent not pre-registered' });
+  }
+  saveMeta(agentId, expectedSecret || secret, null);
   res.json({ ok: true });
 });
 
@@ -474,20 +560,37 @@ wss.on('connection', (socket) => {
     try {
       const msg = JSON.parse(data.toString());
       if (!agentId && msg.type === 'hello') {
+        if (!msg.agentId || !msg.secret) {
+          console.warn('[central] hello missing agentId/secret');
+          socket.close();
+          return;
+        }
         const existing = getAgent(msg.agentId);
-        if (existing && existing.secret && existing.secret !== msg.secret) {
+        const expectedSecret = AGENT_SECRET_MAP.get(msg.agentId) || existing?.secret || null;
+        const legacyAllowed = Boolean(ALLOW_LEGACY_AGENT_SECRET && LEGACY_AGENT_SECRET && msg.secret === LEGACY_AGENT_SECRET);
+
+        if (!expectedSecret && REQUIRE_KNOWN_AGENT && !legacyAllowed) {
+          console.warn('[central] unknown agent rejected', msg.agentId);
+          socket.close();
+          return;
+        }
+        if (expectedSecret && msg.secret !== expectedSecret) {
           console.warn('[central] invalid secret from', msg.agentId);
           socket.close();
           return;
         }
-        if (msg.secret !== AGENT_SECRET && !existing?.secret) {
-          console.warn('[central] secret mismatch (expected env) for new agent', msg.agentId);
+        if (legacyAllowed && !expectedSecret) {
+          console.warn('[central] legacy secret accepted for', msg.agentId);
+        }
+        if (!expectedSecret && !ALLOW_DYNAMIC_AGENT_REGISTRATION && !legacyAllowed) {
+          console.warn('[central] agent registration disabled for', msg.agentId);
           socket.close();
           return;
         }
         agentId = msg.agentId;
         agents.set(agentId, { socket, lastHeartbeat: Date.now() });
-        saveMeta(agentId, msg.secret, msg.relays || null);
+        const secretToPersist = expectedSecret || msg.secret;
+        saveMeta(agentId, secretToPersist, msg.relays || null);
         console.log('[central] agent connected', agentId);
         reconcileOnConnect(agentId);
         return;
