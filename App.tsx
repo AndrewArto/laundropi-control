@@ -290,8 +290,7 @@ const App: React.FC = () => {
     setIsLoading(true);
     fetchLaundries();
     const poller = setInterval(() => {
-      if (isRelayEditModeRef.current) return;
-      if (editingGroupIdRef.current) {
+      if (isRelayEditModeRef.current || editingGroupIdRef.current) {
         refreshConnectivityOnly();
         return;
       }
