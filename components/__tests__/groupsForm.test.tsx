@@ -17,9 +17,12 @@ const mocks = vi.hoisted(() => {
     return payload;
   });
   const getSession = vi.fn().mockResolvedValue({ user: { username: 'admin', role: 'admin' } });
+  const listAgents = vi.fn().mockResolvedValue([
+    { agentId: 'Brandoa_1', lastHeartbeat: Date.now(), online: true },
+  ]);
   const login = vi.fn();
   const logout = vi.fn();
-  return { addGroup, getStatus, getSession, login, logout };
+  return { addGroup, getStatus, getSession, listAgents, login, logout };
 });
 
 vi.mock('../../services/api', () => ({
@@ -27,6 +30,7 @@ vi.mock('../../services/api', () => ({
     addGroup: mocks.addGroup,
     getStatus: mocks.getStatus,
     getSession: mocks.getSession,
+    listAgents: mocks.listAgents,
     login: mocks.login,
     logout: mocks.logout,
   },

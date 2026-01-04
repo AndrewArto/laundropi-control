@@ -14,13 +14,8 @@ enum Tab {
 const AGENT_STALE_MS = 8_000;
 const PENDING_RELAY_TTL_MS = 5_000;
 const DEFAULT_AGENT_ID = (import.meta as any).env?.VITE_AGENT_ID ?? 'dev-agent';
-const LAUNDRY_NAMES_KEY = 'laundropi-laundry-names';
 const DEFAULT_AGENT_SECRET = (import.meta as any).env?.VITE_AGENT_SECRET ?? 'secret';
 const IS_TEST_ENV = (typeof process !== 'undefined' && process.env?.NODE_ENV === 'test') || false;
-const DEFAULT_LAUNDRIES = [
-  { id: 'Brandoa_1', name: 'Brandoa_1' },
-  { id: 'Brandoa_2', name: 'Brandoa_2' },
-];
 
 const to24h = (val?: string | null): string | null => {
   if (!val) return null;
@@ -261,18 +256,19 @@ const App: React.FC = () => {
         setIsLoading(false);
         return;
       }
+      const agentIndex = await ApiService.listAgents();
       let primaryData: { schedules: Schedule[]; groups: RelayGroup[] } | null = null;
-      const items: Laundry[] = await Promise.all(DEFAULT_LAUNDRIES.map(async (template) => {
+      const items: Laundry[] = await Promise.all(agentIndex.map(async (agent) => {
         try {
-          const data = await ApiService.getStatus(template.id);
-          const lastHb = data.lastHeartbeat ?? null;
-          const online = lastHb ? (Date.now() - lastHb) < AGENT_STALE_MS : true;
+          const data = await ApiService.getStatus(agent.agentId);
+          const lastHb = agent.lastHeartbeat ?? data.lastHeartbeat ?? null;
+          const online = Boolean(agent.online) && (lastHb ? (Date.now() - lastHb) < AGENT_STALE_MS : true);
           if (!primaryData) {
             primaryData = { schedules: data.schedules, groups: data.groups };
           }
           return {
-            id: template.id,
-            name: template.name,
+            id: agent.agentId,
+            name: agent.agentId,
             relays: data.relays,
             isOnline: online,
             isMock: data.isMock,
@@ -280,12 +276,12 @@ const App: React.FC = () => {
           };
         } catch (e) {
           return {
-            id: template.id,
-            name: template.name,
+            id: agent.agentId,
+            name: agent.agentId,
             relays: [],
             isOnline: false,
             isMock: true,
-            lastHeartbeat: null,
+            lastHeartbeat: agent.lastHeartbeat ?? null,
           };
         }
       }));
@@ -305,6 +301,9 @@ const App: React.FC = () => {
           }
           return prev;
         });
+      } else {
+        setSchedules([]);
+        setGroups([]);
       }
       setIsLoading(false);
     } catch (err) {
@@ -318,27 +317,32 @@ const App: React.FC = () => {
 
   const refreshConnectivityOnly = async () => {
     try {
-      const updates = await Promise.all(DEFAULT_LAUNDRIES.map(async (template) => {
-        try {
-          const data = await ApiService.getStatus(template.id);
-          const lastHb = data.lastHeartbeat ?? null;
-          const online = lastHb ? (Date.now() - lastHb) < AGENT_STALE_MS : true;
-          return { id: template.id, isOnline: online, lastHeartbeat: lastHb, isMock: data.isMock };
-        } catch {
-          return { id: template.id, isOnline: false, lastHeartbeat: null, isMock: true };
-        }
-      }));
+      const agentIndex = await ApiService.listAgents();
+      setServerOnline(true);
+      if (agentIndex.length === 0) {
+        setLaundries([]);
+        return;
+      }
       setLaundries(prev => {
-        if (!prev.length) return prev;
-        return prev.map(l => {
-          const upd = updates.find(u => u.id === l.id);
-          if (!upd) return l;
-          return { ...l, isOnline: upd.isOnline, lastHeartbeat: upd.lastHeartbeat, isMock: upd.isMock };
+        const prevMap = new Map(prev.map(l => [l.id, l]));
+        return agentIndex.map(agent => {
+          const existing = prevMap.get(agent.agentId);
+          const lastHb = agent.lastHeartbeat ?? existing?.lastHeartbeat ?? null;
+          const online = Boolean(agent.online) && (lastHb ? (Date.now() - lastHb) < AGENT_STALE_MS : true);
+          return {
+            id: agent.agentId,
+            name: existing?.name || agent.agentId,
+            relays: existing?.relays || [],
+            isOnline: online,
+            isMock: existing?.isMock ?? true,
+            lastHeartbeat: lastHb,
+          };
         });
       });
     } catch (err) {
       if (handleAuthFailure(err)) return;
       console.error('Connectivity refresh failed', err);
+      setServerOnline(false);
     }
   };
 
