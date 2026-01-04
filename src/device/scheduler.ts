@@ -82,14 +82,6 @@ class Scheduler {
     const hh = String(now.getHours()).padStart(2, '0');
     const mm = String(now.getMinutes()).padStart(2, '0');
     const current = `${hh}:${mm}`;
-    const actualMap = new Map<number, 'on' | 'off'>();
-    if (this.getSnapshotFn) {
-      try {
-        this.getSnapshotFn().forEach(s => actualMap.set(s.id, s.state));
-      } catch (err) {
-        if (this.debug) console.warn('[scheduler] failed to read snapshot', err);
-      }
-    }
 
     this.schedule.forEach(rule => {
       const shouldBeOn = rule.entries.some(entry => {
@@ -119,10 +111,9 @@ class Scheduler {
 
       const nextState: 'on' | 'off' = shouldBeOn ? 'on' : 'off';
       const prevState = this.lastStates.get(rule.relayId);
-      const actual = actualMap.get(rule.relayId);
-      if (boundary || prevState !== nextState || (actual && actual !== nextState)) {
+      if (boundary) {
         if (this.debug) {
-          console.log('[scheduler] transition', { relayId: rule.relayId, from: prevState, actual, to: nextState, current, rule: rule.entries });
+          console.log('[scheduler] transition', { relayId: rule.relayId, from: prevState, to: nextState, current, rule: rule.entries });
         }
         this.applyFn(rule.relayId, nextState);
         this.lastStates.set(rule.relayId, nextState);

@@ -73,4 +73,39 @@ describe('Scheduler', () => {
     vi.advanceTimersByTime(1000);
     expect(actions.at(-1)).toEqual({ id: 1, state: 'off' });
   });
+
+  it('respects manual override until next boundary', () => {
+    const actions: Array<{ id: number; state: string }> = [];
+    let currentState: 'on' | 'off' = 'off';
+
+    vi.setSystemTime(new Date('2025-01-06T06:59:00Z')); // Mon
+
+    const scheduler = createScheduler(
+      (id, state) => {
+        actions.push({ id, state });
+        currentState = state;
+      },
+      () => [{ id: 1, state: currentState }],
+      null
+    );
+
+    scheduler.setSchedule(makeSchedule(1, '07:00', '08:00', ['Mon']));
+    scheduler.startScheduler();
+
+    // Cross to 07:00 -> ON
+    vi.setSystemTime(new Date('2025-01-06T07:00:00Z'));
+    vi.advanceTimersByTime(1000);
+    expect(actions.at(-1)).toEqual({ id: 1, state: 'on' });
+
+    // Manual OFF should not be overridden until schedule boundary.
+    actions.length = 0;
+    currentState = 'off';
+    vi.advanceTimersByTime(5_000);
+    expect(actions.length).toBe(0);
+
+    // At 08:00 boundary -> OFF
+    vi.setSystemTime(new Date('2025-01-06T08:00:00Z'));
+    vi.advanceTimersByTime(1000);
+    expect(actions.at(-1)).toEqual({ id: 1, state: 'off' });
+  });
 });
