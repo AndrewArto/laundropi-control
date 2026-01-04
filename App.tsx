@@ -11,9 +11,6 @@ enum Tab {
   SETTINGS = 'SETTINGS'
 }
 
-const AUTH_STORAGE_KEY = 'laundropi-auth-v1';
-const AUTH_USERNAME = (import.meta as any).env?.VITE_APP_USER ?? 'admin';
-const AUTH_PASSWORD = (import.meta as any).env?.VITE_APP_PASSWORD ?? 'laundropi';
 const AGENT_STALE_MS = 8_000;
 const PENDING_RELAY_TTL_MS = 5_000;
 const DEFAULT_AGENT_ID = (import.meta as any).env?.VITE_AGENT_ID ?? 'dev-agent';
@@ -68,6 +65,8 @@ const App: React.FC = () => {
 
   const [activeTab, setActiveTab] = useState<Tab>(Tab.DASHBOARD);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [isAuthReady, setIsAuthReady] = useState(false);
+  const [authUser, setAuthUser] = useState<{ username: string; role: string } | null>(null);
   const [authLogin, setAuthLogin] = useState('');
   const [authPassword, setAuthPassword] = useState('');
   const [authError, setAuthError] = useState('');
@@ -173,6 +172,44 @@ const App: React.FC = () => {
     };
   };
 
+  const resetUiState = () => {
+    setRelays([]);
+    setSchedules([]);
+    setGroups([]);
+    setRelayNameDrafts({});
+    setRelayVisibility({});
+    relayVisibilityRef.current = {};
+    latestRelaysRef.current = [];
+    setLaundries([]);
+    setAgentId(null);
+    setAgentHeartbeat(null);
+    setIsMockMode(true);
+    setIsRelayEditMode(false);
+    isRelayEditModeRef.current = false;
+    setNewGroupName('');
+    setNewGroupSelections([]);
+    setNewGroupOnTime('');
+    setNewGroupOffTime('');
+    setNewGroupDays([...DAYS_OF_WEEK]);
+    setGroupSelectionTouched(false);
+    setEditingGroupId(null);
+    editingGroupIdRef.current = null;
+    setServerOnline(true);
+  };
+
+  const handleAuthFailure = (err: unknown) => {
+    const status = (err as any)?.status;
+    if (status !== 401) return false;
+    setAuthError('Сессия истекла. Войди заново.');
+    setIsAuthenticated(false);
+    isAuthenticatedRef.current = false;
+    setAuthUser(null);
+    setAuthPassword('');
+    resetUiState();
+    setIsLoading(false);
+    return true;
+  };
+
   const [isMockMode, setIsMockMode] = useState(true);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -189,18 +226,32 @@ const App: React.FC = () => {
   });
 
   useEffect(() => {
-    if (typeof window === 'undefined') return;
-    try {
-      const saved = window.localStorage.getItem(AUTH_STORAGE_KEY);
-      if (saved === '1') {
-        setIsAuthenticated(true);
-        setIsLoading(true);
-      } else {
-        setIsLoading(false);
+    let cancelled = false;
+    const bootstrap = async () => {
+      try {
+        const session = await ApiService.getSession();
+        if (cancelled) return;
+        if (session?.user) {
+          setIsAuthenticated(true);
+          setAuthUser(session.user);
+          setIsLoading(true);
+        } else {
+          setIsAuthenticated(false);
+          setAuthUser(null);
+          setIsLoading(false);
+        }
+      } catch {
+        if (!cancelled) {
+          setIsAuthenticated(false);
+          setAuthUser(null);
+          setIsLoading(false);
+        }
+      } finally {
+        if (!cancelled) setIsAuthReady(true);
       }
-    } catch {
-      setIsLoading(false);
-    }
+    };
+    bootstrap();
+    return () => { cancelled = true; };
   }, []);
 
   // Fetch data
@@ -257,6 +308,7 @@ const App: React.FC = () => {
       }
       setIsLoading(false);
     } catch (err) {
+      if (handleAuthFailure(err)) return;
       console.error('Critical Failure:', err);
       setServerOnline(false);
       setIsLoading(false);
@@ -285,6 +337,7 @@ const App: React.FC = () => {
         });
       });
     } catch (err) {
+      if (handleAuthFailure(err)) return;
       console.error('Connectivity refresh failed', err);
     }
   };
@@ -334,72 +387,41 @@ const App: React.FC = () => {
     }
   }, [laundries]);
 
-  const handleLoginSubmit = (e: React.FormEvent) => {
+  const handleLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const loginOk = authLogin.trim() === AUTH_USERNAME;
-    const passOk = authPassword === AUTH_PASSWORD;
-    if (loginOk && passOk) {
+    setAuthError('');
+    try {
+      const login = await ApiService.login(authLogin.trim(), authPassword);
       setIsAuthenticated(true);
       isAuthenticatedRef.current = true;
-      setAuthError('');
-      setRelays([]);
-      setSchedules([]);
-      setGroups([]);
-      setRelayNameDrafts({});
-      setRelayVisibility({});
-      relayVisibilityRef.current = {};
-      latestRelaysRef.current = [];
-      setLaundries([]);
-      setNewGroupSelections([]);
-      setGroupSelectionTouched(false);
+      setAuthUser(login.user || { username: authLogin.trim(), role: 'user' });
+      setAuthPassword('');
+      resetUiState();
       setIsLoading(true);
-      if (typeof window !== 'undefined') {
-        try {
-          window.localStorage.setItem(AUTH_STORAGE_KEY, '1');
-        } catch {
-          // ignore
-        }
+    } catch (err) {
+      const status = (err as any)?.status;
+      if (status === 401) {
+        setAuthError('Неверный логин или пароль');
+      } else {
+        setAuthError('Не удалось авторизоваться. Попробуй позже.');
       }
-    } else {
-      setAuthError('Неверный логин или пароль');
     }
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    try {
+      await ApiService.logout();
+    } catch {
+      // ignore logout failures
+    }
     setIsAuthenticated(false);
     isAuthenticatedRef.current = false;
+    setAuthUser(null);
     setAuthLogin('');
     setAuthPassword('');
     setAuthError('');
-    setRelays([]);
-    setSchedules([]);
-    setGroups([]);
-    setIsMockMode(true);
-    setIsRelayEditMode(false);
-    isRelayEditModeRef.current = false;
-    setRelayNameDrafts({});
-    setRelayVisibility({});
-    relayVisibilityRef.current = {};
-    latestRelaysRef.current = [];
-    setLaundries([]);
-    setAgentId(null);
-    setAgentHeartbeat(null);
-    setNewGroupName('');
-    setNewGroupSelections([]);
-    setNewGroupOnTime('');
-    setNewGroupOffTime('');
-    setNewGroupDays([...DAYS_OF_WEEK]);
-    setGroupSelectionTouched(false);
-    setEditingGroupId(null);
-    editingGroupIdRef.current = null;
+    resetUiState();
     setIsLoading(false);
-    if (typeof window !== 'undefined') {
-      try {
-        window.localStorage.removeItem(AUTH_STORAGE_KEY);
-      } catch {
-        // ignore
-      }
-    }
   };
 
   // Sync drafts and visibility
@@ -701,6 +723,7 @@ const App: React.FC = () => {
     try {
       await ApiService.toggleGroup(primaryAgentId, id, action);
     } catch (err) {
+      if (handleAuthFailure(err)) return;
       console.error('Group toggle failed', err);
     }
   };
@@ -1208,6 +1231,10 @@ const App: React.FC = () => {
   );
   };
 
+  if (!isAuthReady) {
+    return <div className="min-h-screen flex items-center justify-center bg-slate-900 text-slate-500">Checking session...</div>;
+  }
+
   if (!isAuthenticated) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-900 px-4">
@@ -1256,7 +1283,7 @@ const App: React.FC = () => {
               Войти
             </button>
             <p className="text-[11px] text-slate-500 text-center">
-              Настройте логин и пароль через переменные среды VITE_APP_USER и VITE_APP_PASSWORD
+              Логины и хэши паролей хранятся на сервере (UI_USERS + SESSION_SECRET).
             </p>
           </form>
         </div>
@@ -1300,8 +1327,14 @@ const App: React.FC = () => {
                 );
               })}
             </div>
-          </div>
+        </div>
           <div className="flex items-center gap-3">
+                {authUser && (
+                  <div className="text-right">
+                    <div className="text-xs text-slate-300">{authUser.username}</div>
+                    <div className="text-[10px] uppercase text-slate-500">{authUser.role}</div>
+                  </div>
+                )}
                 <div className="text-right">
                 <div className="text-xl font-mono text-white font-medium">
                   {currentTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })}

@@ -16,13 +16,19 @@ const mocks = vi.hoisted(() => {
     };
     return payload;
   });
-  return { addGroup, getStatus };
+  const getSession = vi.fn().mockResolvedValue({ user: { username: 'admin', role: 'admin' } });
+  const login = vi.fn();
+  const logout = vi.fn();
+  return { addGroup, getStatus, getSession, login, logout };
 });
 
 vi.mock('../../services/api', () => ({
   ApiService: {
     addGroup: mocks.addGroup,
     getStatus: mocks.getStatus,
+    getSession: mocks.getSession,
+    login: mocks.login,
+    logout: mocks.logout,
   },
 }));
 
@@ -31,25 +37,11 @@ import App from '../../App';
 
 describe('Groups form validation', () => {
   beforeEach(() => {
-    vi.stubGlobal('localStorage', {
-      store: {} as Record<string, string>,
-      getItem(key: string) { return this.store[key]; },
-      setItem(key: string, val: string) { this.store[key] = val; },
-      removeItem(key: string) { delete this.store[key]; },
-      clear() { this.store = {}; },
-    });
-    // mark authenticated
-    (window.localStorage as any).setItem('laundropi-auth-v1', '');
+    mocks.getSession.mockClear();
   });
 
   it('does not submit when group name is empty', async () => {
     render(<App />);
-    const loginInput = await screen.findByPlaceholderText(/логин/i);
-    const passInput = await screen.findByPlaceholderText(/пароль/i);
-    fireEvent.change(loginInput, { target: { value: 'admin' } });
-    fireEvent.change(passInput, { target: { value: 'laundropi' } });
-    fireEvent.click(screen.getByText(/Войти/i));
-
     const groupsTab = await screen.findByText(/Groups/i, undefined, { timeout: 5000 });
     fireEvent.click(groupsTab);
 

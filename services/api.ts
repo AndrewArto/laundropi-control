@@ -1,26 +1,28 @@
 
 import { Relay, Schedule, RelayType, RelayGroup } from '../types';
 
-const API_BASE = (() => {
-  if (typeof window === 'undefined') return '/api';
+const BASE_URL = (() => {
+  if (typeof window === 'undefined') return '';
   const { hostname, port, protocol } = window.location;
   if (port === '3000') {
-    return `${protocol}//${hostname}:4000/api`;
+    return `${protocol}//${hostname}:4000`;
   }
-  return '/api';
+  return '';
 })();
+
+const API_BASE = BASE_URL ? `${BASE_URL}/api` : '/api';
+const AUTH_BASE = BASE_URL ? `${BASE_URL}/auth` : '/auth';
 
 const AGENT_ID = (import.meta as any).env?.VITE_AGENT_ID || 'dev-agent';
 const AGENT_SECRET = (import.meta as any).env?.VITE_AGENT_SECRET || 'secret';
-const UI_TOKEN = (import.meta as any).env?.VITE_UI_TOKEN || '';
-
 const request = async (input: RequestInfo | URL, init?: RequestInit) => {
   const headers = new Headers(init?.headers || {});
-  if (UI_TOKEN) headers.set('Authorization', `Bearer ${UI_TOKEN}`);
-  const res = await fetch(input, { ...init, headers });
+  const res = await fetch(input, { ...init, headers, credentials: 'include' });
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(`API ${res.status}: ${text}`);
+    const err = new Error(`API ${res.status}: ${text}`);
+    (err as any).status = res.status;
+    throw err;
   }
   return res;
 };
@@ -58,6 +60,24 @@ const toEntries = (agentId: string, group: Partial<RelayGroup>): { agentId: stri
 };
 
 export const ApiService = {
+  async getSession(): Promise<{ user: { username: string; role: string } | null }> {
+    const res = await request(`${AUTH_BASE}/session`);
+    return await res.json();
+  },
+
+  async login(username: string, password: string): Promise<{ user: { username: string; role: string } }> {
+    const res = await request(`${AUTH_BASE}/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password }),
+    });
+    return await res.json();
+  },
+
+  async logout(): Promise<void> {
+    await request(`${AUTH_BASE}/logout`, { method: 'POST' });
+  },
+
   async listAgents(): Promise<{ agentId: string; lastHeartbeat: number | null; online: boolean }[]> {
     const res = await request(`${API_BASE}/agents`);
     return await res.json();

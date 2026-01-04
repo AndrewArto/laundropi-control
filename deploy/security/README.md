@@ -1,11 +1,16 @@
 # Security Deployment Notes
 
-This branch adds API auth, CORS allowlist, and per-agent secrets. Use these settings in production.
+This branch adds server-side UI auth, CORS allowlist, and per-agent secrets. Use these settings in production.
 
 ## Central (AWS) environment
 Set these on the central server (or in an EnvironmentFile):
-- `UI_TOKEN=...` (required, used by UI for API calls)
-- `REQUIRE_UI_TOKEN=true`
+- `SESSION_SECRET=...` (required, random 32+ chars)
+- `UI_USERS=admin:admin:<hash>` (format: `username:role:hash` or `username:hash`)
+- Or single-user envs: `UI_USERNAME=admin`, `UI_PASSWORD_HASH=<hash>`, `UI_ROLE=admin`
+- `REQUIRE_UI_AUTH=true`
+- `SESSION_TTL_HOURS=12` (optional)
+- `SESSION_COOKIE_SECURE=true` (keep true in prod)
+- `SESSION_COOKIE_SAMESITE=lax` (optional, strict|lax|none)
 - `CORS_ORIGINS=https://control.example.com`
 - `REQUIRE_CORS_ORIGINS=true`
 - `AGENT_SECRETS=Brandoa_1:secret1,Brandoa_2:secret2`
@@ -13,6 +18,10 @@ Set these on the central server (or in an EnvironmentFile):
 - `ALLOW_DYNAMIC_AGENT_REGISTRATION=false`
 - `ALLOW_LEGACY_AGENT_SECRET=false`
 - `CENTRAL_PORT=4000`
+
+Generate a password hash:
+- `node scripts/hash-ui-password.js "your-password"`
+- Then set `UI_USERS=admin:admin:<hash>`
 
 Temporary migration flags (turn off after cutover):
 - `ALLOW_LEGACY_AGENT_SECRET=true` (accepts old shared secret)
@@ -30,11 +39,12 @@ Terminate TLS in front of the central server and proxy both HTTP and WS.
 Use the provided `deploy/caddy/Caddyfile` (or any reverse proxy):
 - Expose only `:443` publicly.
 - Bind central on localhost or block port 4000 in the firewall.
+- Ensure `/api`, `/auth`, and `/agent` are proxied to central.
 
-## UI token
-The UI must send the token on every API request:
-- Build the UI with `VITE_UI_TOKEN=...` in the frontend env.
-- Restrict UI access with Basic Auth or private network, since the token is in the bundle.
+## UI auth
+Auth is handled by the central server via session cookies:
+- Build UI without embedded credentials (no VITE_* secrets).
+- If you run local dev over http, set `SESSION_COOKIE_SECURE=false`.
 
 ## Secrets and OS hardening
 - Store secrets in `/etc/laundropi/*.env` with permissions `600`.

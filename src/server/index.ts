@@ -29,9 +29,83 @@ const parseAgentSecrets = (val?: string) => {
   return map;
 };
 
+type UiUser = { username: string; role: string; passwordHash: string };
+
+const parseUiUsers = (val?: string) => {
+  const users = new Map<string, UiUser>();
+  parseCsv(val).forEach((entry) => {
+    const parts = entry.split(':').map((part) => part.trim()).filter(Boolean);
+    if (parts.length < 2) return;
+    const username = parts[0];
+    let role = 'admin';
+    let passwordHash = '';
+    if (parts.length === 2) {
+      passwordHash = parts[1];
+    } else {
+      role = parts[1] || 'admin';
+      passwordHash = parts.slice(2).join(':');
+    }
+    if (username && passwordHash) {
+      users.set(username, { username, role, passwordHash });
+    }
+  });
+  const fallbackUser = process.env.UI_USERNAME || process.env.UI_USER || '';
+  const fallbackHash = process.env.UI_PASSWORD_HASH || '';
+  const fallbackRole = process.env.UI_ROLE || 'admin';
+  if (fallbackUser && fallbackHash && !users.has(fallbackUser)) {
+    users.set(fallbackUser, { username: fallbackUser, role: fallbackRole, passwordHash: fallbackHash });
+  }
+  return users;
+};
+
+const safeEqual = (a: Buffer, b: Buffer) => {
+  if (a.length !== b.length) return false;
+  return crypto.timingSafeEqual(a, b);
+};
+
+const verifyPassword = (password: string, stored: string) => {
+  if (!stored) return false;
+  const parts = stored.split('$');
+  if (parts.length !== 6 || parts[0] !== 'scrypt') return false;
+  const [, nStr, rStr, pStr, saltB64, hashB64] = parts;
+  const N = Number(nStr);
+  const r = Number(rStr);
+  const p = Number(pStr);
+  if (!Number.isFinite(N) || !Number.isFinite(r) || !Number.isFinite(p)) return false;
+  const salt = Buffer.from(saltB64, 'base64');
+  const expected = Buffer.from(hashB64, 'base64');
+  if (!salt.length || !expected.length) return false;
+  const actual = crypto.scryptSync(password, salt, expected.length, { N, r, p });
+  return safeEqual(actual, expected);
+};
+
+const parseCookies = (header?: string) => {
+  const out: Record<string, string> = {};
+  if (!header) return out;
+  header.split(';').forEach((part) => {
+    const [rawKey, ...rest] = part.trim().split('=');
+    if (!rawKey) return;
+    const key = rawKey.trim();
+    const value = rest.join('=').trim();
+    if (!key) return;
+    out[key] = decodeURIComponent(value || '');
+  });
+  return out;
+};
+
+const normalizeSameSite = (val?: string) => {
+  const value = (val || 'lax').toLowerCase();
+  if (value === 'none' || value === 'strict' || value === 'lax') return value;
+  return 'lax';
+};
+
 const ALLOW_INSECURE = asBool(process.env.ALLOW_INSECURE, false);
-const REQUIRE_UI_TOKEN = asBool(process.env.REQUIRE_UI_TOKEN, true) && !ALLOW_INSECURE;
-const UI_TOKEN = process.env.UI_TOKEN || '';
+const REQUIRE_UI_AUTH = asBool(process.env.REQUIRE_UI_AUTH, true) && !ALLOW_INSECURE;
+const SESSION_SECRET = process.env.SESSION_SECRET || '';
+const SESSION_TTL_HOURS = Number(process.env.SESSION_TTL_HOURS || 12);
+const SESSION_COOKIE_NAME = process.env.SESSION_COOKIE_NAME || 'laundropi_session';
+const SESSION_COOKIE_SAMESITE = normalizeSameSite(process.env.SESSION_COOKIE_SAMESITE);
+const SESSION_COOKIE_SECURE = asBool(process.env.SESSION_COOKIE_SECURE, !ALLOW_INSECURE);
 const REQUIRE_CORS_ORIGINS = asBool(process.env.REQUIRE_CORS_ORIGINS, true) && !ALLOW_INSECURE;
 const CORS_ORIGINS = parseCsv(process.env.CORS_ORIGINS);
 const REQUIRE_KNOWN_AGENT = asBool(process.env.REQUIRE_KNOWN_AGENT, true) && !ALLOW_INSECURE;
@@ -39,9 +113,15 @@ const ALLOW_DYNAMIC_AGENT_REGISTRATION = asBool(process.env.ALLOW_DYNAMIC_AGENT_
 const ALLOW_LEGACY_AGENT_SECRET = asBool(process.env.ALLOW_LEGACY_AGENT_SECRET, false);
 const AGENT_SECRET_MAP = parseAgentSecrets(process.env.AGENT_SECRETS);
 const LEGACY_AGENT_SECRET = process.env.CENTRAL_AGENT_SECRET || '';
+const UI_USERS = parseUiUsers(process.env.UI_USERS);
 
-if (REQUIRE_UI_TOKEN && !UI_TOKEN) {
-  console.error('[central] UI_TOKEN is required when REQUIRE_UI_TOKEN is enabled.');
+if (REQUIRE_UI_AUTH && !SESSION_SECRET) {
+  console.error('[central] SESSION_SECRET is required when REQUIRE_UI_AUTH is enabled.');
+  process.exit(1);
+}
+
+if (REQUIRE_UI_AUTH && UI_USERS.size === 0) {
+  console.error('[central] UI_USERS (or UI_USERNAME/UI_PASSWORD_HASH) must be set when REQUIRE_UI_AUTH is enabled.');
   process.exit(1);
 }
 
@@ -259,29 +339,103 @@ app.use(cors({
     if (isOriginAllowed(origin)) return cb(null, true);
     return cb(new Error('Not allowed by CORS'));
   },
+  credentials: true,
   optionsSuccessStatus: 204,
 }));
 app.use(express.json());
 
-const extractAuthToken = (req: express.Request) => {
-  const auth = req.headers.authorization || '';
-  if (auth.startsWith('Bearer ')) {
-    return auth.slice('Bearer '.length).trim();
+type SessionPayload = { sub: string; role: string; exp: number };
+
+const sessionTtlHours = Number.isFinite(SESSION_TTL_HOURS) ? SESSION_TTL_HOURS : 12;
+const SESSION_TTL_MS = Math.max(1, sessionTtlHours) * 60 * 60 * 1000;
+
+const signSession = (payload: SessionPayload) => {
+  const body = Buffer.from(JSON.stringify(payload)).toString('base64url');
+  const sig = crypto.createHmac('sha256', SESSION_SECRET).update(body).digest('base64url');
+  return `${body}.${sig}`;
+};
+
+const verifySession = (token: string | undefined): SessionPayload | null => {
+  if (!token) return null;
+  const [body, sig] = token.split('.');
+  if (!body || !sig) return null;
+  const expected = crypto.createHmac('sha256', SESSION_SECRET).update(body).digest('base64url');
+  if (!safeEqual(Buffer.from(sig), Buffer.from(expected))) return null;
+  try {
+    const payload = JSON.parse(Buffer.from(body, 'base64url').toString('utf8')) as SessionPayload;
+    if (!payload || typeof payload.exp !== 'number' || payload.exp < Date.now()) return null;
+    return payload;
+  } catch {
+    return null;
   }
-  const apiKey = req.headers['x-api-key'];
-  if (typeof apiKey === 'string') return apiKey;
-  if (Array.isArray(apiKey)) return apiKey[0];
-  return '';
+};
+
+const getSession = (req: express.Request) => {
+  const cookies = parseCookies(req.headers.cookie);
+  return verifySession(cookies[SESSION_COOKIE_NAME]);
+};
+
+const setSessionCookie = (res: express.Response, token: string, maxAge: number) => {
+  res.cookie(SESSION_COOKIE_NAME, token, {
+    httpOnly: true,
+    secure: SESSION_COOKIE_SECURE,
+    sameSite: SESSION_COOKIE_SAMESITE as 'lax' | 'strict' | 'none',
+    path: '/',
+    maxAge,
+  });
+};
+
+const clearSessionCookie = (res: express.Response) => {
+  res.cookie(SESSION_COOKIE_NAME, '', {
+    httpOnly: true,
+    secure: SESSION_COOKIE_SECURE,
+    sameSite: SESSION_COOKIE_SAMESITE as 'lax' | 'strict' | 'none',
+    path: '/',
+    maxAge: 0,
+  });
 };
 
 const requireUiAuth: express.RequestHandler = (req, res, next) => {
-  if (!REQUIRE_UI_TOKEN) return next();
+  if (!REQUIRE_UI_AUTH) return next();
   if (req.method === 'OPTIONS') return next();
-  if (!UI_TOKEN) return res.status(500).json({ error: 'UI_TOKEN not configured' });
-  const token = extractAuthToken(req);
-  if (token !== UI_TOKEN) return res.status(401).json({ error: 'unauthorized' });
+  const session = getSession(req);
+  if (!session) return res.status(401).json({ error: 'unauthorized' });
+  res.locals.user = session;
   return next();
 };
+
+app.get('/auth/session', (req, res) => {
+  const session = getSession(req);
+  res.setHeader('Cache-Control', 'no-store');
+  res.json({
+    user: session ? { username: session.sub, role: session.role } : null,
+  });
+});
+
+app.post('/auth/login', (req, res) => {
+  const username = String(req.body?.username || '').trim();
+  const password = String(req.body?.password || '');
+  if (!username || !password) return res.status(400).json({ error: 'username and password required' });
+  const user = UI_USERS.get(username);
+  if (!user || !verifyPassword(password, user.passwordHash)) {
+    return res.status(401).json({ error: 'invalid credentials' });
+  }
+  const payload: SessionPayload = {
+    sub: user.username,
+    role: user.role,
+    exp: Date.now() + SESSION_TTL_MS,
+  };
+  const token = signSession(payload);
+  setSessionCookie(res, token, SESSION_TTL_MS);
+  res.setHeader('Cache-Control', 'no-store');
+  res.json({ ok: true, user: { username: user.username, role: user.role } });
+});
+
+app.post('/auth/logout', (_req, res) => {
+  clearSessionCookie(res);
+  res.setHeader('Cache-Control', 'no-store');
+  res.json({ ok: true });
+});
 
 app.use('/api', requireUiAuth);
 
