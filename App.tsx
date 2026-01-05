@@ -1244,11 +1244,11 @@ const App: React.FC = () => {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-900 px-4">
         <div className="w-full max-w-sm bg-slate-800/70 border border-slate-700 rounded-2xl p-6 shadow-xl space-y-5">
-          <div className="flex items-center gap-3">
+          <div className="flex flex-col items-center text-center gap-4">
             <img
               src={BRAND_LOGO_URL}
               alt="WashControl"
-              className="h-48 w-auto max-w-none"
+              className="w-full max-w-[320px] h-auto"
             />
             <div>
               <p className="text-xs uppercase tracking-wide text-slate-400">Secure Access</p>
@@ -1311,7 +1311,7 @@ const App: React.FC = () => {
               <img
                 src={BRAND_LOGO_URL}
                 alt="WashControl"
-                className="h-40 w-auto max-w-none"
+                className="w-auto max-w-[280px] h-auto"
               />
               <span className="sr-only">WashControl</span>
             </div>
