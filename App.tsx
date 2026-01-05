@@ -1248,7 +1248,7 @@ const App: React.FC = () => {
             <img
               src={BRAND_LOGO_URL}
               alt="WashControl"
-              className="h-20 w-auto max-w-[320px]"
+              className="h-48 w-auto max-w-none"
             />
             <div>
               <p className="text-xs uppercase tracking-wide text-slate-400">Secure Access</p>
@@ -1311,7 +1311,7 @@ const App: React.FC = () => {
               <img
                 src={BRAND_LOGO_URL}
                 alt="WashControl"
-                className="h-14 w-auto max-w-[260px]"
+                className="h-40 w-auto max-w-none"
               />
               <span className="sr-only">WashControl</span>
             </div>
