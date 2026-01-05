@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { LayoutDashboard, CalendarClock, Settings, Trash2, Cpu, Server, Pencil, Lock, Plus } from 'lucide-react';
+import { LayoutDashboard, CalendarClock, Settings, Trash2, Cpu, Server, Pencil, Plus } from 'lucide-react';
 import RelayCard from './components/RelayCard';
 import { Relay, Schedule, RelayType, RelayGroup } from './types';
 import { ApiService } from './services/api';
@@ -16,6 +16,7 @@ const PENDING_RELAY_TTL_MS = 5_000;
 const DEFAULT_AGENT_ID = (import.meta as any).env?.VITE_AGENT_ID ?? 'dev-agent';
 const DEFAULT_AGENT_SECRET = (import.meta as any).env?.VITE_AGENT_SECRET ?? 'secret';
 const IS_TEST_ENV = (typeof process !== 'undefined' && process.env?.NODE_ENV === 'test') || false;
+const BRAND_LOGO_URL = '/washcontrol-logo.svg';
 
 const to24h = (val?: string | null): string | null => {
   if (!val) return null;
@@ -1244,9 +1245,11 @@ const App: React.FC = () => {
       <div className="min-h-screen flex items-center justify-center bg-slate-900 px-4">
         <div className="w-full max-w-sm bg-slate-800/70 border border-slate-700 rounded-2xl p-6 shadow-xl space-y-5">
           <div className="flex items-center gap-3">
-            <div className="h-11 w-11 rounded-xl bg-indigo-500/10 border border-indigo-500/30 flex items-center justify-center">
-              <Lock className="w-5 h-5 text-indigo-300" />
-            </div>
+            <img
+              src={BRAND_LOGO_URL}
+              alt="WashControl"
+              className="h-10 w-auto max-w-[180px]"
+            />
             <div>
               <p className="text-xs uppercase tracking-wide text-slate-400">Secure Access</p>
               <h2 className="text-lg font-semibold text-white">LaundroPi Control</h2>
@@ -1307,9 +1310,14 @@ const App: React.FC = () => {
       <header className="bg-slate-900/80 backdrop-blur-md sticky top-0 z-50 border-b border-slate-800">
         <div className="max-w-3xl mx-auto px-4 py-4 flex justify-between items-center">
           <div>
-            <h1 className="text-xl font-bold bg-gradient-to-r from-indigo-400 to-cyan-400 bg-clip-text text-transparent">
-              LaundroPi
-            </h1>
+            <div className="flex items-center gap-2">
+              <img
+                src={BRAND_LOGO_URL}
+                alt="WashControl"
+                className="h-8 w-auto max-w-[160px]"
+              />
+              <span className="sr-only">WashControl</span>
+            </div>
             <div className="flex items-center gap-3 flex-wrap">
               {laundries.map(l => {
                 const fresh = l.lastHeartbeat ? (Date.now() - l.lastHeartbeat) < AGENT_STALE_MS : false;
