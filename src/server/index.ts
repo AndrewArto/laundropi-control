@@ -4,7 +4,7 @@ import cors = require('cors');
 import { WebSocketServer, WebSocket } from 'ws';
 import * as dotenv from 'dotenv';
 import * as crypto from 'crypto';
-import { listAgents, updateHeartbeat, saveMeta, getAgent, updateRelayMeta, listSchedules, upsertSchedule, deleteSchedule, listGroups, listGroupsForMembership, upsertGroup, deleteGroup, GroupRow, deleteAgent, upsertAgent, upsertCommand, listPendingCommands, deleteCommand, updateCommandsForRelay, expireOldCommands } from './db';
+import { listAgents, updateHeartbeat, saveMeta, getAgent, updateRelayMeta, listSchedules, upsertSchedule, deleteSchedule, listGroups, listGroupsForMembership, upsertGroup, deleteGroup, GroupRow, deleteAgent, upsertAgent, upsertCommand, listPendingCommands, deleteCommand, updateCommandsForRelay, expireOldCommands, insertLead, getLastLeadTimestampForIp } from './db';
 
 dotenv.config();
 
@@ -108,6 +108,8 @@ const SESSION_COOKIE_SAMESITE = normalizeSameSite(process.env.SESSION_COOKIE_SAM
 const SESSION_COOKIE_SECURE = asBool(process.env.SESSION_COOKIE_SECURE, !ALLOW_INSECURE);
 const REQUIRE_CORS_ORIGINS = asBool(process.env.REQUIRE_CORS_ORIGINS, true) && !ALLOW_INSECURE;
 const CORS_ORIGINS = parseCsv(process.env.CORS_ORIGINS);
+const LEAD_FORM_ENABLED = asBool(process.env.LEAD_FORM_ENABLED, true);
+const LEAD_RATE_LIMIT_MS = Number(process.env.LEAD_RATE_LIMIT_MS || 60_000);
 const REQUIRE_KNOWN_AGENT = asBool(process.env.REQUIRE_KNOWN_AGENT, true) && !ALLOW_INSECURE;
 const ALLOW_DYNAMIC_AGENT_REGISTRATION = asBool(process.env.ALLOW_DYNAMIC_AGENT_REGISTRATION, false);
 const ALLOW_LEGACY_AGENT_SECRET = asBool(process.env.ALLOW_LEGACY_AGENT_SECRET, false);
@@ -333,6 +335,19 @@ const isOriginAllowed = (origin?: string | null) => {
   return CORS_ORIGINS.includes(origin);
 };
 
+const getClientIp = (req: express.Request): string | null => {
+  const forwarded = req.headers['x-forwarded-for'];
+  if (typeof forwarded === 'string' && forwarded.trim()) {
+    return forwarded.split(',')[0].trim();
+  }
+  if (Array.isArray(forwarded) && forwarded.length) {
+    return forwarded[0].trim();
+  }
+  return req.socket.remoteAddress || null;
+};
+
+const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 const app = express();
 app.use(cors({
   origin: (origin, cb) => {
@@ -435,6 +450,37 @@ app.post('/auth/logout', (_req, res) => {
   clearSessionCookie(res);
   res.setHeader('Cache-Control', 'no-store');
   res.json({ ok: true });
+});
+
+app.post('/lead', (req, res) => {
+  if (!LEAD_FORM_ENABLED) return res.status(404).json({ error: 'not_found' });
+  const email = String(req.body?.email || '').trim().toLowerCase();
+  const trap = String(req.body?.company || '').trim();
+  if (trap) return res.json({ ok: true });
+  if (!email || !emailRegex.test(email)) {
+    return res.status(400).json({ error: 'invalid_email' });
+  }
+  const origin = req.headers.origin;
+  if (origin && !isOriginAllowed(origin)) {
+    return res.status(403).json({ error: 'forbidden' });
+  }
+  const ip = getClientIp(req);
+  const now = Date.now();
+  if (ip) {
+    const last = getLastLeadTimestampForIp(ip);
+    if (last && now - last < LEAD_RATE_LIMIT_MS) {
+      return res.status(429).json({ error: 'rate_limited' });
+    }
+  }
+  insertLead({
+    email: email.slice(0, 320),
+    createdAt: now,
+    source: String(req.body?.source || 'washcontrol.io').slice(0, 64),
+    ip,
+    userAgent: String(req.headers['user-agent'] || '').slice(0, 512) || null,
+    referrer: String(req.headers.referer || req.headers.referrer || '').slice(0, 512) || null,
+  });
+  return res.json({ ok: true });
 });
 
 app.use('/api', requireUiAuth);

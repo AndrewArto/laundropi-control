@@ -11,8 +11,10 @@ Set these on the central server (or in an EnvironmentFile):
 - `SESSION_TTL_HOURS=12` (optional)
 - `SESSION_COOKIE_SECURE=true` (keep true in prod)
 - `SESSION_COOKIE_SAMESITE=lax` (optional, strict|lax|none)
-- `CORS_ORIGINS=https://control.example.com`
+- `CORS_ORIGINS=https://control.example.com,https://washcontrol.io`
 - `REQUIRE_CORS_ORIGINS=true`
+- `LEAD_FORM_ENABLED=true` (optional)
+- `LEAD_RATE_LIMIT_MS=60000` (optional, per IP)
 - `AGENT_SECRETS=Brandoa_1:secret1,Brandoa_2:secret2`
 - `REQUIRE_KNOWN_AGENT=true`
 - `ALLOW_DYNAMIC_AGENT_REGISTRATION=false`
@@ -40,6 +42,7 @@ Use the provided `deploy/caddy/Caddyfile` (or any reverse proxy):
 - Expose only `:443` publicly.
 - Bind central on localhost or block port 4000 in the firewall.
 - Ensure `/api`, `/auth`, and `/agent` are proxied to central.
+- If you host a landing page on `washcontrol.io`, proxy `/lead` to central.
 
 ## UI auth
 Auth is handled by the central server via session cookies:

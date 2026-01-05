@@ -45,6 +45,15 @@ export type CommandRow = {
   expiresAt: number | null;
 };
 
+export type LeadRow = {
+  email: string;
+  createdAt: number;
+  source?: string | null;
+  ip?: string | null;
+  userAgent?: string | null;
+  referrer?: string | null;
+};
+
 const dbPath = process.env.CENTRAL_DB_PATH || './central.db';
 const db = new Database(dbPath);
 
@@ -92,6 +101,19 @@ CREATE TABLE IF NOT EXISTS commands (
   createdAt INTEGER,
   expiresAt INTEGER
 );
+
+CREATE TABLE IF NOT EXISTS leads (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  email TEXT NOT NULL,
+  createdAt INTEGER NOT NULL,
+  source TEXT,
+  ip TEXT,
+  userAgent TEXT,
+  referrer TEXT
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS leads_email_unique ON leads(email);
+CREATE INDEX IF NOT EXISTS leads_ip_created_idx ON leads(ip, createdAt);
 `);
 
 // Best-effort migration: add entries column if missing (ignore errors)
@@ -356,6 +378,32 @@ export function updateCommandsForRelay(agentId: string, relayId: number, status:
 
 export function expireOldCommands(now = Date.now()) {
   db.prepare(`UPDATE commands SET status = ? WHERE expiresAt IS NOT NULL AND expiresAt < ? AND status IN ('pending','sent')`).run('failed', now);
+}
+
+// --- LEADS ---
+const insertLeadStmt = db.prepare(`
+  INSERT OR IGNORE INTO leads(email, createdAt, source, ip, userAgent, referrer)
+  VALUES (@email, @createdAt, @source, @ip, @userAgent, @referrer)
+`);
+
+const lastLeadByIpStmt = db.prepare(`
+  SELECT createdAt FROM leads WHERE ip = ? ORDER BY createdAt DESC LIMIT 1
+`);
+
+export function insertLead(row: LeadRow) {
+  insertLeadStmt.run({
+    email: row.email,
+    createdAt: row.createdAt,
+    source: row.source || null,
+    ip: row.ip || null,
+    userAgent: row.userAgent || null,
+    referrer: row.referrer || null,
+  });
+}
+
+export function getLastLeadTimestampForIp(ip: string): number | null {
+  const row = lastLeadByIpStmt.get(ip) as { createdAt?: number } | undefined;
+  return row?.createdAt ?? null;
 }
 
 // --- AGENTS ---
