@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { LayoutDashboard, CalendarClock, Settings, Trash2, Cpu, Server, Pencil, Plus } from 'lucide-react';
+import { LayoutDashboard, CalendarClock, Settings, Trash2, Cpu, Server, Pencil, Plus, Lock } from 'lucide-react';
 import RelayCard from './components/RelayCard';
 import { Relay, Schedule, RelayType, RelayGroup } from './types';
 import { ApiService } from './services/api';
