@@ -16,7 +16,7 @@ const PENDING_RELAY_TTL_MS = 5_000;
 const DEFAULT_AGENT_ID = (import.meta as any).env?.VITE_AGENT_ID ?? 'dev-agent';
 const DEFAULT_AGENT_SECRET = (import.meta as any).env?.VITE_AGENT_SECRET ?? 'secret';
 const IS_TEST_ENV = (typeof process !== 'undefined' && process.env?.NODE_ENV === 'test') || false;
-const BRAND_LOGO_URL = '/washcontrol-logo.svg';
+const BRAND_LOGO_URL = '/washcontrol-logo.png';
 
 const to24h = (val?: string | null): string | null => {
   if (!val) return null;
