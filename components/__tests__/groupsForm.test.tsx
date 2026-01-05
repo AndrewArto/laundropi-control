@@ -41,11 +41,21 @@ import App from '../../App';
 
 describe('Groups form validation', () => {
   beforeEach(() => {
-    mocks.getSession.mockClear();
+    mocks.getSession.mockResolvedValue({ user: null });
+    mocks.login.mockResolvedValue({ user: { username: 'admin', role: 'admin' } });
+    mocks.listAgents.mockResolvedValue([
+      { agentId: 'Brandoa_1', lastHeartbeat: Date.now(), online: true },
+    ]);
   });
 
   it('does not submit when group name is empty', async () => {
     render(<App />);
+    const loginInput = await screen.findByPlaceholderText(/логин/i);
+    const passInput = await screen.findByPlaceholderText(/пароль/i);
+    fireEvent.change(loginInput, { target: { value: 'admin' } });
+    fireEvent.change(passInput, { target: { value: 'password' } });
+    fireEvent.click(screen.getByText(/Войти/i));
+
     const groupsTab = await screen.findByText(/Groups/i, undefined, { timeout: 5000 });
     fireEvent.click(groupsTab);
 
