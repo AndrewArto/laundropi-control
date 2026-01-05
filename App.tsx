@@ -196,7 +196,7 @@ const App: React.FC = () => {
   const handleAuthFailure = (err: unknown) => {
     const status = (err as any)?.status;
     if (status !== 401) return false;
-    setAuthError('Сессия истекла. Войди заново.');
+    setAuthError('Session expired. Please sign in again.');
     setIsAuthenticated(false);
     isAuthenticatedRef.current = false;
     setAuthUser(null);
@@ -406,9 +406,9 @@ const App: React.FC = () => {
     } catch (err) {
       const status = (err as any)?.status;
       if (status === 401) {
-        setAuthError('Неверный логин или пароль');
+        setAuthError('Invalid username or password.');
       } else {
-        setAuthError('Не удалось авторизоваться. Попробуй позже.');
+        setAuthError('Could not sign in. Please try again.');
       }
     }
   };
@@ -1257,24 +1257,24 @@ const App: React.FC = () => {
           </div>
           <form className="space-y-4" onSubmit={handleLoginSubmit}>
             <div>
-              <label className="text-xs text-slate-400 block mb-1">Логин</label>
+              <label className="text-xs text-slate-400 block mb-1">Username</label>
               <input
                 value={authLogin}
                 onChange={(e) => setAuthLogin(e.target.value)}
                 className="w-full bg-slate-900/70 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                placeholder="Введите логин"
+                placeholder="Enter username"
                 autoComplete="username"
                 autoFocus
               />
             </div>
             <div>
-              <label className="text-xs text-slate-400 block mb-1">Пароль</label>
+              <label className="text-xs text-slate-400 block mb-1">Password</label>
               <input
                 type="password"
                 value={authPassword}
                 onChange={(e) => setAuthPassword(e.target.value)}
                 className="w-full bg-slate-900/70 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                placeholder="Введите пароль"
+                placeholder="Enter password"
                 autoComplete="current-password"
               />
             </div>
@@ -1287,11 +1287,8 @@ const App: React.FC = () => {
               type="submit"
               className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-sm font-semibold transition-colors"
             >
-              Войти
+              Sign in
             </button>
-            <p className="text-[11px] text-slate-500 text-center">
-              Логины и хэши паролей хранятся на сервере (UI_USERS + SESSION_SECRET).
-            </p>
           </form>
         </div>
       </div>
