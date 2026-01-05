@@ -27,6 +27,7 @@ dist-ssr
 central.db
 central.db-shm
 central.db-wal
+central.aws.db*
 *.key
 *.crt
 *.csr
