@@ -1,5 +1,7 @@
 import 'dotenv/config';
 import WebSocket = require('ws');
+import * as fs from 'fs';
+import * as path from 'path';
 import { gpio } from './gpio';
 import { createScheduler, ScheduleEntry } from './scheduler';
 import { RELAYS_CONFIG } from './config';
@@ -15,14 +17,26 @@ const parseArg = (flag: string): string | undefined => {
 const AGENT_ID = parseArg('--id') || process.env.AGENT_ID || 'agent-dev';
 const AGENT_SECRET = process.env.AGENT_SECRET || 'secret';
 const AGENT_WS_URL = process.env.AGENT_WS_URL || 'ws://localhost:4000/agent';
+const SCHEDULE_STORAGE_PATH = process.env.AGENT_SCHEDULE_PATH || '/var/lib/laundropi/schedule.json';
 
 let ws: WebSocket | null = null;
 let heartbeatTimer: NodeJS.Timeout | null = null;
 
+const ensureScheduleDir = () => {
+  const dir = path.dirname(SCHEDULE_STORAGE_PATH);
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+  } catch (err) {
+    console.warn(`[agent] failed to ensure schedule dir ${dir}`, err);
+  }
+};
+
+ensureScheduleDir();
+
 const scheduler = createScheduler(
   (relayId, state) => gpio.setRelayState(relayId, state),
   () => gpio.getSnapshot(),
-  '/tmp/laundropi-schedule.json'
+  SCHEDULE_STORAGE_PATH
 );
 scheduler.startScheduler();
 let scheduleVersion: string | null = null;

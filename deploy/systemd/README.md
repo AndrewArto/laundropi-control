@@ -20,6 +20,12 @@ npm run build
 ```
 2) При необходимости поправить `User` и `WorkingDirectory` в `.service` под свой юзер/путь.
    По умолчанию: `User=pi`, `WorkingDirectory=%h/Projects/Laundry/laundropi-control`.
+3) Для агента создайте каталог для локального кеша расписаний:
+```
+sudo mkdir -p /var/lib/laundropi
+sudo chown <user>:<user> /var/lib/laundropi
+```
+Где `<user>` — это значение `User=` в `laundropi-agent.service`. Если хотите другой путь, задайте `AGENT_SCHEDULE_PATH` в `/etc/laundropi/agent.env`.
 
 ## Установка и автозапуск
 Скопируйте юниты в systemd, перезагрузите демона и включите автозапуск:
