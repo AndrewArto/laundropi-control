@@ -1,5 +1,6 @@
 import * as fs from 'fs';
 import * as os from 'os';
+import * as path from 'path';
 import { RELAYS_CONFIG, RelayConfig } from './config';
 
 type RelayState = 'on' | 'off';
@@ -49,9 +50,10 @@ class GpioController {
   private pins: Map<number, any> = new Map();
   private activeLow = true;
 
-  constructor(persistPath = '/tmp/laundropi-relays.json') {
+  constructor(persistPath = process.env.AGENT_RELAY_STATE_PATH || (os.platform() === 'linux' ? '/var/lib/laundropi/relays.json' : '/tmp/laundropi-relays.json')) {
     this.mockPersistPath = persistPath;
     this.driver = this.pickDriver();
+    this.ensurePersistDir();
     this.loadState();
     this.initPins();
   }
@@ -121,6 +123,15 @@ class GpioController {
       fs.writeFileSync(this.mockPersistPath, JSON.stringify(this.getSnapshot(), null, 2));
     } catch (err) {
       console.warn('[gpio] persist failed', err);
+    }
+  }
+
+  private ensurePersistDir() {
+    if (!this.mockPersistPath) return;
+    try {
+      fs.mkdirSync(path.dirname(this.mockPersistPath), { recursive: true });
+    } catch (err) {
+      console.warn('[gpio] ensure dir failed', err);
     }
   }
 

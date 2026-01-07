@@ -26,6 +26,7 @@ sudo mkdir -p /var/lib/laundropi
 sudo chown <user>:<user> /var/lib/laundropi
 ```
 Где `<user>` — это значение `User=` в `laundropi-agent.service`. Если хотите другой путь, задайте `AGENT_SCHEDULE_PATH` в `/etc/laundropi/agent.env`.
+Состояние реле сохраняется в `/var/lib/laundropi/relays.json` (можно переопределить через `AGENT_RELAY_STATE_PATH`).
 
 ## Установка и автозапуск
 Скопируйте юниты в systemd, перезагрузите демона и включите автозапуск:
