@@ -23,6 +23,11 @@ dist-ssr
 *.sln
 *.sw?
 
+# Env files
+.env
+.env.*
+!.env.example
+
 # Local DB and certificates
 central.db
 central.db-shm
