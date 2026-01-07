@@ -26,7 +26,8 @@ dist-ssr
 # Env files
 .env
 .env.*
-!.env.example
+!.env.agent.example
+!.env.central.example
 
 # Local DB and certificates
 central.db
