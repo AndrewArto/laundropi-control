@@ -37,7 +37,7 @@ ensureScheduleDir();
 
 const scheduler = createScheduler(
   (relayId, state) => gpio.setRelayState(relayId, state),
-  () => gpio.getSnapshot(),
+  () => gpio.getSnapshotWithTimestamps(),
   SCHEDULE_STORAGE_PATH
 );
 scheduler.startScheduler();

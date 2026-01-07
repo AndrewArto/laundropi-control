@@ -108,4 +108,52 @@ describe('Scheduler', () => {
     vi.advanceTimersByTime(1000);
     expect(actions.at(-1)).toEqual({ id: 1, state: 'off' });
   });
+
+  it('uses schedule state after a reboot if a boundary elapsed', () => {
+    const actions: Array<{ id: number; state: string }> = [];
+    vi.setSystemTime(new Date('2025-01-06T07:30:00Z')); // Mon 07:30
+
+    const scheduler = createScheduler(
+      (id, state) => actions.push({ id, state }),
+      () => [{ id: 1, state: 'off' as const, updatedAt: new Date('2025-01-06T06:30:00Z').getTime() }],
+      null
+    );
+
+    scheduler.setSchedule(makeSchedule(1, '07:00', '08:00', ['Mon']));
+    scheduler.startScheduler();
+
+    expect(actions).toEqual([{ id: 1, state: 'on' }]);
+  });
+
+  it('keeps last state if no boundary elapsed since last update', () => {
+    const actions: Array<{ id: number; state: string }> = [];
+    vi.setSystemTime(new Date('2025-01-06T07:30:00Z')); // Mon 07:30
+
+    const scheduler = createScheduler(
+      (id, state) => actions.push({ id, state }),
+      () => [{ id: 1, state: 'off' as const, updatedAt: new Date('2025-01-06T07:10:00Z').getTime() }],
+      null
+    );
+
+    scheduler.setSchedule(makeSchedule(1, '07:00', '08:00', ['Mon']));
+    scheduler.startScheduler();
+
+    expect(actions.length).toBe(0);
+  });
+
+  it('applies overnight schedule state if boundary elapsed', () => {
+    const actions: Array<{ id: number; state: string }> = [];
+    vi.setSystemTime(new Date('2025-01-07T00:30:00Z')); // Tue 00:30
+
+    const scheduler = createScheduler(
+      (id, state) => actions.push({ id, state }),
+      () => [{ id: 1, state: 'off' as const, updatedAt: new Date('2025-01-06T22:30:00Z').getTime() }],
+      null
+    );
+
+    scheduler.setSchedule(makeSchedule(1, '23:00', '06:00', ['Mon', 'Tue']));
+    scheduler.startScheduler();
+
+    expect(actions).toEqual([{ id: 1, state: 'on' }]);
+  });
 });

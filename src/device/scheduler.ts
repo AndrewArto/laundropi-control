@@ -7,6 +7,8 @@ export interface ScheduleEntry {
   entries: { days: DayCode[]; from: string; to: string }[];
 }
 
+type RelaySnapshot = { id: number; state: 'on' | 'off'; updatedAt?: number };
+
 class Scheduler {
   private schedule: ScheduleEntry[] = [];
   private timer: NodeJS.Timeout | null = null;
@@ -16,10 +18,10 @@ class Scheduler {
   private suppressUntilBoundary: Set<number> = new Set();
   private persistPath: string | null;
   private applyFn: (relayId: number, state: 'on' | 'off') => void;
-  private getSnapshotFn?: () => { id: number; state: 'on' | 'off' }[];
+  private getSnapshotFn?: () => RelaySnapshot[];
   private debug = process.env.SCHEDULE_DEBUG === '1' || process.env.SCHEDULE_DEBUG === 'true';
 
-  constructor(applyFn: (relayId: number, state: 'on' | 'off') => void, getSnapshotFn?: () => { id: number; state: 'on' | 'off' }[], persistPath: string | null = '/tmp/laundropi-schedule.json') {
+  constructor(applyFn: (relayId: number, state: 'on' | 'off') => void, getSnapshotFn?: () => RelaySnapshot[], persistPath: string | null = '/tmp/laundropi-schedule.json') {
     this.applyFn = applyFn;
     this.getSnapshotFn = getSnapshotFn;
     this.persistPath = persistPath;
@@ -50,6 +52,7 @@ class Scheduler {
 
   startScheduler() {
     if (this.timer) return;
+    this.bootstrapFromPersistedState();
     // Tick every second for better on-time accuracy
     this.timer = setInterval(() => this.tick(), 1_000);
     this.tick(); // immediate evaluation
@@ -76,26 +79,9 @@ class Scheduler {
     this.lastTick = nowTs;
 
     const now = new Date();
-    const daysOrder: DayCode[] = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-    const day = daysOrder[now.getDay()];
-    const prevDay = daysOrder[(now.getDay() + 6) % 7];
-    const hh = String(now.getHours()).padStart(2, '0');
-    const mm = String(now.getMinutes()).padStart(2, '0');
-    const current = `${hh}:${mm}`;
 
     this.schedule.forEach(rule => {
-      const shouldBeOn = rule.entries.some(entry => {
-        const from = entry.from;
-        const to = entry.to;
-        if (from <= to) {
-          // Same-day window
-          return entry.days.includes(day) && current >= from && current < to;
-        }
-        // Overnight window (e.g., 22:00 -> 06:00)
-        const startsToday = entry.days.includes(day) && current >= from;
-        const continuesFromPrev = entry.days.includes(prevDay) && current < to;
-        return startsToday || continuesFromPrev;
-      });
+      const shouldBeOn = this.computeShouldBeOn(rule, now);
       const prevShould = this.lastShouldBeOn.get(rule.relayId);
       const boundary = prevShould !== undefined && prevShould !== shouldBeOn;
       this.lastShouldBeOn.set(rule.relayId, shouldBeOn);
@@ -121,6 +107,94 @@ class Scheduler {
     });
   }
 
+  private bootstrapFromPersistedState(now = new Date()) {
+    if (!this.getSnapshotFn || this.schedule.length === 0) return;
+    const snapshot = this.getSnapshotFn();
+    if (!Array.isArray(snapshot) || snapshot.length === 0) return;
+
+    const nowTs = now.getTime();
+    const snapshotMap = new Map(snapshot.map(entry => [entry.id, entry]));
+
+    this.schedule.forEach(rule => {
+      const state = snapshotMap.get(rule.relayId);
+      const shouldBeOn = this.computeShouldBeOn(rule, now);
+      this.lastShouldBeOn.set(rule.relayId, shouldBeOn);
+
+      if (!state?.updatedAt) {
+        if (state) {
+          this.lastStates.set(rule.relayId, state.state);
+        }
+        return;
+      }
+
+      const nextBoundary = this.getNextBoundaryAfter(rule, new Date(state.updatedAt));
+      if (nextBoundary !== null && nextBoundary <= nowTs) {
+        const nextState: 'on' | 'off' = shouldBeOn ? 'on' : 'off';
+        if (state.state !== nextState) {
+          this.applyFn(rule.relayId, nextState);
+        }
+        this.lastStates.set(rule.relayId, nextState);
+      } else {
+        this.lastStates.set(rule.relayId, state.state);
+      }
+    });
+  }
+
+  private computeShouldBeOn(rule: ScheduleEntry, now: Date) {
+    const daysOrder: DayCode[] = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const day = daysOrder[now.getDay()];
+    const prevDay = daysOrder[(now.getDay() + 6) % 7];
+    const hh = String(now.getHours()).padStart(2, '0');
+    const mm = String(now.getMinutes()).padStart(2, '0');
+    const current = `${hh}:${mm}`;
+
+    return rule.entries.some(entry => {
+      const from = entry.from;
+      const to = entry.to;
+      if (from <= to) {
+        // Same-day window
+        return entry.days.includes(day) && current >= from && current < to;
+      }
+      // Overnight window (e.g., 22:00 -> 06:00)
+      const startsToday = entry.days.includes(day) && current >= from;
+      const continuesFromPrev = entry.days.includes(prevDay) && current < to;
+      return startsToday || continuesFromPrev;
+    });
+  }
+
+  private getNextBoundaryAfter(rule: ScheduleEntry, since: Date): number | null {
+    const daysOrder: DayCode[] = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const sinceTs = since.getTime();
+    const candidates: number[] = [];
+
+    for (let dayOffset = 0; dayOffset <= 7; dayOffset += 1) {
+      const base = new Date(since);
+      base.setDate(base.getDate() + dayOffset);
+      const dayName = daysOrder[base.getDay()];
+
+      rule.entries.forEach(entry => {
+        if (!entry.days.includes(dayName)) return;
+
+        const start = this.withTime(base, entry.from).getTime();
+        if (start > sinceTs) candidates.push(start);
+
+        const endBase = entry.from <= entry.to ? base : new Date(base.getTime() + 24 * 60 * 60 * 1000);
+        const end = this.withTime(endBase, entry.to).getTime();
+        if (end > sinceTs) candidates.push(end);
+      });
+    }
+
+    if (!candidates.length) return null;
+    return Math.min(...candidates);
+  }
+
+  private withTime(base: Date, time: string) {
+    const [hh, mm] = time.split(':').map(val => Number.parseInt(val, 10));
+    const next = new Date(base);
+    next.setHours(hh || 0, mm || 0, 0, 0);
+    return next;
+  }
+
   private persistSchedule(path = this.persistPath) {
     if (!path) return;
     try {
@@ -133,7 +207,7 @@ class Scheduler {
 
 export function createScheduler(
   applyFn: (relayId: number, state: 'on' | 'off') => void,
-  getSnapshotFn?: () => { id: number; state: 'on' | 'off' }[],
+  getSnapshotFn?: () => RelaySnapshot[],
   persistPath?: string | null
 ) {
   const scheduler = new Scheduler(

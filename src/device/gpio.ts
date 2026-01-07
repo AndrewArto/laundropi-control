@@ -45,6 +45,7 @@ class ShellGpio {
 
 class GpioController {
   private state: Map<number, RelayState> = new Map();
+  private lastUpdated: Map<number, number> = new Map();
   private mockPersistPath: string;
   private driver: Driver;
   private pins: Map<number, any> = new Map();
@@ -84,6 +85,7 @@ class GpioController {
 
   setRelayState(relayId: number, state: RelayState) {
     this.state.set(relayId, state);
+    this.lastUpdated.set(relayId, Date.now());
     this.persistState();
     const relay = RELAYS_CONFIG.find(r => r.id === relayId);
     if (!relay) return;
@@ -96,6 +98,14 @@ class GpioController {
 
   getSnapshot(): { id: number; state: RelayState }[] {
     return Array.from(this.state.entries()).map(([id, state]) => ({ id, state }));
+  }
+
+  getSnapshotWithTimestamps(): { id: number; state: RelayState; updatedAt?: number }[] {
+    return Array.from(this.state.entries()).map(([id, state]) => ({
+      id,
+      state,
+      updatedAt: this.lastUpdated.get(id),
+    }));
   }
 
   getMeta(): RelayConfig[] {
@@ -120,7 +130,7 @@ class GpioController {
 
   private persistState() {
     try {
-      fs.writeFileSync(this.mockPersistPath, JSON.stringify(this.getSnapshot(), null, 2));
+      fs.writeFileSync(this.mockPersistPath, JSON.stringify(this.getSnapshotWithTimestamps(), null, 2));
     } catch (err) {
       console.warn('[gpio] persist failed', err);
     }
@@ -138,11 +148,20 @@ class GpioController {
   private loadState() {
     try {
       if (fs.existsSync(this.mockPersistPath)) {
+        const stat = fs.statSync(this.mockPersistPath);
         const raw = fs.readFileSync(this.mockPersistPath, 'utf-8');
-        const arr = JSON.parse(raw) as { id: number; state: RelayState }[];
-        arr.forEach(r => this.state.set(r.id, r.state));
+        const arr = JSON.parse(raw) as { id: number; state: RelayState; updatedAt?: number }[];
+        arr.forEach(r => {
+          this.state.set(r.id, r.state);
+          const ts = typeof r.updatedAt === 'number' ? r.updatedAt : stat.mtimeMs;
+          this.lastUpdated.set(r.id, ts);
+        });
       } else {
-        RELAYS_CONFIG.forEach(r => this.state.set(r.id, 'off'));
+        const now = Date.now();
+        RELAYS_CONFIG.forEach(r => {
+          this.state.set(r.id, 'off');
+          this.lastUpdated.set(r.id, now);
+        });
       }
     } catch (err) {
       console.warn('[gpio] load failed', err);
