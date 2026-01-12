@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { LayoutDashboard, CalendarClock, Settings, Trash2, Cpu, Server, Pencil, Plus, Lock, Coins, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ChevronDown, ChevronUp, Download } from 'lucide-react';
 import RelayCard from './components/RelayCard';
-import { Relay, Schedule, RelayType, RelayGroup, RevenueEntry, RevenueAuditEntry, RevenueSummary, UiUser } from './types';
+import { Relay, Schedule, RelayType, RelayGroup, RevenueEntry, RevenueAuditEntry, RevenueSummary, UiUser, CameraConfig } from './types';
 import { ApiService } from './services/api';
 import { DAYS_OF_WEEK } from './constants';
 
@@ -169,6 +169,14 @@ const App: React.FC = () => {
   const agentOnline = agentHeartbeat !== null && (Date.now() - agentHeartbeat) < AGENT_STALE_MS;
   const controlsDisabled = IS_TEST_ENV ? false : (!serverOnline || !agentOnline);
   const [laundries, setLaundries] = useState<Laundry[]>([]);
+  const laundriesRef = React.useRef<Laundry[]>([]);
+  const [cameraConfigs, setCameraConfigs] = useState<Record<string, CameraConfig[]>>({});
+  const [cameraLoading, setCameraLoading] = useState(false);
+  const [cameraError, setCameraError] = useState<string | null>(null);
+  const [cameraNameDrafts, setCameraNameDrafts] = useState<Record<string, string>>({});
+  const [cameraSaving, setCameraSaving] = useState<Record<string, boolean>>({});
+  const [cameraSaveErrors, setCameraSaveErrors] = useState<Record<string, string | null>>({});
+  const [cameraRefreshTick, setCameraRefreshTick] = useState(0);
   const isLaundryOnline = React.useCallback((laundry: Laundry) => {
     const fresh = laundry.lastHeartbeat ? (Date.now() - laundry.lastHeartbeat) < AGENT_STALE_MS : false;
     return serverOnline && laundry.isOnline && fresh;
@@ -301,6 +309,39 @@ const App: React.FC = () => {
     };
   };
 
+  const cameraDraftKey = (agentId: string, cameraId: string) => `${agentId}::${cameraId}`;
+  const cameraPositionOrder = (position: string) => (position === 'front' ? 0 : position === 'back' ? 1 : 9);
+
+  const buildCameraPreviewUrl = (camera: CameraConfig, agentId: string) => {
+    const base = camera.previewUrl || `/api/agents/${encodeURIComponent(agentId)}/cameras/${encodeURIComponent(camera.id)}/frame`;
+    const sep = base.includes('?') ? '&' : '?';
+    return `${base}${sep}t=${cameraRefreshTick}`;
+  };
+
+  const getCameraSlots = (agentId: string) => {
+    const existing = cameraConfigs[agentId] || [];
+    const byPosition = new Map(existing.map(cam => [cam.position, cam]));
+    const defaults = [
+      { position: 'front', name: 'Front' },
+      { position: 'back', name: 'Back' },
+    ];
+    const slots = defaults.map(def => {
+      const cam = byPosition.get(def.position);
+      if (cam) return cam;
+      const id = `${agentId}:${def.position}`;
+      return {
+        id,
+        agentId,
+        name: def.name,
+        position: def.position,
+        sourceType: 'pattern' as const,
+        enabled: true,
+        previewUrl: `/api/agents/${encodeURIComponent(agentId)}/cameras/${encodeURIComponent(id)}/frame`,
+      };
+    });
+    return slots.sort((a, b) => cameraPositionOrder(a.position) - cameraPositionOrder(b.position));
+  };
+
   const resetUiState = () => {
     setRelays([]);
     setSchedules([]);
@@ -310,6 +351,13 @@ const App: React.FC = () => {
     relayVisibilityRef.current = {};
     latestRelaysRef.current = [];
     setLaundries([]);
+    setCameraConfigs({});
+    setCameraLoading(false);
+    setCameraError(null);
+    setCameraNameDrafts({});
+    setCameraSaving({});
+    setCameraSaveErrors({});
+    setCameraRefreshTick(0);
     setAgentId(null);
     setAgentHeartbeat(null);
     setIsMockMode(true);
@@ -537,6 +585,47 @@ const App: React.FC = () => {
     }
   };
 
+  const fetchCameras = async () => {
+    const items = laundriesRef.current;
+    if (!items.length) {
+      setCameraConfigs({});
+      setCameraLoading(false);
+      setCameraError(null);
+      return;
+    }
+    setCameraLoading(true);
+    setCameraError(null);
+    try {
+      const results = await Promise.all(items.map(async (laundry) => {
+        try {
+          const res = await ApiService.listCameras(laundry.id);
+          return { agentId: laundry.id, cameras: res.cameras || [] };
+        } catch (err) {
+          if (handleAuthFailure(err)) return { agentId: laundry.id, cameras: [] };
+          console.error('Camera list fetch failed', err);
+          return { agentId: laundry.id, cameras: [] };
+        }
+      }));
+      const nextConfigs: Record<string, CameraConfig[]> = {};
+      const nextDrafts: Record<string, string> = {};
+      results.forEach(({ agentId, cameras }) => {
+        const sorted = [...(cameras || [])].sort((a, b) => cameraPositionOrder(a.position) - cameraPositionOrder(b.position));
+        nextConfigs[agentId] = sorted;
+        sorted.forEach(camera => {
+          nextDrafts[cameraDraftKey(agentId, camera.id)] = camera.name;
+        });
+      });
+      setCameraConfigs(nextConfigs);
+      setCameraNameDrafts(prev => ({ ...prev, ...nextDrafts }));
+    } catch (err) {
+      if (handleAuthFailure(err)) return;
+      console.error('Camera list fetch failed', err);
+      setCameraError('Unable to load cameras.');
+    } finally {
+      setCameraLoading(false);
+    }
+  };
+
   const refreshConnectivityOnly = async () => {
     try {
       const agentIndex = await ApiService.listAgents();
@@ -732,8 +821,33 @@ const App: React.FC = () => {
   }, [isAuthenticated]);
 
   useEffect(() => {
+    if (!isAuthenticated) return;
+    fetchCameras();
+  }, [isAuthenticated, laundryIdKey]);
+
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    const timer = setInterval(() => {
+      fetchCameras();
+    }, 30_000);
+    return () => clearInterval(timer);
+  }, [isAuthenticated]);
+
+  useEffect(() => {
+    if (!isAuthenticated || activeTab !== Tab.DASHBOARD) return;
+    const timer = setInterval(() => {
+      setCameraRefreshTick((prev) => prev + 1);
+    }, 4000);
+    return () => clearInterval(timer);
+  }, [isAuthenticated, activeTab]);
+
+  useEffect(() => {
     isAuthenticatedRef.current = isAuthenticated;
   }, [isAuthenticated]);
+
+  useEffect(() => {
+    laundriesRef.current = laundries;
+  }, [laundries]);
 
   useEffect(() => {
     isRelayEditModeRef.current = isRelayEditMode;
@@ -972,6 +1086,38 @@ const App: React.FC = () => {
   const handleRelayNameInput = (agentId: string, id: number, name: string) => {
     const key = relayDraftKey(agentId, id);
     setRelayNameDrafts(prev => ({ ...prev, [key]: name }));
+  };
+
+  const handleCameraNameInput = (agentId: string, cameraId: string, name: string) => {
+    const key = cameraDraftKey(agentId, cameraId);
+    setCameraNameDrafts(prev => ({ ...prev, [key]: name }));
+    setCameraSaveErrors(prev => ({ ...prev, [key]: null }));
+  };
+
+  const handleCameraNameSave = async (agentId: string, cameraId: string) => {
+    const key = cameraDraftKey(agentId, cameraId);
+    const name = (cameraNameDrafts[key] || '').trim();
+    if (!name) {
+      setCameraSaveErrors(prev => ({ ...prev, [key]: 'Camera name is required.' }));
+      return;
+    }
+    setCameraSaving(prev => ({ ...prev, [key]: true }));
+    setCameraSaveErrors(prev => ({ ...prev, [key]: null }));
+    try {
+      const res = await ApiService.updateCamera(agentId, cameraId, { name });
+      setCameraConfigs(prev => {
+        const list = prev[agentId] || [];
+        const nextList = list.map(cam => cam.id === cameraId ? { ...cam, name: res.camera.name } : cam);
+        return { ...prev, [agentId]: nextList };
+      });
+      setCameraNameDrafts(prev => ({ ...prev, [key]: res.camera.name }));
+    } catch (err) {
+      if (handleAuthFailure(err)) return;
+      console.error('Camera rename failed', err);
+      setCameraSaveErrors(prev => ({ ...prev, [key]: 'Failed to update camera name.' }));
+    } finally {
+      setCameraSaving(prev => ({ ...prev, [key]: false }));
+    }
   };
 
   const handleToggleVisibility = async (id: number, agent: string = primaryAgentId) => {
@@ -1322,6 +1468,15 @@ const App: React.FC = () => {
         </div>
       </div>
 
+      {cameraError && (
+        <div className="bg-red-500/10 border border-red-500/40 text-red-200 px-3 py-2 rounded-lg text-sm">
+          {cameraError}
+        </div>
+      )}
+      {cameraLoading && (
+        <div className="text-xs text-slate-500">Loading cameras...</div>
+      )}
+
       <div ref={relayEditAreaRef} className="space-y-6">
         {laundries.map((laundry, idx) => {
           const online = isLaundryOnline(laundry);
@@ -1330,6 +1485,7 @@ const App: React.FC = () => {
           const visibleRelays = isRelayEditMode ? relaysList : relaysList.filter(r => !r.isHidden);
           const disabled = !online;
           const mock = laundry.isMock || !online;
+          const cameras = getCameraSlots(laundry.id);
           return (
             <div key={laundry.id} className="bg-slate-800 border border-slate-700 rounded-xl p-4 space-y-4">
               <div className="flex items-center gap-3 flex-wrap">
@@ -1380,6 +1536,71 @@ const App: React.FC = () => {
                     isDisabled={disabled}
                   />
                 ))}
+              </div>
+
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="text-xs uppercase tracking-wide text-slate-400">Cameras</div>
+                  {isRelayEditMode && (
+                    <div className="text-[11px] text-slate-500">Rename</div>
+                  )}
+                </div>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {cameras.map(camera => {
+                    const key = cameraDraftKey(laundry.id, camera.id);
+                    const nameValue = cameraNameDrafts[key] ?? camera.name;
+                    const saving = Boolean(cameraSaving[key]);
+                    const saveError = cameraSaveErrors[key];
+                    return (
+                      <div key={camera.id} className="bg-slate-900/40 border border-slate-700 rounded-lg overflow-hidden">
+                        <div className="flex items-center justify-between gap-2 px-3 py-2 border-b border-slate-700">
+                          {isRelayEditMode ? (
+                            <input
+                              value={nameValue}
+                              onChange={(e) => handleCameraNameInput(laundry.id, camera.id, e.target.value)}
+                              className="flex-1 min-w-0 bg-transparent text-sm text-slate-200 focus:outline-none"
+                              placeholder="Camera name"
+                            />
+                          ) : (
+                            <div className="text-sm text-slate-200 truncate">{camera.name}</div>
+                          )}
+                          <span className="text-[10px] uppercase tracking-wide text-slate-500">{camera.position}</span>
+                          {isRelayEditMode && (
+                            <button
+                              onClick={() => handleCameraNameSave(laundry.id, camera.id)}
+                              disabled={saving}
+                              className="text-[10px] px-2 py-1 rounded-md border border-slate-600 text-slate-300 hover:border-slate-500 hover:text-white disabled:opacity-50"
+                            >
+                              Save
+                            </button>
+                          )}
+                        </div>
+                        <div className="relative aspect-video bg-slate-950">
+                          <img
+                            src={buildCameraPreviewUrl(camera, laundry.id)}
+                            alt={`${camera.name} feed`}
+                            className="absolute inset-0 w-full h-full object-cover"
+                          />
+                          {!online && (
+                            <div className="absolute inset-0 bg-slate-900/70 flex items-center justify-center text-xs text-slate-300">
+                              Offline
+                            </div>
+                          )}
+                          {camera.sourceType === 'pattern' && (
+                            <div className="absolute top-2 right-2 text-[10px] px-2 py-1 rounded-full border border-amber-400 text-amber-200 bg-amber-500/10">
+                              Mock
+                            </div>
+                          )}
+                        </div>
+                        {saveError && (
+                          <div className="text-[11px] text-red-300 px-3 py-2 border-t border-red-500/20 bg-red-500/5">
+                            {saveError}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             </div>
           );

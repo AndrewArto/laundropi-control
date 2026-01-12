@@ -1,5 +1,5 @@
 
-import { Relay, Schedule, RelayType, RelayGroup, RevenueEntry, RevenueAuditEntry, RevenueSummary, RevenueDeduction, UiUser } from '../types';
+import { Relay, Schedule, RelayType, RelayGroup, RevenueEntry, RevenueAuditEntry, RevenueSummary, RevenueDeduction, UiUser, CameraConfig } from '../types';
 
 const BASE_URL = (() => {
   if (typeof window === 'undefined') return '';
@@ -144,6 +144,20 @@ export const ApiService = {
     const id = agentId || AGENT_ID;
     const res = await request(`${API_BASE}/dashboard?agentId=${encodeURIComponent(id)}`, { signal: controller.signal });
     clearTimeout(timeoutId);
+    return await res.json();
+  },
+
+  async listCameras(agentId: string): Promise<{ cameras: CameraConfig[] }> {
+    const res = await request(`${API_BASE}/agents/${encodeURIComponent(agentId)}/cameras`);
+    return await res.json();
+  },
+
+  async updateCamera(agentId: string, cameraId: string, payload: Partial<CameraConfig> & { username?: string | null; password?: string | null }): Promise<{ camera: CameraConfig }> {
+    const res = await request(`${API_BASE}/agents/${encodeURIComponent(agentId)}/cameras/${encodeURIComponent(cameraId)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
     return await res.json();
   },
 

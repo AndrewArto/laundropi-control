@@ -93,3 +93,17 @@ export interface RevenueSummary {
   profitLossByAgent: Record<string, number>;
   profitLossOverall: number;
 }
+
+export type CameraSourceType = 'rtsp' | 'pattern';
+
+export interface CameraConfig {
+  id: string;
+  agentId: string;
+  name: string;
+  position: string;
+  sourceType: CameraSourceType;
+  rtspUrl?: string | null;
+  enabled: boolean;
+  hasCredentials?: boolean;
+  previewUrl?: string;
+}
