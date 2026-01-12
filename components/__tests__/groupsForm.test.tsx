@@ -20,9 +20,16 @@ const mocks = vi.hoisted(() => {
   const listAgents = vi.fn().mockResolvedValue([
     { agentId: 'Brandoa_1', lastHeartbeat: Date.now(), online: true },
   ]);
+  const getRevenueEntry = vi.fn().mockResolvedValue({ entry: null, audit: [] });
+  const getRevenueSummary = vi.fn().mockResolvedValue({
+    date: '2026-01-01',
+    week: { startDate: '2026-01-01', endDate: '2026-01-07', totalsByAgent: {}, overall: 0 },
+    month: { startDate: '2026-01-01', endDate: '2026-01-31', totalsByAgent: {}, overall: 0 },
+  });
+  const listRevenueEntryDates = vi.fn().mockResolvedValue([]);
   const login = vi.fn();
   const logout = vi.fn();
-  return { addGroup, getStatus, getSession, listAgents, login, logout };
+  return { addGroup, getStatus, getSession, listAgents, getRevenueEntry, getRevenueSummary, listRevenueEntryDates, login, logout };
 });
 
 vi.mock('../../services/api', () => ({
@@ -31,6 +38,9 @@ vi.mock('../../services/api', () => ({
     getStatus: mocks.getStatus,
     getSession: mocks.getSession,
     listAgents: mocks.listAgents,
+    getRevenueEntry: mocks.getRevenueEntry,
+    getRevenueSummary: mocks.getRevenueSummary,
+    listRevenueEntryDates: mocks.listRevenueEntryDates,
     login: mocks.login,
     logout: mocks.logout,
   },
@@ -50,11 +60,11 @@ describe('Groups form validation', () => {
 
   it('does not submit when group name is empty', async () => {
     render(<App />);
-    const loginInput = await screen.findByPlaceholderText(/логин/i);
-    const passInput = await screen.findByPlaceholderText(/пароль/i);
+    const loginInput = await screen.findByPlaceholderText(/enter username/i);
+    const passInput = await screen.findByPlaceholderText(/enter password/i);
     fireEvent.change(loginInput, { target: { value: 'admin' } });
     fireEvent.change(passInput, { target: { value: 'password' } });
-    fireEvent.click(screen.getByText(/Войти/i));
+    fireEvent.click(screen.getByText(/sign in/i));
 
     const groupsTab = await screen.findByText(/Groups/i, undefined, { timeout: 5000 });
     fireEvent.click(groupsTab);

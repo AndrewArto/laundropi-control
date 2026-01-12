@@ -1,12 +1,17 @@
 import request from 'supertest';
+import { describe, it, expect, vi } from 'vitest';
 
 const setupApp = async () => {
+  vi.resetModules();
   process.env.NODE_ENV = 'test';
   process.env.CENTRAL_DB_PATH = ':memory:';
+  process.env.CENTRAL_ENV_FILE = '/dev/null';
   process.env.ALLOW_INSECURE = 'true';
   process.env.CORS_ORIGINS = 'http://localhost';
   process.env.REQUIRE_CORS_ORIGINS = 'false';
   process.env.ALLOW_DYNAMIC_AGENT_REGISTRATION = 'true';
+  process.env.AGENT_SECRETS = '';
+  process.env.LAUNDRY_IDS = '';
   const mod = await import('../index');
   return mod.app as import('express').Express;
 };

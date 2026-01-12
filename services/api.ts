@@ -1,5 +1,5 @@
 
-import { Relay, Schedule, RelayType, RelayGroup } from '../types';
+import { Relay, Schedule, RelayType, RelayGroup, RevenueEntry, RevenueAuditEntry, RevenueSummary, RevenueDeduction, UiUser } from '../types';
 
 const BASE_URL = (() => {
   if (typeof window === 'undefined') return '';
@@ -59,6 +59,20 @@ const toEntries = (agentId: string, group: Partial<RelayGroup>): { agentId: stri
   return ids.length ? [{ agentId, relayIds: ids }] : [];
 };
 
+type RevenueEntryInput = {
+  entryDate: string;
+  coinsTotal: number;
+  euroCoinsCount: number;
+  billsTotal: number;
+  deductions: RevenueDeduction[];
+};
+
+type RevenueEntryListParams = {
+  startDate?: string;
+  endDate?: string;
+  agentId?: string;
+};
+
 export const ApiService = {
   async getSession(): Promise<{ user: { username: string; role: string } | null }> {
     const res = await request(`${AUTH_BASE}/session`);
@@ -76,6 +90,35 @@ export const ApiService = {
 
   async logout(): Promise<void> {
     await request(`${AUTH_BASE}/logout`, { method: 'POST' });
+  },
+
+  async listUsers(): Promise<UiUser[]> {
+    const res = await request(`${API_BASE}/users`);
+    return await res.json();
+  },
+
+  async createUser(username: string, password: string, role: 'admin' | 'user'): Promise<void> {
+    await request(`${API_BASE}/users`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password, role })
+    });
+  },
+
+  async updateUserRole(username: string, role: 'admin' | 'user'): Promise<void> {
+    await request(`${API_BASE}/users/${encodeURIComponent(username)}/role`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ role })
+    });
+  },
+
+  async updateUserPassword(username: string, password: string): Promise<void> {
+    await request(`${API_BASE}/users/${encodeURIComponent(username)}/password`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password })
+    });
   },
 
   async listAgents(): Promise<{ agentId: string; lastHeartbeat: number | null; online: boolean }[]> {
@@ -216,5 +259,43 @@ export const ApiService = {
       body: JSON.stringify({ action: _action })
     });
     return [];
-  }
+  },
+
+  async getRevenueEntry(agentId: string, date: string): Promise<{ entry: RevenueEntry | null; audit: RevenueAuditEntry[] }> {
+    const res = await request(`${API_BASE}/revenue/${encodeURIComponent(agentId)}?date=${encodeURIComponent(date)}`);
+    return await res.json();
+  },
+
+  async saveRevenueEntry(agentId: string, payload: RevenueEntryInput): Promise<{ entry: RevenueEntry; audit: RevenueAuditEntry[]; unchanged?: boolean }> {
+    const res = await request(`${API_BASE}/revenue/${encodeURIComponent(agentId)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    return await res.json();
+  },
+
+  async getRevenueSummary(date: string): Promise<{ date: string; week: RevenueSummary; month: RevenueSummary }> {
+    const res = await request(`${API_BASE}/revenue/summary?date=${encodeURIComponent(date)}`);
+    return await res.json();
+  },
+
+  async listRevenueEntries(params: RevenueEntryListParams = {}): Promise<RevenueEntry[]> {
+    const query = new URLSearchParams();
+    if (params.startDate) query.set('startDate', params.startDate);
+    if (params.endDate) query.set('endDate', params.endDate);
+    if (params.agentId) query.set('agentId', params.agentId);
+    const url = `${API_BASE}/revenue/entries${query.toString() ? `?${query.toString()}` : ''}`;
+    const res = await request(url);
+    const payload = await res.json();
+    return payload.entries || [];
+  },
+
+  async listRevenueEntryDates(startDate: string, endDate: string, agentId?: string): Promise<string[]> {
+    const query = new URLSearchParams({ startDate, endDate });
+    if (agentId) query.set('agentId', agentId);
+    const res = await request(`${API_BASE}/revenue/dates?${query.toString()}`);
+    const payload = await res.json();
+    return payload.dates || [];
+  },
 };

@@ -1,13 +1,14 @@
 import React, { useEffect, useState } from 'react';
-import { LayoutDashboard, CalendarClock, Settings, Trash2, Cpu, Server, Pencil, Plus, Lock } from 'lucide-react';
+import { LayoutDashboard, CalendarClock, Settings, Trash2, Cpu, Server, Pencil, Plus, Lock, Coins, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ChevronDown, ChevronUp, Download } from 'lucide-react';
 import RelayCard from './components/RelayCard';
-import { Relay, Schedule, RelayType, RelayGroup } from './types';
+import { Relay, Schedule, RelayType, RelayGroup, RevenueEntry, RevenueAuditEntry, RevenueSummary, UiUser } from './types';
 import { ApiService } from './services/api';
 import { DAYS_OF_WEEK } from './constants';
 
 enum Tab {
   DASHBOARD = 'DASHBOARD',
   SCHEDULE = 'SCHEDULE',
+  REVENUE = 'REVENUE',
   SETTINGS = 'SETTINGS'
 }
 
@@ -45,6 +46,72 @@ const normalizeTimeInput = (val: string): string => {
   return `${digits.slice(0, 2)}:${digits.slice(2)}`;
 };
 
+const toDateInput = (date: Date) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+const parseDateParts = (value: string) => {
+  const match = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) return null;
+  if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+  return { year, month, day };
+};
+
+const getDaysInMonth = (year: number, month: number) => new Date(year, month, 0).getDate();
+
+const shiftDateByDays = (value: string, delta: number) => {
+  const parts = parseDateParts(value);
+  if (!parts) return value;
+  const date = new Date(parts.year, parts.month - 1, parts.day);
+  date.setDate(date.getDate() + delta);
+  return toDateInput(date);
+};
+
+const shiftDateByMonths = (value: string, delta: number) => {
+  const parts = parseDateParts(value);
+  if (!parts) return value;
+  const base = new Date(parts.year, parts.month - 1, 1);
+  base.setMonth(base.getMonth() + delta);
+  const nextYear = base.getFullYear();
+  const nextMonth = base.getMonth() + 1;
+  const maxDay = getDaysInMonth(nextYear, nextMonth);
+  const day = Math.min(parts.day, maxDay);
+  return toDateInput(new Date(nextYear, nextMonth - 1, day));
+};
+
+const getMonthRange = (value: string) => {
+  const parts = parseDateParts(value);
+  if (!parts) return null;
+  const daysInMonth = getDaysInMonth(parts.year, parts.month);
+  const monthStr = String(parts.month).padStart(2, '0');
+  return {
+    startDate: `${parts.year}-${monthStr}-01`,
+    endDate: `${parts.year}-${monthStr}-${String(daysInMonth).padStart(2, '0')}`,
+    year: parts.year,
+    month: parts.month,
+    daysInMonth,
+  };
+};
+
+const formatMoney = (value?: number | null) => {
+  if (value === null || value === undefined || !Number.isFinite(value)) return '0.00';
+  return value.toFixed(2);
+};
+
+const makeDeductionId = () => `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
+const formatTimestamp = (ts: number) => new Date(ts).toLocaleString();
+const formatLastLogin = (ts: number | null) => (ts ? formatTimestamp(ts) : 'Never');
+const isRevenueNumericInput = (value: string) => /^(\d+([.,]\d*)?|[.,]\d*)?$/.test(value);
+const normalizeDecimalInput = (value: string) => value.replace(',', '.');
+
 const App: React.FC = () => {
   console.log('[LaundroPi] App mounted render cycle start');
 
@@ -58,6 +125,14 @@ const App: React.FC = () => {
   };
 
   type RelaySelection = { agentId: string; relayId: number };
+
+  type RevenueDraftDeduction = { id: string; amount: string; comment: string };
+  type RevenueDraft = {
+    coinsTotal: string;
+    euroCoinsCount: string;
+    billsTotal: string;
+    deductions: RevenueDraftDeduction[];
+  };
 
   const [activeTab, setActiveTab] = useState<Tab>(Tab.DASHBOARD);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -82,6 +157,8 @@ const App: React.FC = () => {
   const [isRelayEditMode, setIsRelayEditMode] = useState(false);
   const isRelayEditModeRef = React.useRef(false);
   const editingGroupIdRef = React.useRef<string | null>(null);
+  const relayEditAreaRef = React.useRef<HTMLDivElement | null>(null);
+  const groupEditAreaRef = React.useRef<HTMLDivElement | null>(null);
   const isAuthenticatedRef = React.useRef(false);
   const [relayNameDrafts, setRelayNameDrafts] = useState<Record<string, string>>({});
   const [relayVisibility, setRelayVisibility] = useState<Record<string, boolean>>({});
@@ -97,6 +174,36 @@ const App: React.FC = () => {
   const [newLaundryInput, setNewLaundryInput] = useState('');
   const [newLaundrySecret, setNewLaundrySecret] = useState(DEFAULT_AGENT_SECRET);
   const pendingRelayStatesRef = React.useRef<Map<string, { state: boolean; updatedAt: number }>>(new Map());
+  const laundryIdKey = React.useMemo(() => laundries.map(l => l.id).sort().join('|'), [laundries]);
+
+  const [revenueDate, setRevenueDate] = useState<string>(() => toDateInput(new Date()));
+  const [revenueEntries, setRevenueEntries] = useState<Record<string, RevenueEntry | null>>({});
+  const [revenueDrafts, setRevenueDrafts] = useState<Record<string, RevenueDraft>>({});
+  const [revenueAudit, setRevenueAudit] = useState<Record<string, RevenueAuditEntry[]>>({});
+  const [revenueSummary, setRevenueSummary] = useState<{ date: string; week: RevenueSummary; month: RevenueSummary } | null>(null);
+  const [revenueLoading, setRevenueLoading] = useState(false);
+  const [revenueError, setRevenueError] = useState<string | null>(null);
+  const [revenueSaving, setRevenueSaving] = useState<Record<string, boolean>>({});
+  const [revenueSaveErrors, setRevenueSaveErrors] = useState<Record<string, string | null>>({});
+  const [revenueView, setRevenueView] = useState<'daily' | 'all'>('daily');
+  const [revenueEntryDates, setRevenueEntryDates] = useState<string[]>([]);
+  const [revenueAllEntries, setRevenueAllEntries] = useState<RevenueEntry[]>([]);
+  const [revenueAllLoading, setRevenueAllLoading] = useState(false);
+  const [revenueAllError, setRevenueAllError] = useState<string | null>(null);
+  const [isRevenueCalendarOpen, setIsRevenueCalendarOpen] = useState(false);
+
+  const [users, setUsers] = useState<UiUser[]>([]);
+  const [usersLoading, setUsersLoading] = useState(false);
+  const [usersError, setUsersError] = useState<string | null>(null);
+  const [userCreateError, setUserCreateError] = useState<string | null>(null);
+  const [userCreateLoading, setUserCreateLoading] = useState(false);
+  const [newUserName, setNewUserName] = useState('');
+  const [newUserPassword, setNewUserPassword] = useState('');
+  const [newUserRole, setNewUserRole] = useState<'admin' | 'user'>('user');
+  const [userRoleDrafts, setUserRoleDrafts] = useState<Record<string, 'admin' | 'user'>>({});
+  const [userPasswordDrafts, setUserPasswordDrafts] = useState<Record<string, string>>({});
+  const [userSaving, setUserSaving] = useState<Record<string, boolean>>({});
+  const [userSaveErrors, setUserSaveErrors] = useState<Record<string, string | null>>({});
 
   const applyVisibility = (agentId: string, list: Relay[]) => {
     const visMap = relayVisibilityRef.current;
@@ -191,6 +298,92 @@ const App: React.FC = () => {
     setEditingGroupId(null);
     editingGroupIdRef.current = null;
     setServerOnline(true);
+    setRevenueEntries({});
+    setRevenueDrafts({});
+    setRevenueAudit({});
+    setRevenueSummary(null);
+    setRevenueLoading(false);
+    setRevenueError(null);
+    setRevenueSaving({});
+    setRevenueSaveErrors({});
+    setRevenueView('daily');
+    setRevenueEntryDates([]);
+    setRevenueAllEntries([]);
+    setRevenueAllLoading(false);
+    setRevenueAllError(null);
+    setIsRevenueCalendarOpen(false);
+    setRevenueDate(toDateInput(new Date()));
+    setUsers([]);
+    setUsersLoading(false);
+    setUsersError(null);
+    setUserCreateError(null);
+    setUserCreateLoading(false);
+    setNewUserName('');
+    setNewUserPassword('');
+    setNewUserRole('user');
+    setUserRoleDrafts({});
+    setUserPasswordDrafts({});
+    setUserSaving({});
+    setUserSaveErrors({});
+  };
+
+  const buildRevenueDraft = (entry: RevenueEntry | null): RevenueDraft => ({
+    coinsTotal: entry ? formatMoney(entry.coinsTotal) : '',
+    euroCoinsCount: entry ? String(entry.euroCoinsCount) : '',
+    billsTotal: entry ? formatMoney(entry.billsTotal) : '',
+    deductions: entry?.deductions?.map(d => ({
+      id: makeDeductionId(),
+      amount: formatMoney(d.amount),
+      comment: d.comment,
+    })) || [],
+  });
+
+  const parseMoneyInput = (value: string) => {
+    if (!value.trim()) return 0;
+    const num = Number(normalizeDecimalInput(value.trim()));
+    if (!Number.isFinite(num) || num < 0) return null;
+    return Math.round(num * 100) / 100;
+  };
+
+  const parseCountInput = (value: string) => {
+    if (!value.trim()) return 0;
+    const num = Number(normalizeDecimalInput(value.trim()));
+    if (!Number.isFinite(num) || num < 0 || !Number.isInteger(num)) return null;
+    return num;
+  };
+
+  const normalizeDeductionDrafts = (drafts: RevenueDraftDeduction[]) => {
+    const normalized: { amount: number; comment: string }[] = [];
+    for (const item of drafts) {
+      const amountText = item.amount.trim();
+      const comment = item.comment.trim();
+      if (!amountText && !comment) continue;
+      if (!comment) return { error: 'Deduction comment is required.', list: [] };
+      const amount = parseMoneyInput(amountText);
+      if (amount === null) return { error: 'Deduction amount must be a non-negative number.', list: [] };
+      normalized.push({ amount, comment });
+    }
+    return { error: null, list: normalized };
+  };
+
+  const getLatestAudit = (agentId: string, field: string) => {
+    const list = revenueAudit[agentId] || [];
+    return list.find(entry => entry.field === field && entry.oldValue !== null) || null;
+  };
+
+  const getDeductionSummary = (raw: string | null) => {
+    if (!raw) return null;
+    try {
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return null;
+      const sum = parsed.reduce((acc, item) => {
+        const amount = Number(item?.amount);
+        return Number.isFinite(amount) ? acc + amount : acc;
+      }, 0);
+      return { count: parsed.length, total: Math.round(sum * 100) / 100 };
+    } catch {
+      return null;
+    }
   };
 
   const handleAuthFailure = (err: unknown) => {
@@ -201,6 +394,7 @@ const App: React.FC = () => {
     isAuthenticatedRef.current = false;
     setAuthUser(null);
     setAuthPassword('');
+    setActiveTab(Tab.DASHBOARD);
     resetUiState();
     setIsLoading(false);
     return true;
@@ -230,6 +424,7 @@ const App: React.FC = () => {
         if (session?.user) {
           setIsAuthenticated(true);
           setAuthUser(session.user);
+          setActiveTab(session.user.role === 'admin' ? Tab.REVENUE : Tab.DASHBOARD);
           setIsLoading(true);
         } else {
           setIsAuthenticated(false);
@@ -347,6 +542,155 @@ const App: React.FC = () => {
     }
   };
 
+  const fetchRevenueData = async () => {
+    if (!laundryIdKey) {
+      setRevenueEntries({});
+      setRevenueDrafts({});
+      setRevenueAudit({});
+      setRevenueSummary(null);
+      return;
+    }
+    setRevenueLoading(true);
+    setRevenueError(null);
+    try {
+      const date = revenueDate;
+      const results = await Promise.all(laundries.map(async (laundry) => {
+        const response = await ApiService.getRevenueEntry(laundry.id, date);
+        return {
+          agentId: laundry.id,
+          entry: response?.entry ?? null,
+          audit: response?.audit ?? [],
+        };
+      }));
+      const entryMap: Record<string, RevenueEntry | null> = {};
+      const draftMap: Record<string, RevenueDraft> = {};
+      const auditMap: Record<string, RevenueAuditEntry[]> = {};
+      results.forEach(({ agentId: id, entry, audit }) => {
+        entryMap[id] = entry;
+        draftMap[id] = buildRevenueDraft(entry || null);
+        auditMap[id] = audit || [];
+      });
+      setRevenueEntries(entryMap);
+      setRevenueDrafts(draftMap);
+      setRevenueAudit(auditMap);
+      setRevenueSaveErrors({});
+      const summary = await ApiService.getRevenueSummary(date);
+      setRevenueSummary(summary);
+    } catch (err) {
+      if (handleAuthFailure(err)) return;
+      console.error('Revenue fetch failed', err);
+      setRevenueError('Unable to load revenue data.');
+    } finally {
+      setRevenueLoading(false);
+    }
+  };
+
+  const fetchRevenueEntryDates = async () => {
+    const range = getMonthRange(revenueDate);
+    if (!range) {
+      setRevenueEntryDates([]);
+      return;
+    }
+    try {
+      const dates = await ApiService.listRevenueEntryDates(range.startDate, range.endDate);
+      setRevenueEntryDates(dates);
+    } catch (err) {
+      if (handleAuthFailure(err)) return;
+      console.error('Revenue calendar fetch failed', err);
+      setRevenueEntryDates([]);
+    }
+  };
+
+  const fetchAllRevenueEntries = async () => {
+    setRevenueAllLoading(true);
+    setRevenueAllError(null);
+    try {
+      const entries = await ApiService.listRevenueEntries();
+      setRevenueAllEntries(entries);
+    } catch (err) {
+      if (handleAuthFailure(err)) return;
+      console.error('Revenue list fetch failed', err);
+      setRevenueAllError('Unable to load revenue entries.');
+    } finally {
+      setRevenueAllLoading(false);
+    }
+  };
+
+  const csvEscape = (value: string | number | null | undefined) => {
+    const text = value === null || value === undefined ? '' : String(value);
+    if (/[",\n]/.test(text)) {
+      return `"${text.replace(/"/g, '""')}"`;
+    }
+    return text;
+  };
+
+  const formatCsvTimestamp = (ts: number | null) => (ts ? new Date(ts).toISOString() : '');
+
+  const handleExportRevenueCsv = () => {
+    if (!revenueAllEntries.length) return;
+    const laundryNameMap = new Map(laundries.map(l => [l.id, l.name]));
+    const header = [
+      'entryDate',
+      'laundry',
+      'coinsTotal',
+      'euroCoinsCount',
+      'billsTotal',
+      'deductionsTotal',
+      'deductions',
+      'updatedBy',
+      'updatedAt',
+      'createdBy',
+      'createdAt',
+    ];
+    const rows = revenueAllEntries.map(entry => {
+      const deductions = (entry.deductions || [])
+        .map(item => `${formatMoney(item.amount)}:${item.comment}`)
+        .join(' | ');
+      return [
+        entry.entryDate,
+        laundryNameMap.get(entry.agentId) || entry.agentId,
+        formatMoney(entry.coinsTotal),
+        entry.euroCoinsCount,
+        formatMoney(entry.billsTotal),
+        formatMoney(entry.deductionsTotal),
+        deductions,
+        entry.updatedBy || '',
+        formatCsvTimestamp(entry.updatedAt),
+        entry.createdBy || '',
+        formatCsvTimestamp(entry.createdAt),
+      ];
+    });
+    const csv = [header, ...rows].map(row => row.map(csvEscape).join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `revenue-entries-${new Date().toISOString().slice(0, 10)}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const fetchUsers = async () => {
+    setUsersLoading(true);
+    setUsersError(null);
+    try {
+      const list = await ApiService.listUsers();
+      setUsers(list);
+      const roleDrafts: Record<string, 'admin' | 'user'> = {};
+      list.forEach(user => {
+        roleDrafts[user.username] = user.role;
+      });
+      setUserRoleDrafts(roleDrafts);
+      setUserSaveErrors({});
+    } catch (err) {
+      if (handleAuthFailure(err)) return;
+      console.error('User list fetch failed', err);
+      setUsersError('Unable to load users.');
+    } finally {
+      setUsersLoading(false);
+    }
+  };
+
   useEffect(() => {
     if (!isAuthenticated) return;
     setIsLoading(true);
@@ -374,8 +718,56 @@ const App: React.FC = () => {
   }, [editingGroupId]);
 
   useEffect(() => {
+    if (!isRelayEditMode && !editingGroupId) return;
+
+    const handleClick = (event: MouseEvent) => {
+      const target = event.target;
+      if (!(target instanceof HTMLElement)) return;
+      if (target.closest('[data-edit-toggle]')) return;
+
+      const relayInside = relayEditAreaRef.current?.contains(target);
+      const groupInside = groupEditAreaRef.current?.contains(target);
+
+      if (isRelayEditMode && !relayInside) {
+        setIsRelayEditMode(false);
+        fetchLaundries(true);
+      }
+      if (editingGroupId && !groupInside) {
+        setEditingGroupId(null);
+      }
+    };
+
+    document.addEventListener('click', handleClick);
+    return () => document.removeEventListener('click', handleClick);
+  }, [isRelayEditMode, editingGroupId, fetchLaundries]);
+
+  useEffect(() => {
     relayVisibilityRef.current = relayVisibility;
   }, [relayVisibility]);
+
+  useEffect(() => {
+    if (!isAuthenticated || authUser?.role !== 'admin') return;
+    if (activeTab !== Tab.REVENUE || revenueView !== 'daily') return;
+    fetchRevenueData();
+  }, [activeTab, revenueDate, laundryIdKey, isAuthenticated, authUser?.role, revenueView]);
+
+  useEffect(() => {
+    if (!isAuthenticated || authUser?.role !== 'admin') return;
+    if (activeTab !== Tab.REVENUE || revenueView !== 'daily') return;
+    fetchRevenueEntryDates();
+  }, [activeTab, revenueDate, laundryIdKey, isAuthenticated, authUser?.role, revenueView]);
+
+  useEffect(() => {
+    if (!isAuthenticated || authUser?.role !== 'admin') return;
+    if (activeTab !== Tab.REVENUE || revenueView !== 'all') return;
+    fetchAllRevenueEntries();
+  }, [activeTab, revenueView, isAuthenticated, authUser?.role]);
+
+  useEffect(() => {
+    if (!isAuthenticated || authUser?.role !== 'admin') return;
+    if (activeTab !== Tab.SETTINGS) return;
+    fetchUsers();
+  }, [activeTab, isAuthenticated, authUser?.role]);
 
   useEffect(() => {
     const primary = laundries[0];
@@ -399,7 +791,9 @@ const App: React.FC = () => {
       const login = await ApiService.login(authLogin.trim(), authPassword);
       setIsAuthenticated(true);
       isAuthenticatedRef.current = true;
-      setAuthUser(login.user || { username: authLogin.trim(), role: 'user' });
+      const nextUser = login.user || { username: authLogin.trim(), role: 'user' };
+      setAuthUser(nextUser);
+      setActiveTab(nextUser.role === 'admin' ? Tab.REVENUE : Tab.DASHBOARD);
       setAuthPassword('');
       resetUiState();
       setIsLoading(true);
@@ -425,6 +819,7 @@ const App: React.FC = () => {
     setAuthLogin('');
     setAuthPassword('');
     setAuthError('');
+    setActiveTab(Tab.DASHBOARD);
     resetUiState();
     setIsLoading(false);
   };
@@ -733,6 +1128,146 @@ const App: React.FC = () => {
     }
   };
 
+  const updateRevenueDraft = (agentId: string, updater: (draft: RevenueDraft) => RevenueDraft) => {
+    setRevenueDrafts(prev => {
+      const current = prev[agentId] || buildRevenueDraft(revenueEntries[agentId] || null);
+      return { ...prev, [agentId]: updater(current) };
+    });
+    setRevenueSaveErrors(prev => ({ ...prev, [agentId]: null }));
+  };
+
+  const addRevenueDeduction = (agentId: string) => {
+    updateRevenueDraft(agentId, draft => ({
+      ...draft,
+      deductions: [...draft.deductions, { id: makeDeductionId(), amount: '', comment: '' }],
+    }));
+  };
+
+  const removeRevenueDeduction = (agentId: string, id: string) => {
+    updateRevenueDraft(agentId, draft => ({
+      ...draft,
+      deductions: draft.deductions.filter(item => item.id !== id),
+    }));
+  };
+
+  const handleRevenueSave = async (agentId: string) => {
+    const draft = revenueDrafts[agentId] || buildRevenueDraft(revenueEntries[agentId] || null);
+    const coinsTotal = parseMoneyInput(draft.coinsTotal);
+    const euroCoinsCount = parseCountInput(draft.euroCoinsCount);
+    const billsTotal = parseMoneyInput(draft.billsTotal);
+    if (coinsTotal === null) {
+      setRevenueSaveErrors(prev => ({ ...prev, [agentId]: 'Coins total must be a non-negative number.' }));
+      return;
+    }
+    if (euroCoinsCount === null) {
+      setRevenueSaveErrors(prev => ({ ...prev, [agentId]: 'Coin count must be a non-negative integer.' }));
+      return;
+    }
+    if (billsTotal === null) {
+      setRevenueSaveErrors(prev => ({ ...prev, [agentId]: 'Bills total must be a non-negative number.' }));
+      return;
+    }
+    const { list: deductions, error } = normalizeDeductionDrafts(draft.deductions);
+    if (error) {
+      setRevenueSaveErrors(prev => ({ ...prev, [agentId]: error }));
+      return;
+    }
+    setRevenueSaving(prev => ({ ...prev, [agentId]: true }));
+    setRevenueSaveErrors(prev => ({ ...prev, [agentId]: null }));
+    try {
+      const response = await ApiService.saveRevenueEntry(agentId, {
+        entryDate: revenueDate,
+        coinsTotal,
+        euroCoinsCount,
+        billsTotal,
+        deductions,
+      });
+      setRevenueEntries(prev => ({ ...prev, [agentId]: response.entry }));
+      setRevenueAudit(prev => ({ ...prev, [agentId]: response.audit || [] }));
+      setRevenueDrafts(prev => ({ ...prev, [agentId]: buildRevenueDraft(response.entry) }));
+      const summary = await ApiService.getRevenueSummary(revenueDate);
+      setRevenueSummary(summary);
+      if (revenueView === 'daily') {
+        fetchRevenueEntryDates();
+      }
+    } catch (err) {
+      if (handleAuthFailure(err)) return;
+      console.error('Revenue save failed', err);
+      setRevenueSaveErrors(prev => ({ ...prev, [agentId]: 'Failed to save revenue entry.' }));
+    } finally {
+      setRevenueSaving(prev => ({ ...prev, [agentId]: false }));
+    }
+  };
+
+  const handleCreateUser = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const username = newUserName.trim();
+    const password = newUserPassword;
+    if (!username || !password) {
+      setUserCreateError('Username and password are required.');
+      return;
+    }
+    setUserCreateError(null);
+    setUserCreateLoading(true);
+    try {
+      await ApiService.createUser(username, password, newUserRole);
+      setNewUserName('');
+      setNewUserPassword('');
+      setNewUserRole('user');
+      await fetchUsers();
+    } catch (err) {
+      if (handleAuthFailure(err)) return;
+      console.error('User create failed', err);
+      const status = (err as any)?.status;
+      if (status === 409) {
+        setUserCreateError('User already exists.');
+      } else if (status === 400) {
+        setUserCreateError('Username must be 1–64 chars with no spaces, and password is required.');
+      } else {
+        setUserCreateError('Failed to create user.');
+      }
+    } finally {
+      setUserCreateLoading(false);
+    }
+  };
+
+  const handleRoleSave = async (username: string) => {
+    const role = userRoleDrafts[username] || 'user';
+    setUserSaveErrors(prev => ({ ...prev, [username]: null }));
+    setUserSaving(prev => ({ ...prev, [username]: true }));
+    try {
+      await ApiService.updateUserRole(username, role);
+      await fetchUsers();
+    } catch (err) {
+      if (handleAuthFailure(err)) return;
+      console.error('Role update failed', err);
+      setUserSaveErrors(prev => ({ ...prev, [username]: 'Failed to update role.' }));
+    } finally {
+      setUserSaving(prev => ({ ...prev, [username]: false }));
+    }
+  };
+
+  const handlePasswordSave = async (username: string) => {
+    const password = userPasswordDrafts[username] || '';
+    if (!password) {
+      setUserSaveErrors(prev => ({ ...prev, [username]: 'Password cannot be empty.' }));
+      return;
+    }
+    setUserSaveErrors(prev => ({ ...prev, [username]: null }));
+    setUserSaving(prev => ({ ...prev, [username]: true }));
+    try {
+      await ApiService.updateUserPassword(username, password);
+      setUserPasswordDrafts(prev => ({ ...prev, [username]: '' }));
+      await fetchUsers();
+    } catch (err) {
+      if (handleAuthFailure(err)) return;
+      console.error('Password update failed', err);
+      setUserSaveErrors(prev => ({ ...prev, [username]: 'Failed to update password.' }));
+    } finally {
+      setUserSaving(prev => ({ ...prev, [username]: false }));
+    }
+  };
+
   const renderDashboard = () => (
     <div className="space-y-6">
       <div className="flex justify-between items-center">
@@ -751,6 +1286,7 @@ const App: React.FC = () => {
                 return next;
               });
             }}
+            data-edit-toggle="relay"
             disabled={!serverOnline}
             className={`px-3 py-2 text-xs rounded-md border transition-colors flex items-center gap-1 ${isRelayEditMode ? 'border-indigo-500 text-indigo-300 bg-indigo-500/10' : 'border-slate-600 text-slate-300 hover:border-slate-500'} ${!serverOnline ? 'opacity-50 cursor-not-allowed' : ''}`}
           >
@@ -760,68 +1296,70 @@ const App: React.FC = () => {
         </div>
       </div>
 
-      {laundries.map((laundry, idx) => {
-        const fresh = laundry.lastHeartbeat ? (Date.now() - laundry.lastHeartbeat) < AGENT_STALE_MS : false;
-        const online = serverOnline && laundry.isOnline && fresh;
-        const relaysList = laundry.relays;
-        const batchRelayIds = relaysList.filter(r => !r.isHidden).map(r => r.id);
-        const visibleRelays = isRelayEditMode ? relaysList : relaysList.filter(r => !r.isHidden);
-        const disabled = !online;
-        const mock = laundry.isMock || !online;
-        return (
-          <div key={laundry.id} className="bg-slate-800 border border-slate-700 rounded-xl p-4 space-y-4">
-            <div className="flex items-center gap-3 flex-wrap">
-              <div className="text-sm font-semibold text-white">{laundry.name}</div>
-              <span className={`text-xs px-2 py-1 rounded-full border ${online ? 'border-emerald-400 text-emerald-200 bg-emerald-500/10' : 'border-red-400 text-red-200 bg-red-500/10'}`}>
-                {online ? 'Online' : 'Offline'}
-              </span>
-              <span className={`text-xs px-2 py-1 rounded-full border flex items-center gap-1 ${mock ? 'border-amber-400 text-amber-200 bg-amber-500/10' : 'border-emerald-400 text-emerald-200 bg-emerald-500/10'}`}>
-                {mock ? <Server className="w-3 h-3" /> : <Cpu className="w-3 h-3" />}
-                {mock ? 'Mock mode' : 'Hardware'}
-              </span>
-              <div className="flex gap-2 ml-auto">
-                <button
-                  onClick={() => handleBatchControl(batchRelayIds, 'ON', laundry.id)}
-                  disabled={!online || batchRelayIds.length === 0}
-                  className="px-3 py-2 rounded-md text-xs font-semibold border border-emerald-500 text-emerald-200 bg-emerald-500/10 disabled:opacity-50"
-                >
-                  ON
-                </button>
-                <button
-                  onClick={() => handleBatchControl(batchRelayIds, 'OFF', laundry.id)}
-                  disabled={!online || batchRelayIds.length === 0}
-                  className="px-3 py-2 rounded-md text-xs font-semibold border border-red-500 text-red-200 bg-red-500/10 disabled:opacity-50"
-                >
-                  OFF
-                </button>
+      <div ref={relayEditAreaRef} className="space-y-6">
+        {laundries.map((laundry, idx) => {
+          const fresh = laundry.lastHeartbeat ? (Date.now() - laundry.lastHeartbeat) < AGENT_STALE_MS : false;
+          const online = serverOnline && laundry.isOnline && fresh;
+          const relaysList = laundry.relays;
+          const batchRelayIds = relaysList.filter(r => !r.isHidden).map(r => r.id);
+          const visibleRelays = isRelayEditMode ? relaysList : relaysList.filter(r => !r.isHidden);
+          const disabled = !online;
+          const mock = laundry.isMock || !online;
+          return (
+            <div key={laundry.id} className="bg-slate-800 border border-slate-700 rounded-xl p-4 space-y-4">
+              <div className="flex items-center gap-3 flex-wrap">
+                <div className="text-sm font-semibold text-white">{laundry.name}</div>
+                <span className={`text-xs px-2 py-1 rounded-full border ${online ? 'border-emerald-400 text-emerald-200 bg-emerald-500/10' : 'border-red-400 text-red-200 bg-red-500/10'}`}>
+                  {online ? 'Online' : 'Offline'}
+                </span>
+                <span className={`text-xs px-2 py-1 rounded-full border flex items-center gap-1 ${mock ? 'border-amber-400 text-amber-200 bg-amber-500/10' : 'border-emerald-400 text-emerald-200 bg-emerald-500/10'}`}>
+                  {mock ? <Server className="w-3 h-3" /> : <Cpu className="w-3 h-3" />}
+                  {mock ? 'Mock mode' : 'Hardware'}
+                </span>
+                <div className="flex gap-2 ml-auto">
+                  <button
+                    onClick={() => handleBatchControl(batchRelayIds, 'ON', laundry.id)}
+                    disabled={!online || batchRelayIds.length === 0}
+                    className="px-3 py-2 rounded-md text-xs font-semibold border border-emerald-500 text-emerald-200 bg-emerald-500/10 disabled:opacity-50"
+                  >
+                    ON
+                  </button>
+                  <button
+                    onClick={() => handleBatchControl(batchRelayIds, 'OFF', laundry.id)}
+                    disabled={!online || batchRelayIds.length === 0}
+                    className="px-3 py-2 rounded-md text-xs font-semibold border border-red-500 text-red-200 bg-red-500/10 disabled:opacity-50"
+                  >
+                    OFF
+                  </button>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                {visibleRelays.length === 0 && (
+                  <div className="text-sm text-slate-500 bg-slate-900/40 border border-slate-700 rounded-lg p-3 col-span-2">
+                    No relays reported for this agent.
+                  </div>
+                )}
+                {visibleRelays.map(relay => (
+                  <RelayCard
+                    key={`${laundry.id}-${relay.id}`}
+                    relay={relay}
+                    onToggle={() => handleToggleRelay(relay.id, laundry.id)}
+                    isEditing={isRelayEditMode}
+                    nameValue={relayNameDrafts[relayDraftKey(laundry.id, relay.id)] ?? relay.name}
+                    onNameChange={(rid, name) => handleRelayNameInput(laundry.id, rid, name)}
+                    onNameSave={(rid) => handleRenameRelay(rid, laundry.id)}
+                    isHidden={relay.isHidden}
+                    onToggleVisibility={(rid) => handleToggleVisibility(rid, laundry.id)}
+                    onIconChange={(rid, icon) => handleIconChange(rid, icon, laundry.id)}
+                    isDisabled={disabled}
+                  />
+                ))}
               </div>
             </div>
-
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              {visibleRelays.length === 0 && (
-                <div className="text-sm text-slate-500 bg-slate-900/40 border border-slate-700 rounded-lg p-3 col-span-2">
-                  No relays reported for this agent.
-                </div>
-              )}
-              {visibleRelays.map(relay => (
-                <RelayCard
-                  key={`${laundry.id}-${relay.id}`}
-                  relay={relay}
-                  onToggle={() => handleToggleRelay(relay.id, laundry.id)}
-                  isEditing={isRelayEditMode}
-                  nameValue={relayNameDrafts[relayDraftKey(laundry.id, relay.id)] ?? relay.name}
-                  onNameChange={(rid, name) => handleRelayNameInput(laundry.id, rid, name)}
-                  onNameSave={(rid) => handleRenameRelay(rid, laundry.id)}
-                  isHidden={relay.isHidden}
-                  onToggleVisibility={(rid) => handleToggleVisibility(rid, laundry.id)}
-                  onIconChange={(rid, icon) => handleIconChange(rid, icon, laundry.id)}
-                  isDisabled={disabled}
-                />
-              ))}
-            </div>
-          </div>
-        );
-      })}
+          );
+        })}
+      </div>
     </div>
   );
 
@@ -1032,7 +1570,11 @@ const App: React.FC = () => {
                 (group.entries || []).flatMap(e => (e.relayIds || []).map(id => selectionKey(e.agentId, id)))
               );
               return (
-                <div key={group.id} className="bg-slate-800 p-4 rounded-xl border border-slate-700 space-y-3">
+                <div
+                  key={group.id}
+                  ref={editingGroupId === group.id ? groupEditAreaRef : null}
+                  className="bg-slate-800 p-4 rounded-xl border border-slate-700 space-y-3"
+                >
                   <div className="flex justify-between gap-3 items-start">
                     {editingGroupId === group.id ? (
                       <input
@@ -1209,8 +1751,9 @@ const App: React.FC = () => {
                         Schedule active
                       </label>
                       <div className="flex gap-2">
-                        <button
+                    <button
                       onClick={() => setEditingGroupId(editingGroupId === group.id ? null : group.id)}
+                      data-edit-toggle="group"
                       disabled={controlsDisabled}
                       className={`p-2 rounded-lg ${editingGroupId === group.id ? 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/40' : 'text-slate-400 hover:text-white hover:bg-slate-700/50'}`}
                       aria-label="Edit group"
@@ -1233,7 +1776,638 @@ const App: React.FC = () => {
           )}
         </div>
     </div>
+    );
+  };
+
+  const renderRevenueCalendar = () => {
+    const range = getMonthRange(revenueDate);
+    if (!range) return null;
+    const { year, month, daysInMonth } = range;
+    const firstDay = new Date(year, month - 1, 1);
+    const startOffset = (firstDay.getDay() + 6) % 7;
+    const totalCells = Math.ceil((startOffset + daysInMonth) / 7) * 7;
+    const entryDates = new Set(revenueEntryDates);
+    const monthLabel = new Date(year, month - 1, 1).toLocaleString('en-US', { month: 'long', year: 'numeric' });
+
+    return (
+      <div className="bg-slate-900/40 border border-slate-700 rounded-xl p-3 space-y-2">
+        <div className="flex items-center justify-between">
+          <button
+            type="button"
+            onClick={() => setRevenueDate(shiftDateByMonths(revenueDate, -1))}
+            className="p-2 rounded-md border border-slate-700 text-slate-400 hover:text-white hover:border-indigo-500"
+            aria-label="Previous month"
+          >
+            <ChevronsLeft className="w-4 h-4" />
+          </button>
+          <div className="text-sm font-semibold text-slate-200">{monthLabel}</div>
+          <button
+            type="button"
+            onClick={() => setRevenueDate(shiftDateByMonths(revenueDate, 1))}
+            className="p-2 rounded-md border border-slate-700 text-slate-400 hover:text-white hover:border-indigo-500"
+            aria-label="Next month"
+          >
+            <ChevronsRight className="w-4 h-4" />
+          </button>
+        </div>
+        <div className="grid grid-cols-7 gap-1 text-[10px] uppercase text-slate-500">
+          {DAYS_OF_WEEK.map(day => (
+            <div key={`weekday-${day}`} className="text-center">
+              {day}
+            </div>
+          ))}
+        </div>
+        <div className="grid grid-cols-7 gap-1">
+          {Array.from({ length: totalCells }, (_, idx) => {
+            const day = idx - startOffset + 1;
+            if (day < 1 || day > daysInMonth) {
+              return <div key={`empty-${idx}`} className="h-9" />;
+            }
+            const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+            const isSelected = dateStr === revenueDate;
+            const hasEntry = entryDates.has(dateStr);
+            return (
+              <button
+                key={dateStr}
+                type="button"
+                onClick={() => setRevenueDate(dateStr)}
+                className={`h-9 rounded-md text-xs flex flex-col items-center justify-center border ${
+                  isSelected
+                    ? 'border-indigo-400/80 bg-indigo-500/20 text-white'
+                    : 'border-transparent text-slate-200 hover:bg-slate-800/60'
+                }`}
+                aria-label={`Select ${dateStr}`}
+              >
+                <span>{day}</span>
+                {hasEntry && <span className="mt-0.5 w-1.5 h-1.5 rounded-full bg-amber-400" />}
+              </button>
+            );
+          })}
+        </div>
+        <div className="text-[11px] text-slate-500 flex items-center gap-2">
+          <span className="w-2 h-2 rounded-full bg-amber-400" />
+          Entries recorded
+        </div>
+      </div>
+    );
+  };
+
+  const renderRevenueDaily = () => (
+    <div className="space-y-6">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+          <span className="text-xs text-slate-400">Entry date</span>
+          <div className="flex items-center gap-2 w-full sm:w-auto">
+            <button
+              type="button"
+              onClick={() => setRevenueDate(shiftDateByDays(revenueDate, -1))}
+              className="p-2 rounded-md border border-slate-700 text-slate-400 hover:text-white hover:border-indigo-500"
+              aria-label="Previous day"
+            >
+              <ChevronLeft className="w-4 h-4" />
+            </button>
+            <input
+              type="date"
+              value={revenueDate}
+              onChange={(e) => setRevenueDate(e.target.value)}
+              className="bg-slate-900/60 border border-slate-700 rounded-md px-3 py-2 text-xs text-slate-100 focus:outline-none focus:ring-1 focus:ring-indigo-500 w-full sm:w-auto"
+            />
+            <button
+              type="button"
+              onClick={() => setRevenueDate(shiftDateByDays(revenueDate, 1))}
+              className="p-2 rounded-md border border-slate-700 text-slate-400 hover:text-white hover:border-indigo-500"
+              aria-label="Next day"
+            >
+              <ChevronRight className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={() => setIsRevenueCalendarOpen(prev => !prev)}
+          className="flex items-center justify-between gap-2 px-3 py-2 text-xs rounded-md border border-slate-600 text-slate-300 hover:border-slate-500 hover:text-white sm:justify-start"
+          aria-expanded={isRevenueCalendarOpen}
+        >
+          <span className="flex items-center gap-2">
+            <CalendarClock className="w-4 h-4" />
+            Calendar
+          </span>
+          {isRevenueCalendarOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+        </button>
+      </div>
+
+      {isRevenueCalendarOpen && renderRevenueCalendar()}
+
+      {revenueError && (
+        <div className="bg-red-500/10 border border-red-500/40 text-red-200 px-3 py-2 rounded-lg text-sm">
+          {revenueError}
+        </div>
+      )}
+
+      {revenueSummary && (
+        <div className="grid gap-4 md:grid-cols-2">
+          <div className="bg-slate-800 border border-slate-700 rounded-xl p-4">
+            <div className="text-xs uppercase tracking-wide text-slate-400">Week (Mon–Sun)</div>
+            <div className="text-2xl font-semibold text-white mt-1">€{formatMoney(revenueSummary.week.overall)}</div>
+            <div className="text-xs text-slate-500 mt-1">{revenueSummary.week.startDate} → {revenueSummary.week.endDate}</div>
+          </div>
+          <div className="bg-slate-800 border border-slate-700 rounded-xl p-4">
+            <div className="text-xs uppercase tracking-wide text-slate-400">Month</div>
+            <div className="text-2xl font-semibold text-white mt-1">€{formatMoney(revenueSummary.month.overall)}</div>
+            <div className="text-xs text-slate-500 mt-1">{revenueSummary.month.startDate} → {revenueSummary.month.endDate}</div>
+          </div>
+        </div>
+      )}
+
+      {revenueLoading && (
+        <div className="text-sm text-slate-400">Loading revenue data...</div>
+      )}
+
+      {!revenueLoading && laundries.map(laundry => {
+        const entry = revenueEntries[laundry.id] || null;
+        const draft = revenueDrafts[laundry.id] || buildRevenueDraft(entry);
+        const entryAudit = revenueAudit[laundry.id] || [];
+        const coinsAudit = getLatestAudit(laundry.id, 'coinsTotal');
+        const countAudit = getLatestAudit(laundry.id, 'euroCoinsCount');
+        const billsAudit = getLatestAudit(laundry.id, 'billsTotal');
+        const deductionsAudit = getLatestAudit(laundry.id, 'deductions');
+        const prevDeductionSummary = getDeductionSummary(deductionsAudit?.oldValue ?? null);
+        const weekTotal = revenueSummary?.week.totalsByAgent?.[laundry.id] ?? 0;
+        const monthTotal = revenueSummary?.month.totalsByAgent?.[laundry.id] ?? 0;
+        const saveError = revenueSaveErrors[laundry.id];
+        const saving = Boolean(revenueSaving[laundry.id]);
+
+        const fieldClass = (changed: boolean) => (
+          `w-full bg-slate-900/60 border rounded-md px-3 py-2 text-sm text-slate-100 focus:outline-none focus:ring-1 focus:ring-indigo-500 ${
+            changed ? 'border-amber-400/70 bg-amber-500/10' : 'border-slate-700'
+          }`
+        );
+
+        return (
+          <div key={laundry.id} className="bg-slate-800 border border-slate-700 rounded-xl p-4 space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <div className="text-sm font-semibold text-white">{laundry.name}</div>
+                <div className="text-xs text-slate-500">Week: €{formatMoney(weekTotal)} · Month: €{formatMoney(monthTotal)}</div>
+              </div>
+              <div className="flex items-center gap-2">
+                {entry?.hasEdits && (
+                  <span className="text-xs px-2 py-1 rounded-full border border-amber-400 text-amber-200 bg-amber-500/10">
+                    Edited
+                  </span>
+                )}
+                <span className="text-xs px-2 py-1 rounded-full border border-slate-600 text-slate-300 bg-slate-900/40">
+                  {entry ? 'Entry loaded' : 'No entry yet'}
+                </span>
+              </div>
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-3">
+              <div className="space-y-1">
+                <label className="text-xs text-slate-400">Coins total (€)</label>
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  value={draft.coinsTotal}
+                  onChange={(e) => {
+                    const nextValue = e.target.value;
+                    if (!isRevenueNumericInput(nextValue)) return;
+                    updateRevenueDraft(laundry.id, d => ({ ...d, coinsTotal: nextValue }));
+                  }}
+                  className={fieldClass(Boolean(coinsAudit))}
+                  placeholder="0.00"
+                />
+                {coinsAudit && (
+                  <div className="text-[11px] text-amber-300">
+                    Prev: €{formatMoney(Number(coinsAudit.oldValue))} · {coinsAudit.user} · {formatTimestamp(coinsAudit.createdAt)}
+                  </div>
+                )}
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs text-slate-400">Coins in €1 (count)</label>
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  value={draft.euroCoinsCount}
+                  onChange={(e) => {
+                    const nextValue = e.target.value;
+                    if (!isRevenueNumericInput(nextValue)) return;
+                    updateRevenueDraft(laundry.id, d => ({ ...d, euroCoinsCount: nextValue }));
+                  }}
+                  className={fieldClass(Boolean(countAudit))}
+                  placeholder="0"
+                />
+                {countAudit && (
+                  <div className="text-[11px] text-amber-300">
+                    Prev: {countAudit.oldValue} · {countAudit.user} · {formatTimestamp(countAudit.createdAt)}
+                  </div>
+                )}
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs text-slate-400">Bills total (€)</label>
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  value={draft.billsTotal}
+                  onChange={(e) => {
+                    const nextValue = e.target.value;
+                    if (!isRevenueNumericInput(nextValue)) return;
+                    updateRevenueDraft(laundry.id, d => ({ ...d, billsTotal: nextValue }));
+                  }}
+                  className={fieldClass(Boolean(billsAudit))}
+                  placeholder="0.00"
+                />
+                {billsAudit && (
+                  <div className="text-[11px] text-amber-300">
+                    Prev: €{formatMoney(Number(billsAudit.oldValue))} · {billsAudit.user} · {formatTimestamp(billsAudit.createdAt)}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="text-sm text-slate-300">Deductions (comment required)</div>
+                <button
+                  onClick={() => addRevenueDeduction(laundry.id)}
+                  className="text-xs px-2 py-1 rounded-md border border-slate-600 text-slate-300 hover:border-slate-500 hover:text-white transition-colors"
+                >
+                  Add deduction
+                </button>
+              </div>
+              {deductionsAudit && prevDeductionSummary && (
+                <div className="text-[11px] text-amber-300">
+                  Prev: €{formatMoney(prevDeductionSummary.total)} across {prevDeductionSummary.count} items · {deductionsAudit.user} · {formatTimestamp(deductionsAudit.createdAt)}
+                </div>
+              )}
+              {draft.deductions.length === 0 && (
+                <div className="text-xs text-slate-500">No deductions yet.</div>
+              )}
+              {draft.deductions.map(item => (
+                <div key={item.id} className="flex flex-wrap gap-2 items-center">
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    value={item.amount}
+                    onChange={(e) => {
+                      const nextValue = e.target.value;
+                      if (!isRevenueNumericInput(nextValue)) return;
+                      updateRevenueDraft(laundry.id, d => ({
+                        ...d,
+                        deductions: d.deductions.map(row => row.id === item.id ? { ...row, amount: nextValue } : row),
+                      }));
+                    }}
+                    className="flex-1 min-w-0 w-full sm:w-auto sm:min-w-[120px] bg-slate-900/60 border border-slate-700 rounded-md px-3 py-2 text-sm text-slate-100 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                    placeholder="0.00"
+                  />
+                  <input
+                    type="text"
+                    value={item.comment}
+                    onChange={(e) => updateRevenueDraft(laundry.id, d => ({
+                      ...d,
+                      deductions: d.deductions.map(row => row.id === item.id ? { ...row, comment: e.target.value } : row),
+                    }))}
+                    className="flex-[2] min-w-0 w-full sm:w-auto sm:min-w-[200px] bg-slate-900/60 border border-slate-700 rounded-md px-3 py-2 text-sm text-slate-100 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                    placeholder="Reason"
+                  />
+                  <button
+                    onClick={() => removeRevenueDeduction(laundry.id, item.id)}
+                    className="text-xs px-3 py-2 w-full sm:w-auto rounded-md border border-red-500/40 text-red-300 hover:text-red-200 hover:border-red-400 transition-colors"
+                  >
+                    Remove
+                  </button>
+                </div>
+              ))}
+            </div>
+
+            {saveError && (
+              <div className="text-sm text-red-300 bg-red-500/10 border border-red-500/30 rounded-md px-3 py-2">
+                {saveError}
+              </div>
+            )}
+
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="text-xs text-slate-500">
+                {entry
+                  ? `Updated ${formatTimestamp(entry.updatedAt)} by ${entry.updatedBy || 'unknown'}`
+                  : 'No entry recorded for this date.'}
+              </div>
+              <button
+                onClick={() => handleRevenueSave(laundry.id)}
+                disabled={saving}
+                className="px-4 py-2 rounded-md text-xs font-semibold border border-indigo-500 text-indigo-200 bg-indigo-500/10 hover:bg-indigo-500/20 disabled:opacity-50"
+              >
+                {saving ? 'Saving...' : 'Save entry'}
+              </button>
+            </div>
+
+            {entryAudit.length > 0 && (
+              <div className="text-xs text-slate-500 border-t border-slate-700 pt-3 space-y-1">
+                <div className="text-[11px] uppercase tracking-wide text-slate-500">Audit log</div>
+                {entryAudit.filter(item => item.oldValue !== null).slice(0, 6).map(item => (
+                  <div key={`${item.id}-${item.createdAt}`} className="flex flex-wrap justify-between gap-2">
+                    <span>{item.field}: {item.oldValue} → {item.newValue}</span>
+                    <span>{item.user} · {formatTimestamp(item.createdAt)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
   );
+
+  const renderRevenueAll = () => {
+    const laundryNameMap = new Map(laundries.map(l => [l.id, l.name]));
+    return (
+      <div className="space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="text-xs text-slate-400">{revenueAllEntries.length} entries</div>
+          <button
+            onClick={handleExportRevenueCsv}
+            disabled={revenueAllLoading || revenueAllEntries.length === 0}
+            className="flex items-center gap-2 px-3 py-2 text-xs rounded-md border border-slate-600 text-slate-300 hover:border-slate-500 hover:text-white disabled:opacity-50"
+          >
+            <Download className="w-4 h-4" />
+            Export CSV
+          </button>
+        </div>
+
+        {revenueAllError && (
+          <div className="bg-red-500/10 border border-red-500/40 text-red-200 px-3 py-2 rounded-lg text-sm">
+            {revenueAllError}
+          </div>
+        )}
+
+        {revenueAllLoading && (
+          <div className="text-sm text-slate-400">Loading revenue entries...</div>
+        )}
+
+        {!revenueAllLoading && revenueAllEntries.length === 0 && (
+          <div className="text-sm text-slate-500 bg-slate-800/30 rounded-xl border border-dashed border-slate-700 p-4">
+            No entries yet.
+          </div>
+        )}
+
+        {!revenueAllLoading && revenueAllEntries.length > 0 && (
+          <>
+            <div className="space-y-3 md:hidden">
+              {revenueAllEntries.map(entry => (
+                <div key={`${entry.agentId}-${entry.entryDate}`} className="bg-slate-800 border border-slate-700 rounded-lg p-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="text-sm font-semibold text-white">{entry.entryDate}</div>
+                    <div className="text-[11px] text-slate-400">{laundryNameMap.get(entry.agentId) || entry.agentId}</div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 text-xs text-slate-300 mt-2">
+                    <div>Coins: €{formatMoney(entry.coinsTotal)}</div>
+                    <div>€1 count: {entry.euroCoinsCount}</div>
+                    <div>Bills: €{formatMoney(entry.billsTotal)}</div>
+                    <div>Deductions: €{formatMoney(entry.deductionsTotal)}</div>
+                  </div>
+                  <div className="text-[11px] text-slate-500 mt-2">
+                    Updated {formatTimestamp(entry.updatedAt)} · {entry.updatedBy || 'unknown'}
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="hidden md:block overflow-x-auto border border-slate-700 rounded-xl">
+              <table className="min-w-[900px] w-full text-xs text-slate-200">
+                <thead className="bg-slate-900/60 text-slate-400 uppercase tracking-wide">
+                  <tr>
+                    <th className="px-3 py-2 text-left">Date</th>
+                    <th className="px-3 py-2 text-left">Laundry</th>
+                    <th className="px-3 py-2 text-right">Coins (€)</th>
+                    <th className="px-3 py-2 text-right">€1 count</th>
+                    <th className="px-3 py-2 text-right">Bills (€)</th>
+                    <th className="px-3 py-2 text-right">Deductions (€)</th>
+                    <th className="px-3 py-2 text-left">Updated by</th>
+                    <th className="px-3 py-2 text-left">Updated at</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {revenueAllEntries.map(entry => (
+                    <tr key={`${entry.agentId}-${entry.entryDate}`} className="border-t border-slate-700">
+                      <td className="px-3 py-2">{entry.entryDate}</td>
+                      <td className="px-3 py-2">{laundryNameMap.get(entry.agentId) || entry.agentId}</td>
+                      <td className="px-3 py-2 text-right">€{formatMoney(entry.coinsTotal)}</td>
+                      <td className="px-3 py-2 text-right">{entry.euroCoinsCount}</td>
+                      <td className="px-3 py-2 text-right">€{formatMoney(entry.billsTotal)}</td>
+                      <td className="px-3 py-2 text-right">€{formatMoney(entry.deductionsTotal)}</td>
+                      <td className="px-3 py-2">{entry.updatedBy || 'unknown'}</td>
+                      <td className="px-3 py-2">{formatTimestamp(entry.updatedAt)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
+      </div>
+    );
+  };
+
+  const renderRevenue = () => {
+    if (authUser?.role !== 'admin') {
+      return (
+        <div className="text-center py-16 text-slate-500">
+          Revenue tracking is available to admin users only.
+        </div>
+      );
+    }
+
+    return (
+      <div className="space-y-6">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <h2 className="text-xl font-bold text-white flex items-center gap-2">
+            <Coins className="w-5 h-5 text-amber-400" />
+            Revenue
+          </h2>
+          <div className="flex items-center gap-2 w-full sm:w-auto">
+            <div className="inline-flex items-center gap-1 rounded-lg border border-slate-700 bg-slate-900/60 p-1 w-full sm:w-auto justify-between">
+              <button
+                onClick={() => setRevenueView('daily')}
+                className={`px-3 py-1.5 text-xs font-semibold rounded-md flex-1 sm:flex-none ${
+                  revenueView === 'daily' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                Daily
+              </button>
+              <button
+                onClick={() => setRevenueView('all')}
+                className={`px-3 py-1.5 text-xs font-semibold rounded-md flex-1 sm:flex-none ${
+                  revenueView === 'all' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                All entries
+              </button>
+            </div>
+          </div>
+        </div>
+        {revenueView === 'daily' ? renderRevenueDaily() : renderRevenueAll()}
+      </div>
+    );
+  };
+
+  const renderSystem = () => {
+    if (authUser?.role !== 'admin') {
+      return (
+        <div className="text-center py-20 text-slate-500">
+          <Settings className="w-12 h-12 mx-auto mb-4 opacity-50" />
+          <h3 className="text-lg text-slate-300 font-medium mb-2">System</h3>
+          <p className="text-sm max-w-sm mx-auto">Admin access is required to manage users.</p>
+        </div>
+      );
+    }
+
+    return (
+      <div className="space-y-6">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <Settings className="w-5 h-5 text-slate-300" />
+            <h2 className="text-xl font-bold text-white">System</h2>
+          </div>
+          <button
+            onClick={fetchUsers}
+            disabled={usersLoading}
+            className="px-3 py-2 text-xs rounded-md border border-slate-600 text-slate-300 hover:border-slate-500 disabled:opacity-50"
+          >
+            {usersLoading ? 'Refreshing...' : 'Refresh'}
+          </button>
+        </div>
+
+        <div className="bg-slate-800 border border-slate-700 rounded-xl p-4 space-y-4">
+          <div>
+            <h3 className="text-lg font-semibold text-white">User Management</h3>
+            <p className="text-xs text-slate-400">Create users, set passwords, and manage roles.</p>
+          </div>
+
+          {usersError && (
+            <div className="text-sm text-red-300 bg-red-500/10 border border-red-500/30 rounded-md px-3 py-2">
+              {usersError}
+            </div>
+          )}
+
+          {usersLoading && (
+            <div className="text-sm text-slate-400">Loading users...</div>
+          )}
+
+          {!usersLoading && (
+            <div className="space-y-3">
+              {users.length === 0 && (
+                <div className="text-sm text-slate-500 bg-slate-900/40 border border-slate-700 rounded-lg p-3">
+                  No users yet.
+                </div>
+              )}
+              {users.map(user => {
+                const saving = Boolean(userSaving[user.username]);
+                const roleValue = userRoleDrafts[user.username] ?? user.role;
+                const passwordValue = userPasswordDrafts[user.username] ?? '';
+                return (
+                  <div key={user.username} className="bg-slate-900/40 border border-slate-700 rounded-lg p-3">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <div className="text-sm text-slate-100 font-medium">{user.username}</div>
+                        <div className="text-[11px] text-slate-500">Last login: {formatLastLogin(user.lastLoginAt)}</div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <select
+                          value={roleValue}
+                          onChange={(e) => {
+                            const value = e.target.value === 'admin' ? 'admin' : 'user';
+                            setUserRoleDrafts(prev => ({ ...prev, [user.username]: value }));
+                          }}
+                          className="bg-slate-900/60 border border-slate-700 rounded-md px-2 py-1 text-xs text-slate-200"
+                        >
+                          <option value="admin">admin</option>
+                          <option value="user">user</option>
+                        </select>
+                        <button
+                          onClick={() => handleRoleSave(user.username)}
+                          disabled={saving}
+                          className="px-2 py-1 text-xs rounded-md border border-indigo-500 text-indigo-200 bg-indigo-500/10 hover:bg-indigo-500/20 disabled:opacity-50"
+                        >
+                          {saving ? 'Saving...' : 'Update role'}
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="mt-3 flex flex-col md:flex-row md:items-center gap-2">
+                      <input
+                        type="password"
+                        value={passwordValue}
+                        onChange={(e) => setUserPasswordDrafts(prev => ({ ...prev, [user.username]: e.target.value }))}
+                        placeholder="New password"
+                        className="flex-1 bg-slate-900/60 border border-slate-700 rounded-md px-3 py-2 text-sm text-slate-100 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                      />
+                      <button
+                        onClick={() => handlePasswordSave(user.username)}
+                        disabled={saving}
+                        className="px-3 py-2 text-xs rounded-md border border-amber-500 text-amber-200 bg-amber-500/10 hover:bg-amber-500/20 disabled:opacity-50"
+                      >
+                        {saving ? 'Saving...' : 'Set password'}
+                      </button>
+                    </div>
+
+                    {userSaveErrors[user.username] && (
+                      <div className="mt-2 text-xs text-red-300 bg-red-500/10 border border-red-500/30 rounded-md px-2 py-1">
+                        {userSaveErrors[user.username]}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        <form onSubmit={handleCreateUser} className="bg-slate-800 border border-slate-700 rounded-xl p-4 space-y-4">
+          <div className="flex items-center gap-2">
+            <Plus className="w-4 h-4 text-indigo-300" />
+            <h3 className="text-base font-semibold text-white">Add user</h3>
+          </div>
+          <div className="grid gap-3 md:grid-cols-3">
+            <input
+              value={newUserName}
+              onChange={(e) => setNewUserName(e.target.value)}
+              placeholder="Username"
+              className="bg-slate-900/60 border border-slate-700 rounded-md px-3 py-2 text-sm text-slate-100 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+            />
+            <input
+              type="password"
+              value={newUserPassword}
+              onChange={(e) => setNewUserPassword(e.target.value)}
+              placeholder="Password"
+              className="bg-slate-900/60 border border-slate-700 rounded-md px-3 py-2 text-sm text-slate-100 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+            />
+            <select
+              value={newUserRole}
+              onChange={(e) => setNewUserRole(e.target.value === 'admin' ? 'admin' : 'user')}
+              className="bg-slate-900/60 border border-slate-700 rounded-md px-3 py-2 text-sm text-slate-100 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+            >
+              <option value="user">user</option>
+              <option value="admin">admin</option>
+            </select>
+          </div>
+
+          {userCreateError && (
+            <div className="text-sm text-red-300 bg-red-500/10 border border-red-500/30 rounded-md px-3 py-2">
+              {userCreateError}
+            </div>
+          )}
+
+          <div className="flex justify-end">
+            <button
+              type="submit"
+              disabled={userCreateLoading}
+              className="px-4 py-2 rounded-md text-xs font-semibold border border-indigo-500 text-indigo-200 bg-indigo-500/10 hover:bg-indigo-500/20 disabled:opacity-50"
+            >
+              {userCreateLoading ? 'Creating...' : 'Create user'}
+            </button>
+          </div>
+        </form>
+      </div>
+    );
   };
 
   if (!isAuthReady) {
@@ -1305,66 +2479,86 @@ const App: React.FC = () => {
     <div className="min-h-screen pb-24 overflow-x-hidden">
       {/* Header */}
       <header className="bg-slate-900/80 backdrop-blur-md sticky top-0 z-50 border-b border-slate-800">
-        <div className="max-w-3xl mx-auto px-4 py-4 flex justify-between items-center">
-          <div>
-            <div className="flex items-center gap-2">
+        <div className="max-w-full sm:max-w-3xl mx-auto px-3 sm:px-4 py-3">
+          <div className="flex flex-col gap-3 sm:grid sm:grid-cols-[auto,1fr] sm:grid-rows-2 sm:items-center sm:gap-x-4 sm:gap-y-2">
+            <div className="flex items-center gap-3 min-w-0 sm:row-span-2">
               <img
                 src={BRAND_LOGO_URL}
                 alt="WashControl"
-                className="w-auto max-w-[280px] h-auto"
+                className="h-16 sm:h-20 w-auto shrink-0"
               />
               <span className="sr-only">WashControl</span>
             </div>
-            <div className="flex items-center gap-3 flex-wrap">
-              {laundries.map(l => {
-                const fresh = l.lastHeartbeat ? (Date.now() - l.lastHeartbeat) < AGENT_STALE_MS : false;
-                const online = l.isOnline && fresh;
-                const mock = l.isMock || !online;
-                return (
-                  <div key={l.id} className="flex items-center gap-2 px-2 py-1 rounded-md border border-slate-700 bg-slate-900/50">
-                    <span className={`w-2 h-2 rounded-full ${online ? 'bg-emerald-400 animate-pulse' : 'bg-red-500'}`}></span>
-                    <div className="flex flex-col leading-tight">
-                      <p className="text-xs text-slate-300 flex items-center gap-1">
-                        {mock ? <Server className="w-3 h-3" /> : <Cpu className="w-3 h-3" />}
-                        {l.name} {online ? 'online' : 'offline'}
-                      </p>
-                      <p className="text-[11px] text-slate-500">
-                        {mock ? 'Mock mode (no GPIO)' : 'Hardware connected'}
-                      </p>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-        </div>
-          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-4 sm:gap-5 justify-start sm:justify-end w-full sm:w-auto sm:row-start-1 sm:col-start-2">
+              <div className="flex items-center gap-4">
                 {authUser && (
-                  <div className="text-right">
+                  <div className="text-left sm:text-right leading-tight">
                     <div className="text-xs text-slate-300">{authUser.username}</div>
                     <div className="text-[10px] uppercase text-slate-500">{authUser.role}</div>
                   </div>
                 )}
-                <div className="text-right">
-                <div className="text-xl font-mono text-white font-medium">
-                  {currentTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })}
+                <div className="text-left sm:text-right leading-tight">
+                  <div className="text-lg font-mono text-white font-medium">
+                    {currentTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })}
+                  </div>
+                  <div className="text-[11px] text-slate-500">
+                    {currentTime.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })}
+                  </div>
                 </div>
-                <div className="flex items-center justify-end gap-2 text-xs text-slate-500">
-                  {currentTime.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })}
+              </div>
+            </div>
+            <div className="sm:row-start-2 sm:col-start-2 flex items-center gap-3 w-full">
+              {laundries.length > 0 && (
+                <div className="flex items-center gap-2 overflow-x-auto min-w-0 flex-1">
+                  {laundries.map(laundry => {
+                    const fresh = laundry.lastHeartbeat ? (Date.now() - laundry.lastHeartbeat) < AGENT_STALE_MS : false;
+                    const online = serverOnline && laundry.isOnline && fresh;
+                    return (
+                      <span
+                        key={`header-status-${laundry.id}`}
+                        className={`inline-flex flex-col gap-1 px-3 py-1.5 rounded-xl border text-[11px] font-semibold ${
+                          online
+                            ? 'border-emerald-400/60 text-emerald-200 bg-emerald-500/10'
+                            : 'border-red-400/60 text-red-200 bg-red-500/10'
+                        }`}
+                      >
+                        <span className="flex items-center gap-2 whitespace-nowrap">
+                          <span className={`w-2 h-2 rounded-full ${online ? 'bg-emerald-400' : 'bg-red-400'}`} />
+                          <span className="max-w-[140px] truncate">{laundry.name}</span>
+                        </span>
+                        <span className="flex items-center gap-2 whitespace-nowrap">
+                          <span className="text-[10px] uppercase tracking-wide opacity-70">
+                            {online ? 'Online' : 'Offline'}
+                          </span>
+                          <span
+                            className={`px-1.5 py-0.5 rounded-full text-[10px] uppercase tracking-wide border ${
+                              laundry.isMock
+                                ? 'border-amber-400/60 text-amber-200 bg-amber-500/10'
+                                : 'border-sky-400/60 text-sky-200 bg-sky-500/10'
+                            }`}
+                          >
+                            {laundry.isMock ? 'Mock' : 'Pi'}
+                          </span>
+                        </span>
+                      </span>
+                    );
+                  })}
                 </div>
-             </div>
-             <button
-               onClick={handleLogout}
-               className="flex items-center gap-2 px-3 py-2 text-xs font-semibold border border-slate-700 rounded-md text-slate-300 hover:text-white hover:border-indigo-500 transition-colors"
-             >
-               <Lock className="w-4 h-4" />
-               Log out
-            </button>
+              )}
+              <button
+                onClick={handleLogout}
+                className="ml-auto shrink-0 flex items-center justify-center gap-2 px-3 py-2 text-xs font-semibold border border-slate-700 rounded-md text-slate-300 hover:text-white hover:border-indigo-500 transition-colors"
+              >
+                <Lock className="w-4 h-4" />
+                Log out
+              </button>
+            </div>
           </div>
         </div>
       </header>
 
       {/* Main Content */}
-      <main className="max-w-3xl w-full mx-auto px-4 py-6 overflow-hidden box-border">
+      <main className="max-w-full sm:max-w-3xl w-full mx-auto px-3 sm:px-4 py-6 overflow-hidden box-border">
         {!serverOnline && (
           <div className="mb-4 bg-amber-500/10 border border-amber-500/40 text-amber-200 px-3 py-2 rounded-lg text-sm">
             Server unreachable. Controls are temporarily disabled until connection is restored.
@@ -1377,31 +2571,23 @@ const App: React.FC = () => {
         )}
         {activeTab === Tab.DASHBOARD && renderDashboard()}
         {activeTab === Tab.SCHEDULE && renderScheduler()}
-        {activeTab === Tab.SETTINGS && (
-           <div className="text-center py-20 text-slate-500">
-             <Settings className="w-12 h-12 mx-auto mb-4 opacity-50" />
-             <h3 className="text-lg text-slate-300 font-medium mb-2">Raspberry Pi Configuration</h3>
-             <p className="text-sm max-w-sm mx-auto mb-6">
-               {isMockMode 
-                 ? "Mock mode: no Raspberry Pi GPIO connected. Start the Pi service to control real hardware." 
-                 : "Connected to Real Hardware (Raspberry Pi GPIO ready)"}
-             </p>
-             
-             {isMockMode && (
-               <div className="text-left max-w-sm mx-auto bg-slate-900 p-4 rounded-lg font-mono text-xs text-slate-400 overflow-x-auto border border-amber-500/20">
-                 <p className="mb-2 text-amber-400 font-bold">Not Connected to Hardware</p>
-                 <p className="mb-2 text-slate-300">To start the backend server on your Pi:</p>
-                 <p className="text-emerald-400">1. npm install</p>
-                 <p className="text-emerald-400">2. node server.js</p>
-               </div>
-             )}
-           </div>
-        )}
+        {activeTab === Tab.REVENUE && renderRevenue()}
+        {activeTab === Tab.SETTINGS && renderSystem()}
       </main>
 
       {/* Bottom Navigation */}
       <nav className="fixed bottom-0 left-0 right-0 bg-slate-900 border-t border-slate-800 pb-safe">
-        <div className="max-w-3xl mx-auto px-6 py-3 flex justify-between items-center">
+        <div className="max-w-full sm:max-w-3xl mx-auto px-4 sm:px-6 py-3 flex justify-between items-center">
+          {authUser?.role === 'admin' && (
+            <button 
+              onClick={() => setActiveTab(Tab.REVENUE)}
+              className={`flex flex-col items-center gap-1 ${activeTab === Tab.REVENUE ? 'text-amber-400' : 'text-slate-500 hover:text-slate-300'}`}
+            >
+              <Coins className="w-6 h-6" />
+              <span className="text-[10px] font-medium">Revenue</span>
+            </button>
+          )}
+
           <button 
             onClick={() => setActiveTab(Tab.DASHBOARD)}
             className={`flex flex-col items-center gap-1 ${activeTab === Tab.DASHBOARD ? 'text-indigo-400' : 'text-slate-500 hover:text-slate-300'}`}
@@ -1434,3 +2620,4 @@ const App: React.FC = () => {
 export default App;
 // Test helpers
 export const __timeHelpers = { to24h, normalizeTimeInput };
+export const __revenueHelpers = { isRevenueNumericInput };

@@ -4,7 +4,7 @@ import cors = require('cors');
 import { WebSocketServer, WebSocket } from 'ws';
 import * as dotenv from 'dotenv';
 import * as crypto from 'crypto';
-import { listAgents, updateHeartbeat, saveMeta, getAgent, updateRelayMeta, listSchedules, upsertSchedule, deleteSchedule, listGroups, listGroupsForMembership, upsertGroup, deleteGroup, GroupRow, deleteAgent, upsertAgent, upsertCommand, listPendingCommands, deleteCommand, updateCommandsForRelay, expireOldCommands, insertLead, getLastLeadTimestampForIp } from './db';
+import { listAgents, updateHeartbeat, saveMeta, getAgent, updateRelayMeta, listSchedules, upsertSchedule, deleteSchedule, listGroups, listGroupsForMembership, upsertGroup, deleteGroup, GroupRow, deleteAgent, upsertAgent, upsertCommand, listPendingCommands, deleteCommand, updateCommandsForRelay, expireOldCommands, insertLead, getLastLeadTimestampForIp, getRevenueEntry, listRevenueEntriesBetween, listRevenueEntries, listRevenueEntryDatesBetween, upsertRevenueEntry, insertRevenueAudit, listRevenueAudit, RevenueEntryRow, listUiUsers, getUiUser, createUiUser, updateUiUserRole, updateUiUserPassword, updateUiUserLastLogin, countUiUsers } from './db';
 
 dotenv.config({ path: process.env.CENTRAL_ENV_FILE || '.env.central' });
 
@@ -29,35 +29,6 @@ const parseAgentSecrets = (val?: string) => {
   return map;
 };
 
-type UiUser = { username: string; role: string; passwordHash: string };
-
-const parseUiUsers = (val?: string) => {
-  const users = new Map<string, UiUser>();
-  parseCsv(val).forEach((entry) => {
-    const parts = entry.split(':').map((part) => part.trim()).filter(Boolean);
-    if (parts.length < 2) return;
-    const username = parts[0];
-    let role = 'admin';
-    let passwordHash = '';
-    if (parts.length === 2) {
-      passwordHash = parts[1];
-    } else {
-      role = parts[1] || 'admin';
-      passwordHash = parts.slice(2).join(':');
-    }
-    if (username && passwordHash) {
-      users.set(username, { username, role, passwordHash });
-    }
-  });
-  const fallbackUser = process.env.UI_USERNAME || process.env.UI_USER || '';
-  const fallbackHash = process.env.UI_PASSWORD_HASH || '';
-  const fallbackRole = process.env.UI_ROLE || 'admin';
-  if (fallbackUser && fallbackHash && !users.has(fallbackUser)) {
-    users.set(fallbackUser, { username: fallbackUser, role: fallbackRole, passwordHash: fallbackHash });
-  }
-  return users;
-};
-
 const safeEqual = (a: Buffer, b: Buffer) => {
   if (a.length !== b.length) return false;
   return crypto.timingSafeEqual(a, b);
@@ -77,6 +48,16 @@ const verifyPassword = (password: string, stored: string) => {
   if (!salt.length || !expected.length) return false;
   const actual = crypto.scryptSync(password, salt, expected.length, { N, r, p });
   return safeEqual(actual, expected);
+};
+
+const hashPassword = (password: string) => {
+  const N = 16384;
+  const r = 8;
+  const p = 1;
+  const keylen = 64;
+  const salt = crypto.randomBytes(16);
+  const hash = crypto.scryptSync(password, salt, keylen, { N, r, p });
+  return `scrypt$${N}$${r}$${p}$${salt.toString('base64')}$${hash.toString('base64')}`;
 };
 
 const parseCookies = (header?: string) => {
@@ -99,6 +80,16 @@ const normalizeSameSite = (val?: string) => {
   return 'lax';
 };
 
+type UserRole = 'admin' | 'user';
+
+const normalizeRole = (val?: string): UserRole => (val === 'admin' ? 'admin' : 'user');
+
+const isValidUsername = (val: string) => {
+  const trimmed = val.trim();
+  if (!trimmed || trimmed.length > 64) return false;
+  return !/\s/.test(trimmed);
+};
+
 const ALLOW_INSECURE = asBool(process.env.ALLOW_INSECURE, false);
 const REQUIRE_UI_AUTH = asBool(process.env.REQUIRE_UI_AUTH, true) && !ALLOW_INSECURE;
 const SESSION_SECRET = process.env.SESSION_SECRET || '';
@@ -115,15 +106,18 @@ const ALLOW_DYNAMIC_AGENT_REGISTRATION = asBool(process.env.ALLOW_DYNAMIC_AGENT_
 const ALLOW_LEGACY_AGENT_SECRET = asBool(process.env.ALLOW_LEGACY_AGENT_SECRET, false);
 const AGENT_SECRET_MAP = parseAgentSecrets(process.env.AGENT_SECRETS);
 const LEGACY_AGENT_SECRET = process.env.CENTRAL_AGENT_SECRET || '';
-const UI_USERS = parseUiUsers(process.env.UI_USERS);
+const KNOWN_LAUNDRY_IDS = (() => {
+  const explicit = parseCsv(process.env.LAUNDRY_IDS);
+  if (explicit.length) return explicit;
+  if (AGENT_SECRET_MAP.size) return Array.from(AGENT_SECRET_MAP.keys());
+  return [];
+})();
+const KNOWN_LAUNDRY_SET = new Set(KNOWN_LAUNDRY_IDS);
+
+const isKnownLaundry = (agentId: string) => KNOWN_LAUNDRY_SET.size === 0 || KNOWN_LAUNDRY_SET.has(agentId);
 
 if (REQUIRE_UI_AUTH && !SESSION_SECRET) {
   console.error('[central] SESSION_SECRET is required when REQUIRE_UI_AUTH is enabled.');
-  process.exit(1);
-}
-
-if (REQUIRE_UI_AUTH && UI_USERS.size === 0) {
-  console.error('[central] UI_USERS (or UI_USERNAME/UI_PASSWORD_HASH) must be set when REQUIRE_UI_AUTH is enabled.');
   process.exit(1);
 }
 
@@ -135,6 +129,52 @@ if (REQUIRE_CORS_ORIGINS && CORS_ORIGINS.length === 0) {
 if (!ALLOW_INSECURE && AGENT_SECRET_MAP.size === 0) {
   console.warn('[central] AGENT_SECRETS is empty; only agents already stored in the DB can connect.');
 }
+
+const DEFAULT_ADMIN_USERNAME = 'admin';
+const DEFAULT_ADMIN_PASSWORD = 'admin';
+
+const ensureDefaultAdmin = () => {
+  if (countUiUsers() > 0) return;
+  const now = Date.now();
+  const created = createUiUser({
+    username: DEFAULT_ADMIN_USERNAME,
+    role: 'admin',
+    passwordHash: hashPassword(DEFAULT_ADMIN_PASSWORD),
+    createdAt: now,
+    updatedAt: now,
+    lastLoginAt: null,
+  });
+  if (created) {
+    console.warn('[central] default admin user created (admin/admin). Change the password in System > User Management.');
+  }
+};
+
+const ensureKnownAgents = () => {
+  if (!KNOWN_LAUNDRY_SET.size) return;
+  KNOWN_LAUNDRY_IDS.forEach(agentId => {
+    const existing = getAgent(agentId);
+    const secret = AGENT_SECRET_MAP.get(agentId) || existing?.secret || '';
+    if (existing) {
+      if (secret && secret !== existing.secret) {
+        upsertAgent({ ...existing, secret });
+      }
+      return;
+    }
+    upsertAgent({
+      agentId,
+      secret,
+      lastHeartbeat: null,
+      lastStatus: null,
+      lastMeta: null,
+      desiredState: null,
+      reportedState: null,
+      scheduleVersion: null,
+    });
+  });
+};
+
+ensureDefaultAdmin();
+ensureKnownAgents();
 
 const PORT = Number(process.env.CENTRAL_PORT || 4000);
 const HEARTBEAT_STALE_MS = 30_000;
@@ -198,6 +238,82 @@ const normalizeGroupTimes = (group: GroupRow): GroupRow => {
 
 const getNormalizedGroups = (ownerId?: string): GroupRow[] => {
   return listGroups(ownerId).map(normalizeGroupTimes);
+};
+
+const formatDate = (date: Date) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+const parseEntryDate = (value?: string | null) => {
+  if (!value) return null;
+  const match = value.trim().match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) return null;
+  if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+  const date = new Date(year, month - 1, day);
+  if (Number.isNaN(date.getTime())) return null;
+  return formatDate(date);
+};
+
+const resolveEntryDate = (value?: string | null) => parseEntryDate(value) || formatDate(new Date());
+
+const roundMoney = (val: number) => Math.round(val * 100) / 100;
+
+const parseMoney = (value: any) => {
+  if (value === '' || value === null || value === undefined) return 0;
+  const num = Number(value);
+  if (!Number.isFinite(num) || num < 0) return null;
+  return roundMoney(num);
+};
+
+const parseCount = (value: any) => {
+  if (value === '' || value === null || value === undefined) return 0;
+  const num = Number(value);
+  if (!Number.isFinite(num) || num < 0 || !Number.isInteger(num)) return null;
+  return num;
+};
+
+const normalizeDeductions = (input: any) => {
+  const list = Array.isArray(input) ? input : [];
+  const normalized: { amount: number; comment: string }[] = [];
+  for (const item of list) {
+    const rawAmount = item?.amount;
+    const rawComment = typeof item?.comment === 'string' ? item.comment : String(item?.comment || '');
+    const comment = rawComment.trim();
+    const hasAmount = rawAmount !== '' && rawAmount !== null && rawAmount !== undefined;
+    const hasComment = comment.length > 0;
+    if (!hasAmount && !hasComment) continue;
+    const amount = parseMoney(rawAmount);
+    if (!hasComment) {
+      return { error: 'deduction comment required', list: [] };
+    }
+    if (amount === null) {
+      return { error: 'invalid deduction amount', list: [] };
+    }
+    normalized.push({ amount, comment });
+  }
+  return { error: null, list: normalized };
+};
+
+const buildRevenueSummary = (entries: RevenueEntryRow[]) => {
+  const totalsByAgent: Record<string, number> = {};
+  entries.forEach(entry => {
+    const net = roundMoney(entry.coinsTotal - entry.deductionsTotal);
+    totalsByAgent[entry.agentId] = roundMoney((totalsByAgent[entry.agentId] || 0) + net);
+  });
+  const overall = roundMoney(Object.values(totalsByAgent).reduce((sum, val) => sum + val, 0));
+  return { totalsByAgent, overall };
+};
+
+const filterEntriesByKnownAgents = (entries: RevenueEntryRow[]) => {
+  if (!KNOWN_LAUNDRY_SET.size) return entries;
+  return entries.filter(entry => KNOWN_LAUNDRY_SET.has(entry.agentId));
 };
 
 const desiredStateKey = (agentId: string, relayId: number) => `${agentId}::${relayId}`;
@@ -359,7 +475,7 @@ app.use(cors({
 }));
 app.use(express.json());
 
-type SessionPayload = { sub: string; role: string; exp: number };
+type SessionPayload = { sub: string; role: UserRole; exp: number };
 
 const sessionTtlHours = Number.isFinite(SESSION_TTL_HOURS) ? SESSION_TTL_HOURS : 12;
 const SESSION_TTL_MS = Math.max(1, sessionTtlHours) * 60 * 60 * 1000;
@@ -419,6 +535,13 @@ const requireUiAuth: express.RequestHandler = (req, res, next) => {
   return next();
 };
 
+const requireAdmin: express.RequestHandler = (_req, res, next) => {
+  if (!REQUIRE_UI_AUTH) return next();
+  const session = res.locals.user as SessionPayload | undefined;
+  if (!session || session.role !== 'admin') return res.status(403).json({ error: 'forbidden' });
+  return next();
+};
+
 app.get('/auth/session', (req, res) => {
   const session = getSession(req);
   res.setHeader('Cache-Control', 'no-store');
@@ -431,24 +554,99 @@ app.post('/auth/login', (req, res) => {
   const username = String(req.body?.username || '').trim();
   const password = String(req.body?.password || '');
   if (!username || !password) return res.status(400).json({ error: 'username and password required' });
-  const user = UI_USERS.get(username);
+  const user = getUiUser(username);
   if (!user || !verifyPassword(password, user.passwordHash)) {
     return res.status(401).json({ error: 'invalid credentials' });
   }
+  const role = normalizeRole(user.role);
+  updateUiUserLastLogin(user.username, Date.now());
   const payload: SessionPayload = {
     sub: user.username,
-    role: user.role,
+    role,
     exp: Date.now() + SESSION_TTL_MS,
   };
   const token = signSession(payload);
   setSessionCookie(res, token, SESSION_TTL_MS);
   res.setHeader('Cache-Control', 'no-store');
-  res.json({ ok: true, user: { username: user.username, role: user.role } });
+  res.json({ ok: true, user: { username: user.username, role } });
 });
 
 app.post('/auth/logout', (_req, res) => {
   clearSessionCookie(res);
   res.setHeader('Cache-Control', 'no-store');
+  res.json({ ok: true });
+});
+
+app.get('/api/users', requireUiAuth, requireAdmin, (_req, res) => {
+  const users = listUiUsers().map(u => ({
+    username: u.username,
+    role: u.role,
+    lastLoginAt: u.lastLoginAt,
+    createdAt: u.createdAt,
+    updatedAt: u.updatedAt,
+  }));
+  res.json(users);
+});
+
+app.post('/api/users', requireUiAuth, requireAdmin, (req, res) => {
+  const username = String(req.body?.username || '').trim();
+  const password = String(req.body?.password || '');
+  const role = normalizeRole(req.body?.role);
+  if (!isValidUsername(username) || !password) {
+    return res.status(400).json({ error: 'username and password required' });
+  }
+  if (getUiUser(username)) {
+    return res.status(409).json({ error: 'user exists' });
+  }
+  const now = Date.now();
+  const created = createUiUser({
+    username,
+    role,
+    passwordHash: hashPassword(password),
+    createdAt: now,
+    updatedAt: now,
+    lastLoginAt: null,
+  });
+  if (!created) {
+    return res.status(500).json({ error: 'create failed' });
+  }
+  res.json({ ok: true });
+});
+
+app.put('/api/users/:username/role', requireUiAuth, requireAdmin, (req, res) => {
+  const username = String(req.params.username || '').trim();
+  const role = normalizeRole(req.body?.role);
+  if (!isValidUsername(username)) {
+    return res.status(400).json({ error: 'invalid username' });
+  }
+  const users = listUiUsers();
+  const target = users.find(u => u.username === username);
+  if (!target) {
+    return res.status(404).json({ error: 'user not found' });
+  }
+  if (role !== 'admin') {
+    const adminCount = users.filter(u => u.role === 'admin').length;
+    if (target.role === 'admin' && adminCount <= 1) {
+      return res.status(400).json({ error: 'at least one admin required' });
+    }
+  }
+  const updated = updateUiUserRole(username, role);
+  if (!updated) {
+    return res.status(404).json({ error: 'user not found' });
+  }
+  res.json({ ok: true });
+});
+
+app.put('/api/users/:username/password', requireUiAuth, requireAdmin, (req, res) => {
+  const username = String(req.params.username || '').trim();
+  const password = String(req.body?.password || '');
+  if (!isValidUsername(username) || !password) {
+    return res.status(400).json({ error: 'username and password required' });
+  }
+  const updated = updateUiUserPassword(username, hashPassword(password));
+  if (!updated) {
+    return res.status(404).json({ error: 'user not found' });
+  }
   res.json({ ok: true });
 });
 
@@ -484,9 +682,182 @@ app.post('/lead', (req, res) => {
 });
 
 app.use('/api', requireUiAuth);
+app.use('/api/revenue', requireAdmin);
+
+app.get('/api/revenue/summary', (req, res) => {
+  const dateStr = resolveEntryDate(req.query?.date as string | undefined);
+  const anchor = new Date(`${dateStr}T00:00:00`);
+  const day = anchor.getDay();
+  const diff = day === 0 ? -6 : 1 - day;
+  const weekStart = new Date(anchor);
+  weekStart.setDate(anchor.getDate() + diff);
+  const weekEnd = new Date(weekStart);
+  weekEnd.setDate(weekStart.getDate() + 6);
+  const monthStart = new Date(anchor.getFullYear(), anchor.getMonth(), 1);
+  const monthEnd = new Date(anchor.getFullYear(), anchor.getMonth() + 1, 0);
+  const weekStartDate = formatDate(weekStart);
+  const weekEndDate = formatDate(weekEnd);
+  const monthStartDate = formatDate(monthStart);
+  const monthEndDate = formatDate(monthEnd);
+  const weekEntries = filterEntriesByKnownAgents(listRevenueEntriesBetween(weekStartDate, weekEndDate));
+  const monthEntries = filterEntriesByKnownAgents(listRevenueEntriesBetween(monthStartDate, monthEndDate));
+  res.json({
+    date: dateStr,
+    week: { startDate: weekStartDate, endDate: weekEndDate, ...buildRevenueSummary(weekEntries) },
+    month: { startDate: monthStartDate, endDate: monthEndDate, ...buildRevenueSummary(monthEntries) },
+  });
+});
+
+app.get('/api/revenue/entries', (req, res) => {
+  const startRaw = req.query?.startDate as string | undefined;
+  const endRaw = req.query?.endDate as string | undefined;
+  const agentId = req.query?.agentId as string | undefined;
+  if (agentId && !isKnownLaundry(agentId)) {
+    return res.status(404).json({ error: 'agent not found' });
+  }
+  const startDate = startRaw ? parseEntryDate(startRaw) : null;
+  const endDate = endRaw ? parseEntryDate(endRaw) : null;
+  if ((startRaw || endRaw) && (!startDate || !endDate)) {
+    return res.status(400).json({ error: 'startDate and endDate required' });
+  }
+  const entries = listRevenueEntries({
+    startDate: startDate || undefined,
+    endDate: endDate || undefined,
+    agentId,
+  });
+  const filtered = filterEntriesByKnownAgents(entries);
+  res.json({ entries: filtered });
+});
+
+app.get('/api/revenue/dates', (req, res) => {
+  const startRaw = req.query?.startDate as string | undefined;
+  const endRaw = req.query?.endDate as string | undefined;
+  const agentId = req.query?.agentId as string | undefined;
+  const startDate = startRaw ? parseEntryDate(startRaw) : null;
+  const endDate = endRaw ? parseEntryDate(endRaw) : null;
+  if (!startDate || !endDate) {
+    return res.status(400).json({ error: 'startDate and endDate required' });
+  }
+  if (agentId && !isKnownLaundry(agentId)) {
+    return res.status(404).json({ error: 'agent not found' });
+  }
+  const dates = new Set<string>();
+  if (agentId) {
+    listRevenueEntryDatesBetween(startDate, endDate, agentId).forEach(date => dates.add(date));
+  } else if (KNOWN_LAUNDRY_SET.size) {
+    KNOWN_LAUNDRY_IDS.forEach(id => {
+      listRevenueEntryDatesBetween(startDate, endDate, id).forEach(date => dates.add(date));
+    });
+  } else {
+    listRevenueEntryDatesBetween(startDate, endDate).forEach(date => dates.add(date));
+  }
+  res.json({ dates: Array.from(dates).sort() });
+});
+
+app.get('/api/revenue/:agentId', (req, res) => {
+  const agentId = req.params.agentId;
+  if (!isKnownLaundry(agentId)) {
+    return res.status(404).json({ error: 'agent not found' });
+  }
+  const entryDate = resolveEntryDate(req.query?.date as string | undefined);
+  const entry = getRevenueEntry(agentId, entryDate);
+  const audit = entry ? listRevenueAudit(agentId, entryDate) : [];
+  res.json({ entry, audit });
+});
+
+app.put('/api/revenue/:agentId', (req, res) => {
+  const agentId = req.params.agentId;
+  if (!isKnownLaundry(agentId)) {
+    return res.status(404).json({ error: 'agent not found' });
+  }
+  const entryDate = resolveEntryDate(req.body?.entryDate || (req.query?.date as string | undefined));
+  const coinsTotal = parseMoney(req.body?.coinsTotal);
+  const euroCoinsCount = parseCount(req.body?.euroCoinsCount);
+  const billsTotal = parseMoney(req.body?.billsTotal);
+  if (coinsTotal === null) return res.status(400).json({ error: 'invalid coinsTotal' });
+  if (euroCoinsCount === null) return res.status(400).json({ error: 'invalid euroCoinsCount' });
+  if (billsTotal === null) return res.status(400).json({ error: 'invalid billsTotal' });
+  const { list: deductions, error: deductionsError } = normalizeDeductions(req.body?.deductions);
+  if (deductionsError) return res.status(400).json({ error: deductionsError });
+  const deductionsTotal = roundMoney(deductions.reduce((sum, item) => sum + item.amount, 0));
+  const now = Date.now();
+  const session = res.locals.user as SessionPayload | undefined;
+  const username = session?.sub || 'unknown';
+  const existing = getRevenueEntry(agentId, entryDate);
+
+  if (!existing) {
+    const entry: RevenueEntryRow = {
+      agentId,
+      entryDate,
+      createdAt: now,
+      updatedAt: now,
+      coinsTotal,
+      euroCoinsCount,
+      billsTotal,
+      deductions,
+      deductionsTotal,
+      createdBy: username,
+      updatedBy: username,
+      hasEdits: false,
+    };
+    upsertRevenueEntry(entry);
+    insertRevenueAudit([
+      { agentId, entryDate, field: 'coinsTotal', oldValue: null, newValue: String(coinsTotal), user: username, createdAt: now },
+      { agentId, entryDate, field: 'euroCoinsCount', oldValue: null, newValue: String(euroCoinsCount), user: username, createdAt: now },
+      { agentId, entryDate, field: 'billsTotal', oldValue: null, newValue: String(billsTotal), user: username, createdAt: now },
+      { agentId, entryDate, field: 'deductions', oldValue: null, newValue: JSON.stringify(deductions), user: username, createdAt: now },
+    ]);
+    return res.json({ entry, audit: listRevenueAudit(agentId, entryDate) });
+  }
+
+  const changes: { field: string; oldValue: string | null; newValue: string | null }[] = [];
+  const prevCoins = roundMoney(existing.coinsTotal);
+  const prevEuroCoins = existing.euroCoinsCount;
+  const prevBills = roundMoney(existing.billsTotal);
+  const prevDeductionsPayload = JSON.stringify(existing.deductions || []);
+  const nextDeductionsPayload = JSON.stringify(deductions);
+
+  if (prevCoins !== coinsTotal) changes.push({ field: 'coinsTotal', oldValue: String(prevCoins), newValue: String(coinsTotal) });
+  if (prevEuroCoins !== euroCoinsCount) changes.push({ field: 'euroCoinsCount', oldValue: String(prevEuroCoins), newValue: String(euroCoinsCount) });
+  if (prevBills !== billsTotal) changes.push({ field: 'billsTotal', oldValue: String(prevBills), newValue: String(billsTotal) });
+  if (prevDeductionsPayload !== nextDeductionsPayload) changes.push({ field: 'deductions', oldValue: prevDeductionsPayload, newValue: nextDeductionsPayload });
+
+  if (changes.length === 0) {
+    return res.json({ entry: existing, audit: listRevenueAudit(agentId, entryDate), unchanged: true });
+  }
+
+  const updated: RevenueEntryRow = {
+    ...existing,
+    coinsTotal,
+    euroCoinsCount,
+    billsTotal,
+    deductions,
+    deductionsTotal,
+    updatedAt: now,
+    updatedBy: username,
+    hasEdits: true,
+  };
+  upsertRevenueEntry(updated);
+  insertRevenueAudit(changes.map(change => ({
+    agentId,
+    entryDate,
+    field: change.field,
+    oldValue: change.oldValue,
+    newValue: change.newValue,
+    user: username,
+    createdAt: now,
+  })));
+  return res.json({ entry: updated, audit: listRevenueAudit(agentId, entryDate) });
+});
 
 app.get('/api/agents', (_req, res) => {
-  const list = listAgents().map(a => {
+  const allAgents = listAgents();
+  const selectedAgents = KNOWN_LAUNDRY_SET.size
+    ? KNOWN_LAUNDRY_IDS
+        .map(id => allAgents.find(a => a.agentId === id))
+        .filter((item): item is (typeof allAgents)[number] => Boolean(item))
+    : allAgents;
+  const list = selectedAgents.map(a => {
     const socketRec = agents.get(a.agentId);
     const online = socketRec?.socket.readyState === WebSocket.OPEN;
     return {
@@ -499,6 +870,9 @@ app.get('/api/agents', (_req, res) => {
 });
 
 app.get('/api/agents/:id/status', (req, res) => {
+  if (!isKnownLaundry(req.params.id)) {
+    return res.status(404).json({ error: 'agent not found' });
+  }
   const rec = getAgent(req.params.id);
   if (!rec) return res.status(404).json({ error: 'agent not found' });
   res.json({
@@ -512,6 +886,9 @@ app.get('/api/agents/:id/status', (req, res) => {
 app.post('/api/agents', (req, res) => {
   const { agentId, secret } = req.body || {};
   if (!agentId || !secret) return res.status(400).json({ error: 'agentId and secret required' });
+  if (!isKnownLaundry(agentId)) {
+    return res.status(403).json({ error: 'agent not allowed' });
+  }
   const expectedSecret = AGENT_SECRET_MAP.get(agentId);
   if (expectedSecret && secret !== expectedSecret) {
     return res.status(403).json({ error: 'agent secret mismatch' });
@@ -524,9 +901,16 @@ app.post('/api/agents', (req, res) => {
 });
 
 app.delete('/api/agents/:id', (req, res) => {
-  deleteAgent(req.params.id);
-  agents.delete(req.params.id);
-  relayStateCache.delete(req.params.id);
+  const agentId = req.params.id;
+  if (!isKnownLaundry(agentId)) {
+    return res.status(404).json({ error: 'agent not found' });
+  }
+  if (KNOWN_LAUNDRY_SET.size && KNOWN_LAUNDRY_SET.has(agentId)) {
+    return res.status(403).json({ error: 'laundry is fixed' });
+  }
+  deleteAgent(agentId);
+  agents.delete(agentId);
+  relayStateCache.delete(agentId);
   res.json({ ok: true });
 });
 
@@ -556,7 +940,12 @@ app.post('/api/agents/:id/relays/:relayId/state', (req, res) => {
 });
 
 app.get('/api/dashboard', (req, res) => {
-  const agentId = (req.query.agentId as string) || listAgents()[0]?.agentId;
+  const requestedId = req.query.agentId as string | undefined;
+  if (requestedId && !isKnownLaundry(requestedId)) {
+    return res.status(404).json({ error: 'agent not found' });
+  }
+  const fallbackId = KNOWN_LAUNDRY_SET.size ? KNOWN_LAUNDRY_IDS[0] : listAgents()[0]?.agentId;
+  const agentId = requestedId || fallbackId;
   if (!agentId) return res.json({ relays: [], schedules: [], groups: [], isMock: true });
   const rec = getAgent(agentId);
   const schedules = listSchedules(agentId).map(s => ({
@@ -762,6 +1151,11 @@ wss.on('connection', (socket) => {
       if (!agentId && msg.type === 'hello') {
         if (!msg.agentId || !msg.secret) {
           console.warn('[central] hello missing agentId/secret');
+          socket.close();
+          return;
+        }
+        if (!isKnownLaundry(msg.agentId)) {
+          console.warn('[central] agent not in laundry list', msg.agentId);
           socket.close();
           return;
         }

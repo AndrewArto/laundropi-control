@@ -28,6 +28,8 @@ dist-ssr
 .env.*
 !.env.agent.example
 !.env.central.example
+env.central
+tmp/
 
 # Local DB and certificates
 central.db

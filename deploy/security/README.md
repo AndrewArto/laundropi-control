@@ -5,8 +5,6 @@ This branch adds server-side UI auth, CORS allowlist, and per-agent secrets. Use
 ## Central (AWS) environment
 Set these on the central server (or in an EnvironmentFile):
 - `SESSION_SECRET=...` (required, random 32+ chars)
-- `UI_USERS=admin:admin:<hash>` (format: `username:role:hash` or `username:hash`)
-- Or single-user envs: `UI_USERNAME=admin`, `UI_PASSWORD_HASH=<hash>`, `UI_ROLE=admin`
 - `REQUIRE_UI_AUTH=true`
 - `SESSION_TTL_HOURS=12` (optional)
 - `SESSION_COOKIE_SECURE=true` (keep true in prod)
@@ -15,15 +13,13 @@ Set these on the central server (or in an EnvironmentFile):
 - `REQUIRE_CORS_ORIGINS=true`
 - `LEAD_FORM_ENABLED=true` (optional)
 - `LEAD_RATE_LIMIT_MS=60000` (optional, per IP)
-- `AGENT_SECRETS=Brandoa_1:secret1,Brandoa_2:secret2`
+- `AGENT_SECRETS=<agent-id-1>:<secret-1>,<agent-id-2>:<secret-2>`
 - `REQUIRE_KNOWN_AGENT=true`
 - `ALLOW_DYNAMIC_AGENT_REGISTRATION=false`
 - `ALLOW_LEGACY_AGENT_SECRET=false`
 - `CENTRAL_PORT=4000`
 
-Generate a password hash:
-- `node scripts/hash-ui-password.js "your-password"`
-- Then set `UI_USERS=admin:admin:<hash>`
+Default UI user is `admin` / `admin` on first run. Change credentials in System > User Management.
 
 Temporary migration flags (turn off after cutover):
 - `ALLOW_LEGACY_AGENT_SECRET=true` (accepts old shared secret)
@@ -31,7 +27,7 @@ Temporary migration flags (turn off after cutover):
 
 ## Agent environment (per Raspberry Pi)
 Each agent must have its own secret:
-- `AGENT_ID=Brandoa_1`
+- `AGENT_ID=<agent-id-1>`
 - `AGENT_SECRET=secret1`
 - `AGENT_WS_URL=wss://control.example.com/agent`
 - `PIN_MAP=7:21` (if needed)
