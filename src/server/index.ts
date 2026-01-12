@@ -4,7 +4,7 @@ import cors = require('cors');
 import { WebSocketServer, WebSocket } from 'ws';
 import * as dotenv from 'dotenv';
 import * as crypto from 'crypto';
-import { listAgents, updateHeartbeat, saveMeta, getAgent, updateRelayMeta, listSchedules, upsertSchedule, deleteSchedule, listGroups, listGroupsForMembership, upsertGroup, deleteGroup, GroupRow, deleteAgent, upsertAgent, upsertCommand, listPendingCommands, deleteCommand, updateCommandsForRelay, expireOldCommands, insertLead, getLastLeadTimestampForIp, getRevenueEntry, listRevenueEntriesBetween, listRevenueEntries, listRevenueEntryDatesBetween, upsertRevenueEntry, insertRevenueAudit, listRevenueAudit, RevenueEntryRow, listUiUsers, getUiUser, createUiUser, updateUiUserRole, updateUiUserPassword, updateUiUserLastLogin, countUiUsers } from './db';
+import { listAgents, updateHeartbeat, saveMeta, getAgent, updateRelayMeta, listSchedules, upsertSchedule, deleteSchedule, listGroups, listGroupsForMembership, upsertGroup, deleteGroup, GroupRow, deleteAgent, upsertAgent, upsertCommand, listPendingCommands, deleteCommand, updateCommandsForRelay, expireOldCommands, insertLead, getLastLeadTimestampForIp, getRevenueEntry, listRevenueEntriesBetween, listRevenueEntries, listRevenueEntryDatesBetween, upsertRevenueEntry, insertRevenueAudit, listRevenueAudit, RevenueEntryRow, listUiUsers, getUiUser, createUiUser, updateUiUserRole, updateUiUserPassword, updateUiUserLastLogin, countUiUsers, listCameras, getCamera, upsertCamera, deleteCamera, upsertIntegrationSecret, getIntegrationSecret, deleteIntegrationSecret, CameraRow } from './db';
 
 dotenv.config({ path: process.env.CENTRAL_ENV_FILE || '.env.central' });
 
@@ -58,6 +58,39 @@ const hashPassword = (password: string) => {
   const salt = crypto.randomBytes(16);
   const hash = crypto.scryptSync(password, salt, keylen, { N, r, p });
   return `scrypt$${N}$${r}$${p}$${salt.toString('base64')}$${hash.toString('base64')}`;
+};
+
+const INTEGRATION_SECRETS_KEY = (process.env.INTEGRATION_SECRETS_KEY || process.env.CAMERA_SECRETS_KEY || '').trim();
+
+const getIntegrationKey = () => {
+  if (!INTEGRATION_SECRETS_KEY) return null;
+  return crypto.createHash('sha256').update(INTEGRATION_SECRETS_KEY).digest();
+};
+
+const encryptSecret = (value: string) => {
+  const key = getIntegrationKey();
+  if (!key) throw new Error('INTEGRATION_SECRETS_KEY is required to store secrets');
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+  const encrypted = Buffer.concat([cipher.update(value, 'utf8'), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return `v1:${iv.toString('base64')}:${tag.toString('base64')}:${encrypted.toString('base64')}`;
+};
+
+const decryptSecret = (ciphertext: string) => {
+  const key = getIntegrationKey();
+  if (!key) throw new Error('INTEGRATION_SECRETS_KEY is required to read secrets');
+  const [version, ivB64, tagB64, dataB64] = ciphertext.split(':');
+  if (version !== 'v1' || !ivB64 || !tagB64 || !dataB64) {
+    throw new Error('Invalid secret payload');
+  }
+  const iv = Buffer.from(ivB64, 'base64');
+  const tag = Buffer.from(tagB64, 'base64');
+  const data = Buffer.from(dataB64, 'base64');
+  const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
+  decipher.setAuthTag(tag);
+  const decrypted = Buffer.concat([decipher.update(data), decipher.final()]);
+  return decrypted.toString('utf8');
 };
 
 const parseCookies = (header?: string) => {
@@ -175,13 +208,26 @@ const ensureKnownAgents = () => {
 
 ensureDefaultAdmin();
 ensureKnownAgents();
+if (KNOWN_LAUNDRY_SET.size) {
+  KNOWN_LAUNDRY_IDS.forEach(ensureDefaultCameras);
+}
 
 const PORT = Number(process.env.CENTRAL_PORT || 4000);
 const HEARTBEAT_STALE_MS = 30_000;
+const CAMERA_FRAME_TIMEOUT_MS = Number(process.env.CAMERA_FRAME_TIMEOUT_MS || 4000);
 
 type AgentSocketRecord = { socket: WebSocket; lastHeartbeat: number };
 const agents: Map<string, AgentSocketRecord> = new Map();
 const relayStateCache: Map<string, Map<number, string>> = new Map();
+
+type CameraFrameResult = { contentType: string; data: Buffer };
+type PendingCameraFrame = {
+  resolve: (result: CameraFrameResult) => void;
+  reject: (err: Error) => void;
+  timer: NodeJS.Timeout;
+};
+
+const pendingCameraFrames: Map<string, PendingCameraFrame> = new Map();
 
 const normalizeTime = (val?: string | null): string | null => {
   if (!val) return null;
@@ -238,6 +284,125 @@ const normalizeGroupTimes = (group: GroupRow): GroupRow => {
 
 const getNormalizedGroups = (ownerId?: string): GroupRow[] => {
   return listGroups(ownerId).map(normalizeGroupTimes);
+};
+
+const CAMERA_POSITIONS = ['front', 'back'] as const;
+const DEFAULT_CAMERA_NAMES: Record<string, string> = {
+  front: 'Front',
+  back: 'Back',
+};
+
+const normalizeCameraPosition = (value?: string | null) => {
+  const raw = (value || '').trim().toLowerCase();
+  if (raw === 'front' || raw === 'back') return raw;
+  return 'front';
+};
+
+const normalizeCameraName = (value: string | undefined, position: string) => {
+  const trimmed = (value || '').trim();
+  if (trimmed) return trimmed.slice(0, 64);
+  return DEFAULT_CAMERA_NAMES[position] || 'Camera';
+};
+
+const normalizeRtspUrl = (value?: string | null): string | null => {
+  if (!value) return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  try {
+    const parsed = new URL(trimmed);
+    if (parsed.protocol !== 'rtsp:') return null;
+    parsed.username = '';
+    parsed.password = '';
+    return parsed.toString();
+  } catch {
+    return null;
+  }
+};
+
+const buildCameraId = (agentId: string, position: string) => `${agentId}:${position}`;
+
+const buildStreamKey = (camera: CameraRow) => {
+  const raw = `cam_${camera.agentId}_${camera.position}`.toLowerCase();
+  const cleaned = raw.replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+  return cleaned || `cam_${camera.id.replace(/[^a-z0-9]+/gi, '_')}`;
+};
+
+const attachRtspCredentials = (rtspUrl: string, username?: string | null, password?: string | null) => {
+  try {
+    const parsed = new URL(rtspUrl);
+    if (username) parsed.username = username;
+    if (password) parsed.password = password;
+    return parsed.toString();
+  } catch {
+    return rtspUrl;
+  }
+};
+
+const readSecretValue = (secretId: string | null) => {
+  if (!secretId) return null;
+  const row = getIntegrationSecret(secretId);
+  if (!row) return null;
+  try {
+    return decryptSecret(row.cipher);
+  } catch (err) {
+    console.warn('[central] failed to decrypt secret', secretId, err);
+    return null;
+  }
+};
+
+const saveSecretValue = (secretId: string, kind: string, value: string) => {
+  const now = Date.now();
+  const existing = getIntegrationSecret(secretId);
+  const cipher = encryptSecret(value);
+  upsertIntegrationSecret({
+    id: secretId,
+    kind,
+    cipher,
+    createdAt: existing?.createdAt || now,
+    updatedAt: now,
+  });
+};
+
+const ensureDefaultCameras = (agentId: string) => {
+  const existing = listCameras(agentId);
+  const existingByPosition = new Map(existing.map(camera => [camera.position, camera]));
+  const now = Date.now();
+  CAMERA_POSITIONS.forEach(position => {
+    if (existingByPosition.has(position)) return;
+    const id = buildCameraId(agentId, position);
+    upsertCamera({
+      id,
+      agentId,
+      name: DEFAULT_CAMERA_NAMES[position],
+      position,
+      sourceType: 'pattern',
+      rtspUrl: null,
+      usernameSecretId: null,
+      passwordSecretId: null,
+      enabled: true,
+      createdAt: now,
+      updatedAt: now,
+    });
+  });
+};
+
+const buildCameraAgentPayload = (camera: CameraRow) => {
+  const streamKey = buildStreamKey(camera);
+  const username = readSecretValue(camera.usernameSecretId);
+  const password = readSecretValue(camera.passwordSecretId);
+  const rtspUrl = camera.sourceType === 'rtsp' && camera.rtspUrl
+    ? attachRtspCredentials(camera.rtspUrl, username, password)
+    : null;
+  return {
+    id: camera.id,
+    agentId: camera.agentId,
+    name: camera.name,
+    position: camera.position,
+    sourceType: camera.sourceType,
+    enabled: camera.enabled,
+    streamKey,
+    rtspUrl,
+  };
 };
 
 const formatDate = (date: Date) => {
@@ -447,6 +612,56 @@ const pushSchedulesToAgent = (agentId: string) => {
     }
     target.socket.send(JSON.stringify({ type: 'update_schedule', schedules: scheds, version }));
   }
+};
+
+const pushCameraConfigToAgent = (agentId: string) => {
+  const target = agents.get(agentId);
+  if (!target || target.socket.readyState !== WebSocket.OPEN) return;
+  ensureDefaultCameras(agentId);
+  const cameras = listCameras(agentId).map(buildCameraAgentPayload);
+  target.socket.send(JSON.stringify({ type: 'update_cameras', cameras }));
+};
+
+const requestCameraFrame = (agentId: string, cameraId: string): Promise<CameraFrameResult> => {
+  const target = agents.get(agentId);
+  if (!target || target.socket.readyState !== WebSocket.OPEN) {
+    return Promise.reject(new Error('agent not connected'));
+  }
+  const requestId = crypto.randomUUID();
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      pendingCameraFrames.delete(requestId);
+      reject(new Error('camera frame timeout'));
+    }, CAMERA_FRAME_TIMEOUT_MS);
+    pendingCameraFrames.set(requestId, { resolve, reject, timer });
+    target.socket.send(JSON.stringify({ type: 'camera_frame_request', cameraId, requestId }));
+  });
+};
+
+const buildCameraPatternSvg = (camera: CameraRow) => {
+  const width = 640;
+  const height = 360;
+  const title = `${camera.agentId} · ${camera.name}`;
+  const subtitle = camera.position.toUpperCase();
+  return `
+<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
+  <defs>
+    <linearGradient id="bg" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0%" stop-color="#0f172a"/>
+      <stop offset="100%" stop-color="#1e293b"/>
+    </linearGradient>
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#1f2937" stroke-width="1"/>
+    </pattern>
+  </defs>
+  <rect width="100%" height="100%" fill="url(#bg)"/>
+  <rect width="100%" height="100%" fill="url(#grid)"/>
+  <rect x="24" y="24" width="${width - 48}" height="${height - 48}" rx="18" fill="none" stroke="#334155" stroke-width="2"/>
+  <circle cx="${width - 58}" cy="50" r="8" fill="#22c55e"/>
+  <text x="48" y="78" fill="#e2e8f0" font-size="22" font-family="Arial, sans-serif">${title}</text>
+  <text x="48" y="110" fill="#94a3b8" font-size="14" font-family="Arial, sans-serif">Mock camera · ${subtitle}</text>
+  <text x="48" y="${height - 40}" fill="#64748b" font-size="12" font-family="Arial, sans-serif">Pattern feed (no camera configured)</text>
+</svg>`.trim();
 };
 
 const isOriginAllowed = (origin?: string | null) => {
@@ -887,6 +1102,161 @@ app.get('/api/agents/:id/status', (req, res) => {
   });
 });
 
+app.get('/api/agents/:id/cameras', (req, res) => {
+  const agentId = req.params.id;
+  if (!isKnownLaundry(agentId)) {
+    return res.status(404).json({ error: 'agent not found' });
+  }
+  ensureDefaultCameras(agentId);
+  const cameras = listCameras(agentId)
+    .sort((a, b) => {
+      const order = (pos: string) => (pos === 'front' ? 0 : pos === 'back' ? 1 : 9);
+      const diff = order(a.position) - order(b.position);
+      if (diff !== 0) return diff;
+      return a.name.localeCompare(b.name);
+    })
+    .map(camera => ({
+      id: camera.id,
+      agentId: camera.agentId,
+      name: camera.name,
+      position: camera.position,
+      sourceType: camera.sourceType,
+      rtspUrl: camera.rtspUrl,
+      enabled: camera.enabled,
+      hasCredentials: Boolean(camera.usernameSecretId || camera.passwordSecretId),
+      previewUrl: `/api/agents/${encodeURIComponent(agentId)}/cameras/${encodeURIComponent(camera.id)}/frame`,
+    }));
+  res.json({ cameras });
+});
+
+app.put('/api/agents/:id/cameras/:cameraId', (req, res) => {
+  const agentId = req.params.id;
+  const cameraId = req.params.cameraId;
+  if (!isKnownLaundry(agentId)) {
+    return res.status(404).json({ error: 'agent not found' });
+  }
+  ensureDefaultCameras(agentId);
+  const existing = getCamera(cameraId);
+  if (!existing || existing.agentId !== agentId) {
+    return res.status(404).json({ error: 'camera not found' });
+  }
+
+  const name = typeof req.body?.name === 'string'
+    ? normalizeCameraName(req.body.name, existing.position)
+    : existing.name;
+  const requestedSource = typeof req.body?.sourceType === 'string' ? req.body.sourceType : null;
+  const sourceType = (requestedSource === 'rtsp' || requestedSource === 'pattern')
+    ? requestedSource
+    : existing.sourceType;
+  const enabled = typeof req.body?.enabled === 'boolean' ? req.body.enabled : existing.enabled;
+
+  let rtspUrl = existing.rtspUrl;
+  if (req.body?.rtspUrl === null) {
+    rtspUrl = null;
+  } else if (typeof req.body?.rtspUrl === 'string') {
+    const normalized = normalizeRtspUrl(req.body.rtspUrl);
+    if (!normalized && req.body.rtspUrl.trim()) {
+      return res.status(400).json({ error: 'invalid rtspUrl' });
+    }
+    rtspUrl = normalized;
+  }
+
+  let usernameSecretId = existing.usernameSecretId;
+  let passwordSecretId = existing.passwordSecretId;
+
+  try {
+    if (req.body?.username !== undefined) {
+      const username = typeof req.body.username === 'string' ? req.body.username.trim() : '';
+      if (!username) {
+        if (usernameSecretId) deleteIntegrationSecret(usernameSecretId);
+        usernameSecretId = null;
+      } else {
+        const id = usernameSecretId || `${cameraId}:username`;
+        saveSecretValue(id, 'camera_username', username);
+        usernameSecretId = id;
+      }
+    }
+
+    if (req.body?.password !== undefined) {
+      const password = typeof req.body.password === 'string' ? req.body.password.trim() : '';
+      if (!password) {
+        if (passwordSecretId) deleteIntegrationSecret(passwordSecretId);
+        passwordSecretId = null;
+      } else {
+        const id = passwordSecretId || `${cameraId}:password`;
+        saveSecretValue(id, 'camera_password', password);
+        passwordSecretId = id;
+      }
+    }
+  } catch (err) {
+    console.error('[central] failed to store camera secret', err);
+    return res.status(500).json({ error: 'camera secret storage failed' });
+  }
+
+  if (sourceType === 'pattern') {
+    rtspUrl = null;
+    if (usernameSecretId) deleteIntegrationSecret(usernameSecretId);
+    if (passwordSecretId) deleteIntegrationSecret(passwordSecretId);
+    usernameSecretId = null;
+    passwordSecretId = null;
+  }
+
+  const updated: CameraRow = {
+    ...existing,
+    name,
+    sourceType,
+    rtspUrl,
+    usernameSecretId,
+    passwordSecretId,
+    enabled,
+    updatedAt: Date.now(),
+  };
+  upsertCamera(updated);
+  pushCameraConfigToAgent(agentId);
+  res.json({
+    camera: {
+      id: updated.id,
+      agentId: updated.agentId,
+      name: updated.name,
+      position: updated.position,
+      sourceType: updated.sourceType,
+      rtspUrl: updated.rtspUrl,
+      enabled: updated.enabled,
+      hasCredentials: Boolean(updated.usernameSecretId || updated.passwordSecretId),
+      previewUrl: `/api/agents/${encodeURIComponent(agentId)}/cameras/${encodeURIComponent(updated.id)}/frame`,
+    }
+  });
+});
+
+app.get('/api/agents/:id/cameras/:cameraId/frame', async (req, res) => {
+  const agentId = req.params.id;
+  const cameraId = req.params.cameraId;
+  if (!isKnownLaundry(agentId)) {
+    return res.status(404).json({ error: 'agent not found' });
+  }
+  ensureDefaultCameras(agentId);
+  const camera = getCamera(cameraId);
+  if (!camera || camera.agentId !== agentId) {
+    return res.status(404).json({ error: 'camera not found' });
+  }
+
+  res.setHeader('Cache-Control', 'no-store, max-age=0');
+  if (camera.sourceType === 'pattern' || !camera.enabled) {
+    res.setHeader('Content-Type', 'image/svg+xml');
+    res.status(200).send(buildCameraPatternSvg(camera));
+    return;
+  }
+
+  try {
+    const frame = await requestCameraFrame(agentId, cameraId);
+    res.setHeader('Content-Type', frame.contentType || 'image/jpeg');
+    res.status(200).end(frame.data);
+  } catch (err: any) {
+    console.warn('[central] camera frame failed', err?.message || err);
+    res.status(504).json({ error: 'camera frame unavailable' });
+  }
+});
+
 app.post('/api/agents', (req, res) => {
   const { agentId, secret } = req.body || {};
   if (!agentId || !secret) return res.status(400).json({ error: 'agentId and secret required' });
@@ -1191,6 +1561,7 @@ wss.on('connection', (socket) => {
         saveMeta(agentId, secretToPersist, msg.relays || null);
         console.log('[central] agent connected', agentId);
         reconcileOnConnect(agentId);
+        pushCameraConfigToAgent(agentId);
         return;
       }
 
@@ -1235,6 +1606,23 @@ wss.on('connection', (socket) => {
         if ((reportedVersion && currentVersion !== reportedVersion) || (!reportedVersion && knownVersion && knownVersion !== currentVersion)) {
           console.log('[central] schedule version mismatch, repushing', { agentId, currentVersion, reportedVersion: reportedVersion ?? knownVersion ?? 'n/a' });
           pushSchedulesToAgent(agentId);
+        }
+        return;
+      }
+
+      if (msg.type === 'camera_frame') {
+        const requestId = msg.requestId;
+        if (!requestId) return;
+        const pending = pendingCameraFrames.get(requestId);
+        if (!pending) return;
+        clearTimeout(pending.timer);
+        pendingCameraFrames.delete(requestId);
+        if (msg.ok && msg.data) {
+          const buffer = Buffer.from(msg.data, 'base64');
+          const contentType = typeof msg.contentType === 'string' ? msg.contentType : 'image/jpeg';
+          pending.resolve({ contentType, data: buffer });
+        } else {
+          pending.reject(new Error(msg.error || 'camera frame failed'));
         }
         return;
       }

@@ -94,6 +94,28 @@ export type RevenueAuditRow = {
   createdAt: number;
 };
 
+export type IntegrationSecretRow = {
+  id: string;
+  kind: string;
+  cipher: string;
+  createdAt: number;
+  updatedAt: number;
+};
+
+export type CameraRow = {
+  id: string;
+  agentId: string;
+  name: string;
+  position: string;
+  sourceType: string;
+  rtspUrl: string | null;
+  usernameSecretId: string | null;
+  passwordSecretId: string | null;
+  enabled: boolean;
+  createdAt: number;
+  updatedAt: number;
+};
+
 const dbPath = process.env.CENTRAL_DB_PATH || './central.db';
 const db = new Database(dbPath);
 
@@ -195,6 +217,30 @@ CREATE TABLE IF NOT EXISTS revenue_audit (
 );
 
 CREATE INDEX IF NOT EXISTS revenue_audit_agent_date_idx ON revenue_audit(agentId, entryDate, createdAt);
+
+CREATE TABLE IF NOT EXISTS integration_secrets (
+  id TEXT PRIMARY KEY,
+  kind TEXT NOT NULL,
+  cipher TEXT NOT NULL,
+  createdAt INTEGER NOT NULL,
+  updatedAt INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS cameras (
+  id TEXT PRIMARY KEY,
+  agentId TEXT NOT NULL,
+  name TEXT NOT NULL,
+  position TEXT NOT NULL,
+  sourceType TEXT NOT NULL,
+  rtspUrl TEXT,
+  usernameSecretId TEXT,
+  passwordSecretId TEXT,
+  enabled INTEGER DEFAULT 1,
+  createdAt INTEGER NOT NULL,
+  updatedAt INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS cameras_agent_idx ON cameras(agentId);
 `);
 
 // Best-effort migration: add entries column if missing (ignore errors)
@@ -574,6 +620,20 @@ export function deleteAgent(agentId: string) {
   db.prepare('DELETE FROM agents WHERE agentId = ?').run(agentId);
   db.prepare('DELETE FROM schedules WHERE agentId = ?').run(agentId);
   db.prepare('DELETE FROM groups WHERE agentId = ?').run(agentId);
+  const cameras = listCameras(agentId);
+  db.prepare('DELETE FROM cameras WHERE agentId = ?').run(agentId);
+  const secretIds = new Set<string>();
+  cameras.forEach(camera => {
+    if (camera.usernameSecretId) secretIds.add(camera.usernameSecretId);
+    if (camera.passwordSecretId) secretIds.add(camera.passwordSecretId);
+  });
+  secretIds.forEach(id => {
+    try {
+      deleteIntegrationSecret(id);
+    } catch (_) {
+      // ignore cleanup errors
+    }
+  });
 }
 
 const parseDeductions = (raw: string | null): RevenueDeduction[] => {
@@ -720,4 +780,122 @@ export function insertRevenueAudit(rows: RevenueAuditRow[]) {
     });
   });
   insertMany(rows);
+}
+
+// --- INTEGRATION SECRETS ---
+const upsertIntegrationSecretStmt = db.prepare(`
+  INSERT INTO integration_secrets(id, kind, cipher, createdAt, updatedAt)
+  VALUES (@id, @kind, @cipher, @createdAt, @updatedAt)
+  ON CONFLICT(id) DO UPDATE SET
+    kind=excluded.kind,
+    cipher=excluded.cipher,
+    updatedAt=excluded.updatedAt;
+`);
+
+const getIntegrationSecretStmt = db.prepare('SELECT * FROM integration_secrets WHERE id = ?');
+const deleteIntegrationSecretStmt = db.prepare('DELETE FROM integration_secrets WHERE id = ?');
+
+export function upsertIntegrationSecret(row: IntegrationSecretRow) {
+  upsertIntegrationSecretStmt.run({
+    id: row.id,
+    kind: row.kind,
+    cipher: row.cipher,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  });
+}
+
+export function getIntegrationSecret(id: string): IntegrationSecretRow | null {
+  const row = getIntegrationSecretStmt.get(id) as any;
+  if (!row) return null;
+  return {
+    id: row.id,
+    kind: row.kind,
+    cipher: row.cipher,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  };
+}
+
+export function deleteIntegrationSecret(id: string) {
+  deleteIntegrationSecretStmt.run(id);
+}
+
+// --- CAMERAS ---
+const upsertCameraStmt = db.prepare(`
+  INSERT INTO cameras(
+    id, agentId, name, position, sourceType, rtspUrl, usernameSecretId, passwordSecretId,
+    enabled, createdAt, updatedAt
+  )
+  VALUES (
+    @id, @agentId, @name, @position, @sourceType, @rtspUrl, @usernameSecretId, @passwordSecretId,
+    @enabled, @createdAt, @updatedAt
+  )
+  ON CONFLICT(id) DO UPDATE SET
+    agentId=excluded.agentId,
+    name=excluded.name,
+    position=excluded.position,
+    sourceType=excluded.sourceType,
+    rtspUrl=excluded.rtspUrl,
+    usernameSecretId=excluded.usernameSecretId,
+    passwordSecretId=excluded.passwordSecretId,
+    enabled=excluded.enabled,
+    updatedAt=excluded.updatedAt;
+`);
+
+export function upsertCamera(row: CameraRow) {
+  upsertCameraStmt.run({
+    id: row.id,
+    agentId: row.agentId,
+    name: row.name,
+    position: row.position,
+    sourceType: row.sourceType,
+    rtspUrl: row.rtspUrl || null,
+    usernameSecretId: row.usernameSecretId || null,
+    passwordSecretId: row.passwordSecretId || null,
+    enabled: row.enabled ? 1 : 0,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  });
+}
+
+export function getCamera(id: string): CameraRow | null {
+  const row = db.prepare('SELECT * FROM cameras WHERE id = ?').get(id) as any;
+  if (!row) return null;
+  return {
+    id: row.id,
+    agentId: row.agentId,
+    name: row.name,
+    position: row.position,
+    sourceType: row.sourceType,
+    rtspUrl: row.rtspUrl || null,
+    usernameSecretId: row.usernameSecretId || null,
+    passwordSecretId: row.passwordSecretId || null,
+    enabled: Boolean(row.enabled),
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  };
+}
+
+export function listCameras(agentId?: string): CameraRow[] {
+  const rows = agentId
+    ? db.prepare('SELECT * FROM cameras WHERE agentId = ? ORDER BY position, createdAt').all(agentId)
+    : db.prepare('SELECT * FROM cameras ORDER BY agentId, position, createdAt').all();
+  return rows.map((row: any) => ({
+    id: row.id,
+    agentId: row.agentId,
+    name: row.name,
+    position: row.position,
+    sourceType: row.sourceType,
+    rtspUrl: row.rtspUrl || null,
+    usernameSecretId: row.usernameSecretId || null,
+    passwordSecretId: row.passwordSecretId || null,
+    enabled: Boolean(row.enabled),
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  }));
+}
+
+export function deleteCamera(id: string) {
+  db.prepare('DELETE FROM cameras WHERE id = ?').run(id);
 }
