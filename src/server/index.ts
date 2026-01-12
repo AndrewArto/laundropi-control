@@ -303,12 +303,16 @@ const normalizeDeductions = (input: any) => {
 
 const buildRevenueSummary = (entries: RevenueEntryRow[]) => {
   const totalsByAgent: Record<string, number> = {};
+  const profitLossByAgent: Record<string, number> = {};
   entries.forEach(entry => {
-    const net = roundMoney(entry.coinsTotal - entry.deductionsTotal);
-    totalsByAgent[entry.agentId] = roundMoney((totalsByAgent[entry.agentId] || 0) + net);
+    const coinsTotal = entry.coinsTotal > 0 ? roundMoney(entry.coinsTotal) : 0;
+    const deductionsTotal = roundMoney(entry.deductionsTotal || 0);
+    totalsByAgent[entry.agentId] = roundMoney((totalsByAgent[entry.agentId] || 0) + coinsTotal);
+    profitLossByAgent[entry.agentId] = roundMoney((profitLossByAgent[entry.agentId] || 0) + roundMoney(coinsTotal - deductionsTotal));
   });
   const overall = roundMoney(Object.values(totalsByAgent).reduce((sum, val) => sum + val, 0));
-  return { totalsByAgent, overall };
+  const profitLossOverall = roundMoney(Object.values(profitLossByAgent).reduce((sum, val) => sum + val, 0));
+  return { totalsByAgent, overall, profitLossByAgent, profitLossOverall };
 };
 
 const filterEntriesByKnownAgents = (entries: RevenueEntryRow[]) => {

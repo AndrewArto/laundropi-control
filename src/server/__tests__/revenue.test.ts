@@ -39,6 +39,19 @@ describe('Revenue API', () => {
     expect(created.body.entry.deductionsTotal).toBe(10);
     expect(created.body.entry.hasEdits).toBe(false);
 
+    const extraPayload = {
+      entryDate: '2026-01-09',
+      coinsTotal: 0,
+      euroCoinsCount: 0,
+      billsTotal: 0,
+      deductions: [{ amount: 5, comment: 'Maintenance' }],
+    };
+
+    await request(app)
+      .put(`/api/revenue/${agentId}`)
+      .send(extraPayload)
+      .expect(200);
+
     const updatePayload = {
       entryDate,
       coinsTotal: 130,
@@ -65,5 +78,7 @@ describe('Revenue API', () => {
 
     expect(summary.body.week.overall).toBe(130);
     expect(summary.body.month.overall).toBe(130);
+    expect(summary.body.week.profitLossOverall).toBe(125);
+    expect(summary.body.month.profitLossOverall).toBe(125);
   });
 });

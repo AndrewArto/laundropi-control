@@ -90,4 +90,6 @@ export interface RevenueSummary {
   endDate: string;
   totalsByAgent: Record<string, number>;
   overall: number;
+  profitLossByAgent: Record<string, number>;
+  profitLossOverall: number;
 }
