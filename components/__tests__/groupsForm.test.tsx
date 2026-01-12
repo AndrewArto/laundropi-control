@@ -30,7 +30,7 @@ const mocks = vi.hoisted(() => {
   const listRevenueEntryDates = vi.fn().mockResolvedValue([]);
   const login = vi.fn();
   const logout = vi.fn();
-  return { addGroup, getStatus, getSession, listAgents, getRevenueEntry, getRevenueSummary, listRevenueEntryDates, login, logout };
+  return { addGroup, updateGroup, getStatus, getSession, listAgents, getRevenueEntry, getRevenueSummary, listRevenueEntryDates, login, logout };
 });
 
 vi.mock('../../services/api', () => ({
