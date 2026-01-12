@@ -1,0 +1,21 @@
+control.example.com {
+  encode gzip
+
+  handle /api/* {
+    reverse_proxy 127.0.0.1:4000
+  }
+
+  handle /auth* {
+    reverse_proxy 127.0.0.1:4000
+  }
+
+  handle /agent {
+    reverse_proxy 127.0.0.1:4000
+  }
+
+  handle {
+    root * /var/www/laundropi/dist
+    try_files {path} /index.html
+    file_server
+  }
+}

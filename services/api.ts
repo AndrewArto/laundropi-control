@@ -1,260 +1,301 @@
 
-import { Relay, Schedule, RelayType, RelayGroup } from '../types';
-import { INITIAL_RELAYS, MOCK_SCHEDULES } from '../constants';
+import { Relay, Schedule, RelayType, RelayGroup, RevenueEntry, RevenueAuditEntry, RevenueSummary, RevenueDeduction, UiUser } from '../types';
 
-const API_BASE = (() => {
-  if (typeof window === 'undefined') return '/api';
-  // When served from vite preview on :3000, API lives on :3001
+const BASE_URL = (() => {
+  if (typeof window === 'undefined') return '';
   const { hostname, port, protocol } = window.location;
   if (port === '3000') {
-    return `${protocol}//${hostname}:3001/api`;
+    return `${protocol}//${hostname}:4000`;
   }
-  return '/api';
+  return '';
 })();
 
-// --- INTERNAL MOCK SERVER STATE ---
-// This allows the app to function fully in the browser preview
-// by simulating the backend database in memory. When running in
-// the browser and the backend is unreachable, we persist this mock
-// state to localStorage so reloads keep visibility/name/icon edits.
-const STORAGE_KEY = 'laundropi-mock-state';
+const API_BASE = BASE_URL ? `${BASE_URL}/api` : '/api';
+const AUTH_BASE = BASE_URL ? `${BASE_URL}/auth` : '/auth';
 
-const loadMockState = () => {
-  if (typeof window === 'undefined') return null;
-  try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) return null;
-    return JSON.parse(raw);
-  } catch {
-    return null;
+const AGENT_ID = (import.meta as any).env?.VITE_AGENT_ID || 'dev-agent';
+const AGENT_SECRET = (import.meta as any).env?.VITE_AGENT_SECRET || 'secret';
+const request = async (input: RequestInfo | URL, init?: RequestInit) => {
+  const headers = new Headers(init?.headers || {});
+  const res = await fetch(input, { ...init, headers, credentials: 'include' });
+  if (!res.ok) {
+    const text = await res.text();
+    const err = new Error(`API ${res.status}: ${text}`);
+    (err as any).status = res.status;
+    throw err;
   }
+  return res;
 };
 
-const persistMockState = (state: typeof mockState) => {
-  if (typeof window === 'undefined') return;
-  try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-  } catch {
-    // ignore
+const normalizeTime = (val?: string | null) => {
+  if (!val) return null;
+  const raw = val.trim();
+  const ampm = raw.match(/^(\d{1,2}):(\d{2})(?::\d{2})?\s*(AM|PM)$/i);
+  if (ampm) {
+    let hh = parseInt(ampm[1], 10);
+    const mm = ampm[2];
+    const suffix = ampm[3].toUpperCase();
+    if (suffix === 'PM' && hh !== 12) hh += 12;
+    if (suffix === 'AM' && hh === 12) hh = 0;
+    return `${String(hh).padStart(2, '0')}:${mm}`;
   }
+  const hhmm = raw.match(/^(\d{1,2}):(\d{2})(?::\d{2})?$/);
+  if (hhmm) {
+    const hh = Math.min(Math.max(parseInt(hhmm[1], 10), 0), 23);
+    const mm = Math.min(Math.max(parseInt(hhmm[2], 10), 0), 59);
+    return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
+  }
+  return null;
 };
 
-let mockState = loadMockState() || {
-  relays: JSON.parse(JSON.stringify(INITIAL_RELAYS)) as Relay[],
-  schedules: JSON.parse(JSON.stringify(MOCK_SCHEDULES)) as Schedule[],
-  groups: [] as RelayGroup[],
-  isOffline: false
+const toEntries = (agentId: string, group: Partial<RelayGroup>): { agentId: string; relayIds: number[] }[] => {
+  if (Array.isArray(group.entries) && group.entries.length) {
+    return group.entries.map(e => ({
+      agentId: e.agentId,
+      relayIds: Array.isArray(e.relayIds) ? e.relayIds.map(Number) : [],
+    }));
+  }
+  const ids = Array.isArray(group.relayIds) ? group.relayIds.map(Number) : [];
+  return ids.length ? [{ agentId, relayIds: ids }] : [];
 };
 
-let lastGoodState: { relays: Relay[]; schedules: Schedule[]; groups: RelayGroup[]; isMock: boolean } | null = null;
+type RevenueEntryInput = {
+  entryDate: string;
+  coinsTotal: number;
+  euroCoinsCount: number;
+  billsTotal: number;
+  deductions: RevenueDeduction[];
+};
 
-// Helper to simulate network delay for realism
-const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+type RevenueEntryListParams = {
+  startDate?: string;
+  endDate?: string;
+  agentId?: string;
+};
 
 export const ApiService = {
-  async getStatus(): Promise<{ relays: Relay[], schedules: Schedule[], groups: RelayGroup[], isMock: boolean }> {
-    try {
-      // 1. Try Real Server
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 2000); // 2s timeout
-      
-      const res = await fetch(`${API_BASE}/status`, { signal: controller.signal });
-      clearTimeout(timeoutId);
-      
-      if (!res.ok) throw new Error(`Server returned ${res.status}`);
-      const data = await res.json();
-      const isHardware = Boolean(data.isHardware);
-      
-      // Sync mock state with real state so if we go offline, we have latest
-      mockState.relays = data.relays;
-      mockState.schedules = data.schedules;
-      mockState.groups = data.groups || [];
-      mockState.isOffline = false;
-      lastGoodState = { relays: [...data.relays], schedules: [...data.schedules], groups: [...(data.groups || [])], isMock: !isHardware };
-      persistMockState(mockState);
-      
-      return { ...data, isMock: !isHardware };
-    } catch (error) {
-      // 2. Fallback to last good; if none, bubble error so caller can keep current UI state
-      if (lastGoodState) {
-        console.warn('[API] Status fetch failed, using last known good state.');
-        return { 
-          relays: [...lastGoodState.relays],
-          schedules: [...lastGoodState.schedules],
-          groups: [...lastGoodState.groups],
-          isMock: lastGoodState.isMock
-        };
-      }
-      throw error;
-    }
+  async getSession(): Promise<{ user: { username: string; role: string } | null }> {
+    const res = await request(`${AUTH_BASE}/session`);
+    return await res.json();
   },
 
-  async toggleRelay(id: number): Promise<Relay[]> {
-    try {
-      const res = await fetch(`${API_BASE}/relays/${id}`, { method: 'POST' });
-      if (!res.ok) throw new Error('Failed to toggle relay');
-      const data = await res.json();
-      return data.relays || [];
-    } catch (error) {
-      throw error;
-    }
+  async login(username: string, password: string): Promise<{ user: { username: string; role: string } }> {
+    const res = await request(`${AUTH_BASE}/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password }),
+    });
+    return await res.json();
   },
 
-  async batchControl(ids: number[], action: 'ON' | 'OFF'): Promise<void> {
-    try {
-      const res = await fetch(`${API_BASE}/relays/batch`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ids, action })
-      });
-      if (!res.ok) throw new Error('Failed to batch control');
-    } catch (error) {
-      throw error;
-    }
+  async logout(): Promise<void> {
+    await request(`${AUTH_BASE}/logout`, { method: 'POST' });
   },
 
-  async renameRelay(id: number, name: string): Promise<Relay> {
-    try {
-      const res = await fetch(`${API_BASE}/relays/${id}/name`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name })
-      });
-      if (!res.ok) throw new Error('Failed to rename relay');
-      return await res.json();
-    } catch (error) {
-      throw error;
-    }
+  async listUsers(): Promise<UiUser[]> {
+    const res = await request(`${API_BASE}/users`);
+    return await res.json();
   },
 
-  async setRelayIcon(id: number, iconType: RelayType): Promise<Relay> {
-    try {
-      const res = await fetch(`${API_BASE}/relays/${id}/icon`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ iconType })
-      });
-      if (!res.ok) throw new Error('Failed to set icon');
-      return await res.json();
-    } catch (error) {
-      throw error;
-    }
+  async createUser(username: string, password: string, role: 'admin' | 'user'): Promise<void> {
+    await request(`${API_BASE}/users`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password, role })
+    });
   },
 
-  async setRelayColorGroup(id: number, colorGroup: Relay['colorGroup']): Promise<Relay> {
-    try {
-      const res = await fetch(`${API_BASE}/relays/${id}/group`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ colorGroup })
-      });
-      if (!res.ok) throw new Error('Failed to set color group');
-      return await res.json();
-    } catch (error) {
-      throw error;
-    }
+  async updateUserRole(username: string, role: 'admin' | 'user'): Promise<void> {
+    await request(`${API_BASE}/users/${encodeURIComponent(username)}/role`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ role })
+    });
   },
 
-  async setRelayVisibility(id: number, isHidden: boolean): Promise<Relay> {
-    try {
-      const res = await fetch(`${API_BASE}/relays/${id}/visibility`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ isHidden })
-      });
-      if (!res.ok) throw new Error('Failed to set visibility');
-      return await res.json();
-    } catch (error) {
-      throw error;
-    }
+  async updateUserPassword(username: string, password: string): Promise<void> {
+    await request(`${API_BASE}/users/${encodeURIComponent(username)}/password`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password })
+    });
   },
 
-  async addSchedule(schedule: Omit<Schedule, 'id'>): Promise<Schedule> {
-    try {
-      const res = await fetch(`${API_BASE}/schedules`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(schedule)
-      });
-      if (!res.ok) throw new Error('Failed to add schedule');
-      return await res.json();
-    } catch (error) {
-      throw error;
-    }
+  async listAgents(): Promise<{ agentId: string; lastHeartbeat: number | null; online: boolean }[]> {
+    const res = await request(`${API_BASE}/agents`);
+    return await res.json();
   },
 
-  async deleteSchedule(id: string): Promise<void> {
-    try {
-      const res = await fetch(`${API_BASE}/schedules/${id}`, { method: 'DELETE' });
-      if (!res.ok) throw new Error('Failed to delete schedule');
-    } catch (error) {
-      throw error;
-    }
+  async registerAgent(agentId: string, secret: string): Promise<void> {
+    await request(`${API_BASE}/agents`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agentId, secret: secret || AGENT_SECRET })
+    });
   },
 
-  async updateSchedule(id: string, schedule: Omit<Schedule, 'id'>): Promise<Schedule> {
-    try {
-      const res = await fetch(`${API_BASE}/schedules/${id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(schedule)
-      });
-      if (!res.ok) throw new Error('Failed to update schedule');
-      return await res.json();
-    } catch (error) {
-      throw error;
-    }
+  async deleteAgent(agentId: string): Promise<void> {
+    await request(`${API_BASE}/agents/${agentId}`, { method: 'DELETE' });
   },
 
-  async addGroup(group: Omit<RelayGroup, 'id'>): Promise<RelayGroup> {
-    try {
-      const res = await fetch(`${API_BASE}/groups`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(group)
-      });
-      if (!res.ok) throw new Error('Failed to add group');
-      return await res.json();
-    } catch (error) {
-      throw error;
-    }
+  async getStatus(agentId?: string): Promise<{ relays: Relay[], schedules: Schedule[], groups: RelayGroup[], isMock: boolean, agentId?: string, lastHeartbeat?: number | null }> {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 2000);
+    const id = agentId || AGENT_ID;
+    const res = await request(`${API_BASE}/dashboard?agentId=${encodeURIComponent(id)}`, { signal: controller.signal });
+    clearTimeout(timeoutId);
+    return await res.json();
   },
 
-  async updateGroup(id: string, group: Omit<RelayGroup, 'id'>): Promise<RelayGroup> {
-    try {
-      const res = await fetch(`${API_BASE}/groups/${id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(group)
-      });
-      if (!res.ok) throw new Error('Failed to update group');
-      return await res.json();
-    } catch (error) {
-      throw error;
-    }
+  async setRelayState(agentId: string, id: number, state: 'on' | 'off'): Promise<void> {
+    await request(`${API_BASE}/agents/${agentId}/relays/${id}/state`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ state })
+    });
   },
 
-  async deleteGroup(id: string): Promise<void> {
-    try {
-      const res = await fetch(`${API_BASE}/groups/${id}`, { method: 'DELETE' });
-      if (!res.ok) throw new Error('Failed to delete group');
-    } catch (error) {
-      throw error;
-    }
+  async batchControl(agentId: string, ids: number[], action: 'ON' | 'OFF'): Promise<void> {
+    await Promise.all(ids.map(id => this.setRelayState(agentId, id, action === 'ON' ? 'on' : 'off')));
   },
 
-  async toggleGroup(id: string, action: 'ON' | 'OFF'): Promise<Relay[]> {
-    try {
-      const res = await fetch(`${API_BASE}/groups/${id}/action`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action })
-      });
-      if (!res.ok) throw new Error('Failed to toggle group');
-      const data = await res.json();
-      return data.relays || [];
-    } catch (error) {
-      throw error;
-    }
-  }
+  async renameRelay(agentId: string, id: number, name: string): Promise<Relay> {
+    await request(`${API_BASE}/agents/${agentId}/relays/${id}/meta`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name })
+    });
+    return { id, name } as Relay;
+  },
+
+  async setRelayIcon(agentId: string, id: number, iconType: RelayType): Promise<Relay> {
+    await request(`${API_BASE}/agents/${agentId}/relays/${id}/meta`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ iconType })
+    });
+    return { id, iconType } as Relay;
+  },
+
+  async setRelayVisibility(agentId: string, id: number, isHidden: boolean): Promise<Relay> {
+    await request(`${API_BASE}/agents/${agentId}/relays/${id}/meta`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ isHidden })
+    });
+    return { id, isHidden } as Relay;
+  },
+
+  async addSchedule(agentId: string, schedule: Omit<Schedule, 'id'>): Promise<Schedule> {
+    const res = await request(`${API_BASE}/agents/${agentId}/schedules`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ...schedule,
+        time: undefined,
+        from: normalizeTime((schedule as any).from) || null,
+        to: normalizeTime((schedule as any).to) || null,
+      })
+    });
+    return await res.json();
+  },
+
+  async deleteSchedule(agentId: string, _id: string): Promise<void> {
+    await request(`${API_BASE}/agents/${agentId}/schedules/${_id}`, { method: 'DELETE' });
+  },
+
+  async updateSchedule(agentId: string, id: string, schedule: Omit<Schedule, 'id'>): Promise<Schedule> {
+    const res = await request(`${API_BASE}/agents/${agentId}/schedules/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ...schedule,
+        time: undefined,
+        from: normalizeTime((schedule as any).from) || null,
+        to: normalizeTime((schedule as any).to) || null,
+      })
+    });
+    return await res.json();
+  },
+
+  async addGroup(agentId: string, group: Omit<RelayGroup, 'id'>): Promise<RelayGroup> {
+    const entries = toEntries(agentId, group);
+    const res = await request(`${API_BASE}/agents/${agentId}/groups`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ...group,
+        entries,
+        onTime: normalizeTime(group.onTime as any),
+        offTime: normalizeTime(group.offTime as any),
+      })
+    });
+    return await res.json();
+  },
+
+  async updateGroup(agentId: string, id: string, group: Omit<RelayGroup, 'id'>): Promise<RelayGroup> {
+    const entries = toEntries(agentId, group);
+    const res = await request(`${API_BASE}/agents/${agentId}/groups/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ...group,
+        entries,
+        onTime: normalizeTime(group.onTime as any),
+        offTime: normalizeTime(group.offTime as any),
+      })
+    });
+    return await res.json();
+  },
+
+  async deleteGroup(agentId: string, _id: string): Promise<void> {
+    await request(`${API_BASE}/agents/${agentId}/groups/${_id}`, { method: 'DELETE' });
+  },
+
+  async toggleGroup(agentId: string, _id: string, _action: 'ON' | 'OFF'): Promise<Relay[]> {
+    await request(`${API_BASE}/agents/${agentId}/groups/${_id}/action`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: _action })
+    });
+    return [];
+  },
+
+  async getRevenueEntry(agentId: string, date: string): Promise<{ entry: RevenueEntry | null; audit: RevenueAuditEntry[] }> {
+    const res = await request(`${API_BASE}/revenue/${encodeURIComponent(agentId)}?date=${encodeURIComponent(date)}`);
+    return await res.json();
+  },
+
+  async saveRevenueEntry(agentId: string, payload: RevenueEntryInput): Promise<{ entry: RevenueEntry; audit: RevenueAuditEntry[]; unchanged?: boolean }> {
+    const res = await request(`${API_BASE}/revenue/${encodeURIComponent(agentId)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    return await res.json();
+  },
+
+  async getRevenueSummary(date: string): Promise<{ date: string; week: RevenueSummary; month: RevenueSummary }> {
+    const res = await request(`${API_BASE}/revenue/summary?date=${encodeURIComponent(date)}`);
+    return await res.json();
+  },
+
+  async listRevenueEntries(params: RevenueEntryListParams = {}): Promise<RevenueEntry[]> {
+    const query = new URLSearchParams();
+    if (params.startDate) query.set('startDate', params.startDate);
+    if (params.endDate) query.set('endDate', params.endDate);
+    if (params.agentId) query.set('agentId', params.agentId);
+    const url = `${API_BASE}/revenue/entries${query.toString() ? `?${query.toString()}` : ''}`;
+    const res = await request(url);
+    const payload = await res.json();
+    return payload.entries || [];
+  },
+
+  async listRevenueEntryDates(startDate: string, endDate: string, agentId?: string): Promise<string[]> {
+    const query = new URLSearchParams({ startDate, endDate });
+    if (agentId) query.set('agentId', agentId);
+    const res = await request(`${API_BASE}/revenue/dates?${query.toString()}`);
+    const payload = await res.json();
+    return payload.dates || [];
+  },
 };

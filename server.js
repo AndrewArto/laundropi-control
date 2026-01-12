@@ -31,21 +31,13 @@ const CHANNEL_MAP = {
   4: 4,
   5: 5,
   6: 6,
-  7: undefined,
+  7: 7,
   8: 8,
 };
 const COLOR_GROUPS = ['blue','green','orange','pink'];
 
 // --- HARDWARE ABSTRACTION LAYER ---
-// Raspberry Pi 5 uses the RP1 chip which breaks standard 'onoff' (sysfs).
-// We need a robust factory that tries 'onoff' first, and falls back to 'pinctrl' (CLI) for Pi 5.
-
-let GpioLib;
-try {
-  GpioLib = require('onoff').Gpio;
-} catch (e) {
-  GpioLib = null;
-}
+// Raspberry Pi 5 uses the RP1 chip; we use pinctrl/raspi-gpio for direct control.
 
 class MockGpio {
   constructor(pin) { this.pin = pin; this.val = 0; console.log(`[Mock] Pin ${pin} Init`); }
@@ -87,28 +79,9 @@ class ShellGpio {
 
 // Factory to get the working GPIO controller
 function createGpio(pin) {
-  // 1. Try 'onoff' (Standard for Pi 3/4/Zero)
-  if (GpioLib) {
-    try {
-      return new GpioLib(pin, 'out');
-    } catch (err) {
-      // 2. Catch Pi 5 Specific Error (EINVAL)
-      if (err.code === 'EINVAL' || err.message.includes('EINVAL')) {
-        console.log(`[Hardware] Pin ${pin}: 'onoff' failed (Pi 5 detected?). Switching to 'pinctrl'.`);
-        return new ShellGpio(pin);
-      }
-      console.error(`[Hardware] Pin ${pin}: Unexpected error, using Mock.`, err.message);
-    }
-  }
-  
-  // 3. Fallback if 'onoff' isn't installed at all, but we are on linux (try shell)
-  if (os.platform() === 'linux') {
-     console.log(`[Hardware] Pin ${pin}: 'onoff' missing. Using ShellGpio.`);
-     return new ShellGpio(pin);
-  }
-
-  // 4. Windows/Mac Dev Mode
-  return new MockGpio(pin);
+  const forceMock = process.env.MOCK_GPIO === '1' || process.env.MOCK_GPIO === 'true';
+  if (forceMock || os.platform() !== 'linux') return new MockGpio(pin);
+  return new ShellGpio(pin);
 }
 
 // --- DEFAULT STATE ---
@@ -119,7 +92,7 @@ const INITIAL_RELAYS = [
   { id: 4, name: 'Window Neon', gpioPin: PIN_MAP[4], type: 'SIGN', iconType: 'SIGN', colorGroup: 'pink', isOn: false, channelNumber: 4, isHidden: false },
   { id: 5, name: 'Front Door Lock', gpioPin: PIN_MAP[5], type: 'DOOR', iconType: 'DOOR', colorGroup: 'green', isOn: false, channelNumber: 5, isHidden: false },
   { id: 6, name: 'Back Door Lock', gpioPin: PIN_MAP[6], type: 'DOOR', iconType: 'DOOR', colorGroup: 'green', isOn: false, channelNumber: 6, isHidden: false },
-  { id: 7, name: 'Vending Machine', gpioPin: PIN_MAP[7], type: 'MACHINE', iconType: 'MACHINE', colorGroup: null, isOn: true, channelNumber: undefined, isHidden: true },
+  { id: 7, name: 'Vending Machine', gpioPin: PIN_MAP[7], type: 'MACHINE', iconType: 'MACHINE', colorGroup: null, isOn: true, channelNumber: 7, isHidden: false },
   { id: 8, name: 'Office Fan', gpioPin: PIN_MAP[8], type: 'OTHER', iconType: 'OTHER', colorGroup: 'orange', isOn: false, channelNumber: 8, isHidden: false },
 ];
 
@@ -533,7 +506,7 @@ setInterval(() => {
       }
     }
   });
-}, 5000);
+}, 1000);
 
 // --- START ---
 loadData();

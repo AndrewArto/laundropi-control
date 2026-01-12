@@ -22,3 +22,21 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Env files
+.env
+.env.*
+!.env.agent.example
+!.env.central.example
+env.central
+tmp/
+
+# Local DB and certificates
+central.db
+central.db-shm
+central.db-wal
+central.aws.db*
+*.key
+*.crt
+*.csr
+ca.srl

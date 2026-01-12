@@ -1,0 +1,17 @@
+[Unit]
+Description=LaundroPi Central (WS + API)
+After=network.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+# Change this user/path if your username or checkout directory differs
+User=laundropi
+WorkingDirectory=/opt/laundropi-control
+EnvironmentFile=/etc/laundropi/central.env
+ExecStart=/usr/bin/env npm run dev:central
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
