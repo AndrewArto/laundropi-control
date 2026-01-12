@@ -169,6 +169,32 @@ const App: React.FC = () => {
   const agentOnline = agentHeartbeat !== null && (Date.now() - agentHeartbeat) < AGENT_STALE_MS;
   const controlsDisabled = IS_TEST_ENV ? false : (!serverOnline || !agentOnline);
   const [laundries, setLaundries] = useState<Laundry[]>([]);
+  const isLaundryOnline = React.useCallback((laundry: Laundry) => {
+    const fresh = laundry.lastHeartbeat ? (Date.now() - laundry.lastHeartbeat) < AGENT_STALE_MS : false;
+    return serverOnline && laundry.isOnline && fresh;
+  }, [serverOnline]);
+  const offlineAgents = React.useMemo(
+    () => laundries.filter(laundry => !isLaundryOnline(laundry)),
+    [laundries, isLaundryOnline]
+  );
+  const offlineMessages = React.useMemo(() => {
+    const messages: { key: string; tone: 'server' | 'agent'; text: string }[] = [];
+    if (!serverOnline) {
+      messages.push({
+        key: 'server-offline',
+        tone: 'server',
+        text: 'Server unreachable. Controls are temporarily disabled until connection is restored.',
+      });
+    }
+    offlineAgents.forEach(laundry => {
+      messages.push({
+        key: `agent-offline-${laundry.id}`,
+        tone: 'agent',
+        text: `Agent ${laundry.id} is offline. Controls are disabled until it reconnects.`,
+      });
+    });
+    return messages;
+  }, [serverOnline, offlineAgents]);
   const primaryAgentId = agentId || laundries[0]?.id || DEFAULT_AGENT_ID;
   const [isAddingLaundry, setIsAddingLaundry] = useState(false);
   const [newLaundryInput, setNewLaundryInput] = useState('');
@@ -1298,8 +1324,7 @@ const App: React.FC = () => {
 
       <div ref={relayEditAreaRef} className="space-y-6">
         {laundries.map((laundry, idx) => {
-          const fresh = laundry.lastHeartbeat ? (Date.now() - laundry.lastHeartbeat) < AGENT_STALE_MS : false;
-          const online = serverOnline && laundry.isOnline && fresh;
+          const online = isLaundryOnline(laundry);
           const relaysList = laundry.relays;
           const batchRelayIds = relaysList.filter(r => !r.isHidden).map(r => r.id);
           const visibleRelays = isRelayEditMode ? relaysList : relaysList.filter(r => !r.isHidden);
@@ -1432,8 +1457,7 @@ const App: React.FC = () => {
                 </div>
                 <div className="space-y-3">
                   {visibleByLaundry.map(l => {
-                    const fresh = l.lastHeartbeat ? (Date.now() - l.lastHeartbeat) < AGENT_STALE_MS : false;
-                    const online = serverOnline && l.isOnline && fresh;
+                    const online = isLaundryOnline(l);
                     return (
                       <div key={`laundry-select-${l.id}`} className="bg-slate-900/40 border border-slate-700 rounded-lg p-3 space-y-2">
                         <div className="flex items-center justify-between">
@@ -2511,8 +2535,7 @@ const App: React.FC = () => {
               {laundries.length > 0 && (
                 <div className="flex items-center gap-2 overflow-x-auto min-w-0 flex-1">
                   {laundries.map(laundry => {
-                    const fresh = laundry.lastHeartbeat ? (Date.now() - laundry.lastHeartbeat) < AGENT_STALE_MS : false;
-                    const online = serverOnline && laundry.isOnline && fresh;
+                    const online = isLaundryOnline(laundry);
                     return (
                       <span
                         key={`header-status-${laundry.id}`}
@@ -2559,14 +2582,20 @@ const App: React.FC = () => {
 
       {/* Main Content */}
       <main className="max-w-full sm:max-w-3xl w-full mx-auto px-3 sm:px-4 py-6 overflow-hidden box-border">
-        {!serverOnline && (
-          <div className="mb-4 bg-amber-500/10 border border-amber-500/40 text-amber-200 px-3 py-2 rounded-lg text-sm">
-            Server unreachable. Controls are temporarily disabled until connection is restored.
-          </div>
-        )}
-        {serverOnline && !agentOnline && (
-          <div className="mb-4 bg-red-500/10 border border-red-500/40 text-red-200 px-3 py-2 rounded-lg text-sm">
-            Agent {agentId || ''} is offline. Controls are disabled until it reconnects.
+        {offlineMessages.length > 0 && (
+          <div className="mb-4 space-y-2">
+            {offlineMessages.map(message => (
+              <div
+                key={message.key}
+                className={`px-3 py-2 rounded-lg text-sm border ${
+                  message.tone === 'server'
+                    ? 'bg-amber-500/10 border-amber-500/40 text-amber-200'
+                    : 'bg-red-500/10 border-red-500/40 text-red-200'
+                }`}
+              >
+                {message.text}
+              </div>
+            ))}
           </div>
         )}
         {activeTab === Tab.DASHBOARD && renderDashboard()}
