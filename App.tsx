@@ -17,7 +17,7 @@ const PENDING_RELAY_TTL_MS = 5_000;
 const DEFAULT_AGENT_ID = (import.meta as any).env?.VITE_AGENT_ID ?? 'dev-agent';
 const DEFAULT_AGENT_SECRET = (import.meta as any).env?.VITE_AGENT_SECRET ?? 'secret';
 const IS_TEST_ENV = (typeof process !== 'undefined' && process.env?.NODE_ENV === 'test') || false;
-const BRAND_LOGO_URL = '/washcontrol-logo.png';
+const BRAND_LOGO_URL = '/washcontrol-logo.png?v=20260112';
 
 const to24h = (val?: string | null): string | null => {
   if (!val) return null;
@@ -2446,7 +2446,7 @@ const App: React.FC = () => {
             <img
               src={BRAND_LOGO_URL}
               alt="WashControl"
-              className="w-full max-w-[320px] h-auto"
+              className="w-full max-w-[240px] sm:max-w-[320px] lg:max-w-[360px] h-auto"
             />
             <div>
               <p className="text-xs uppercase tracking-wide text-slate-400">Secure Access</p>
@@ -2509,7 +2509,7 @@ const App: React.FC = () => {
               <img
                 src={BRAND_LOGO_URL}
                 alt="WashControl"
-                className="h-16 sm:h-20 w-auto shrink-0"
+                className="h-12 sm:h-16 lg:h-20 w-auto shrink-0"
               />
               <span className="sr-only">WashControl</span>
             </div>
