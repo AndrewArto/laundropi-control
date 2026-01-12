@@ -2513,7 +2513,7 @@ const App: React.FC = () => {
               />
               <span className="sr-only">WashControl</span>
             </div>
-            <div className="flex items-center gap-4 sm:gap-5 justify-start sm:justify-end w-full sm:w-auto sm:row-start-1 sm:col-start-3 sm:justify-self-end">
+            <div className="flex items-center gap-4 sm:gap-5 justify-start sm:justify-end w-full sm:w-auto sm:row-start-1 sm:col-start-3 sm:justify-self-end sm:self-start">
               <div className="flex items-center gap-4">
                 {authUser && (
                   <div className="text-left sm:text-right leading-tight">
@@ -2533,7 +2533,7 @@ const App: React.FC = () => {
             </div>
             <div className="flex items-center gap-3 w-full sm:contents">
               {laundries.length > 0 && (
-                <div className="flex items-center gap-2 overflow-x-auto min-w-0 flex-1 sm:row-start-2 sm:col-start-2">
+                <div className="flex items-center gap-2 overflow-x-auto min-w-0 flex-1 sm:row-start-2 sm:col-start-2 sm:self-end">
                   {laundries.map(laundry => {
                     const online = isLaundryOnline(laundry);
                     return (
@@ -2570,7 +2570,7 @@ const App: React.FC = () => {
               )}
               <button
                 onClick={handleLogout}
-                className="ml-auto shrink-0 flex items-center justify-center gap-2 px-3 py-2 text-xs font-semibold border border-slate-700 rounded-md text-slate-300 hover:text-white hover:border-indigo-500 transition-colors sm:row-start-2 sm:col-start-3 sm:ml-0 sm:justify-self-end"
+                className="ml-auto shrink-0 flex items-center justify-center gap-2 px-3 py-2 text-xs font-semibold border border-slate-700 rounded-md text-slate-300 hover:text-white hover:border-indigo-500 transition-colors sm:row-start-2 sm:col-start-3 sm:ml-0 sm:justify-self-end sm:self-end"
               >
                 <Lock className="w-4 h-4" />
                 Log out
