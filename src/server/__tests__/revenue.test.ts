@@ -52,6 +52,20 @@ describe('Revenue API', () => {
       .send(extraPayload)
       .expect(200);
 
+    const otherAgentId = 'Laundry-2';
+    const otherPayload = {
+      entryDate: '2026-01-08',
+      coinsTotal: 50,
+      euroCoinsCount: 15,
+      billsTotal: 20,
+      deductions: [{ amount: 20, comment: 'Repairs' }],
+    };
+
+    await request(app)
+      .put(`/api/revenue/${otherAgentId}`)
+      .send(otherPayload)
+      .expect(200);
+
     const updatePayload = {
       entryDate,
       coinsTotal: 130,
@@ -76,9 +90,13 @@ describe('Revenue API', () => {
       .get(`/api/revenue/summary?date=${entryDate}`)
       .expect(200);
 
-    expect(summary.body.week.overall).toBe(130);
-    expect(summary.body.month.overall).toBe(130);
-    expect(summary.body.week.profitLossOverall).toBe(125);
-    expect(summary.body.month.profitLossOverall).toBe(125);
+    expect(summary.body.week.overall).toBe(180);
+    expect(summary.body.month.overall).toBe(180);
+    expect(summary.body.week.profitLossOverall).toBe(155);
+    expect(summary.body.month.profitLossOverall).toBe(155);
+    expect(summary.body.week.totalsByAgent[agentId]).toBe(130);
+    expect(summary.body.week.profitLossByAgent[agentId]).toBe(125);
+    expect(summary.body.week.totalsByAgent[otherAgentId]).toBe(50);
+    expect(summary.body.week.profitLossByAgent[otherAgentId]).toBe(30);
   });
 });
