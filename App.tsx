@@ -2509,9 +2509,9 @@ const App: React.FC = () => {
               <img
                 src={BRAND_LOGO_URL}
                 alt="WashControl"
-                className="h-full w-auto shrink-0 object-contain max-w-[200px] sm:max-w-[240px] lg:max-w-[280px]"
-                width={180}
-                height={104}
+                className="h-[88%] sm:h-[90%] lg:h-[92%] w-auto shrink-0 object-contain max-w-[190px] sm:max-w-[230px] lg:max-w-[270px]"
+                width={170}
+                height={98}
               />
               <span className="sr-only">WashControl</span>
             </div>
