@@ -2504,8 +2504,8 @@ const App: React.FC = () => {
       {/* Header */}
       <header className="bg-slate-900/80 backdrop-blur-md sticky top-0 z-50 border-b border-slate-800">
         <div className="max-w-full sm:max-w-3xl mx-auto px-3 sm:px-4 py-3">
-          <div className="flex flex-col gap-3 sm:grid sm:grid-cols-[auto,1fr] sm:grid-rows-2 sm:items-center sm:gap-x-4 sm:gap-y-2">
-            <div className="flex items-center gap-3 min-w-0 sm:row-span-2">
+          <div className="flex flex-col gap-3 sm:grid sm:grid-cols-[auto,minmax(0,1fr),auto] sm:items-start sm:gap-x-5 sm:gap-y-2">
+            <div className="flex items-center gap-3 min-w-0 sm:row-span-2 sm:self-start">
               <img
                 src={BRAND_LOGO_URL}
                 alt="WashControl"
@@ -2513,7 +2513,7 @@ const App: React.FC = () => {
               />
               <span className="sr-only">WashControl</span>
             </div>
-            <div className="flex items-center gap-4 sm:gap-5 justify-start sm:justify-end w-full sm:w-auto sm:row-start-1 sm:col-start-2">
+            <div className="flex items-center gap-4 sm:gap-5 justify-start sm:justify-end w-full sm:w-auto sm:row-start-1 sm:col-start-3 sm:justify-self-end">
               <div className="flex items-center gap-4">
                 {authUser && (
                   <div className="text-left sm:text-right leading-tight">
@@ -2531,9 +2531,9 @@ const App: React.FC = () => {
                 </div>
               </div>
             </div>
-            <div className="sm:row-start-2 sm:col-start-2 flex items-center gap-3 w-full">
+            <div className="flex items-center gap-3 w-full sm:contents">
               {laundries.length > 0 && (
-                <div className="flex items-center gap-2 overflow-x-auto min-w-0 flex-1">
+                <div className="flex items-center gap-2 overflow-x-auto min-w-0 flex-1 sm:row-start-2 sm:col-start-2">
                   {laundries.map(laundry => {
                     const online = isLaundryOnline(laundry);
                     return (
@@ -2570,7 +2570,7 @@ const App: React.FC = () => {
               )}
               <button
                 onClick={handleLogout}
-                className="ml-auto shrink-0 flex items-center justify-center gap-2 px-3 py-2 text-xs font-semibold border border-slate-700 rounded-md text-slate-300 hover:text-white hover:border-indigo-500 transition-colors"
+                className="ml-auto shrink-0 flex items-center justify-center gap-2 px-3 py-2 text-xs font-semibold border border-slate-700 rounded-md text-slate-300 hover:text-white hover:border-indigo-500 transition-colors sm:row-start-2 sm:col-start-3 sm:ml-0 sm:justify-self-end"
               >
                 <Lock className="w-4 h-4" />
                 Log out
