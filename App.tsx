@@ -2503,37 +2503,19 @@ const App: React.FC = () => {
     <div className="min-h-screen pb-24 overflow-x-hidden">
       {/* Header */}
       <header className="bg-slate-900/80 backdrop-blur-md sticky top-0 z-50 border-b border-slate-800">
-        <div className="max-w-full sm:max-w-3xl mx-auto px-3 sm:px-4 py-3">
-          <div className="flex flex-col gap-3 sm:grid sm:grid-cols-[auto,minmax(0,1fr),auto] sm:items-start sm:gap-x-5 sm:gap-y-2">
-            <div className="flex items-center gap-3 min-w-0 sm:row-span-2 sm:self-start">
+        <div className="max-w-full sm:max-w-3xl mx-auto px-3 sm:px-4">
+          <div className="grid grid-cols-[auto,minmax(0,1fr),auto] items-center gap-3 sm:gap-5 h-24 sm:h-28 lg:h-32">
+            <div className="flex items-center h-full">
               <img
                 src={BRAND_LOGO_URL}
                 alt="WashControl"
-                className="h-12 sm:h-16 lg:h-20 w-auto shrink-0"
+                className="h-full w-auto shrink-0"
               />
               <span className="sr-only">WashControl</span>
             </div>
-            <div className="flex items-center gap-4 sm:gap-5 justify-start sm:justify-end w-full sm:w-auto sm:row-start-1 sm:col-start-3 sm:justify-self-end sm:self-start">
-              <div className="flex items-center gap-4">
-                {authUser && (
-                  <div className="text-left sm:text-right leading-tight">
-                    <div className="text-xs text-slate-300">{authUser.username}</div>
-                    <div className="text-[10px] uppercase text-slate-500">{authUser.role}</div>
-                  </div>
-                )}
-                <div className="text-left sm:text-right leading-tight">
-                  <div className="text-lg font-mono text-white font-medium">
-                    {currentTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })}
-                  </div>
-                  <div className="text-[11px] text-slate-500">
-                    {currentTime.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })}
-                  </div>
-                </div>
-              </div>
-            </div>
-            <div className="flex items-center gap-3 w-full sm:contents">
+            <div className="flex items-center justify-center min-w-0">
               {laundries.length > 0 && (
-                <div className="flex items-center gap-2 overflow-x-auto min-w-0 flex-1 sm:row-start-2 sm:col-start-2 sm:self-end">
+                <div className="flex items-center gap-2 overflow-x-auto min-w-0">
                   {laundries.map(laundry => {
                     const online = isLaundryOnline(laundry);
                     return (
@@ -2568,9 +2550,27 @@ const App: React.FC = () => {
                   })}
                 </div>
               )}
+            </div>
+            <div className="flex h-full flex-col items-end justify-between gap-2">
+              <div className="flex items-center gap-3">
+                {authUser && (
+                  <div className="text-right leading-tight">
+                    <div className="text-xs text-slate-300">{authUser.username}</div>
+                    <div className="text-[10px] uppercase text-slate-500">{authUser.role}</div>
+                  </div>
+                )}
+                <div className="text-right leading-tight">
+                  <div className="text-lg font-mono text-white font-medium">
+                    {currentTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })}
+                  </div>
+                  <div className="text-[11px] text-slate-500">
+                    {currentTime.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })}
+                  </div>
+                </div>
+              </div>
               <button
                 onClick={handleLogout}
-                className="ml-auto shrink-0 flex items-center justify-center gap-2 px-3 py-2 text-xs font-semibold border border-slate-700 rounded-md text-slate-300 hover:text-white hover:border-indigo-500 transition-colors sm:row-start-2 sm:col-start-3 sm:ml-0 sm:justify-self-end sm:self-end"
+                className="shrink-0 flex items-center justify-center gap-2 px-3 py-2 text-xs font-semibold border border-slate-700 rounded-md text-slate-300 hover:text-white hover:border-indigo-500 transition-colors"
               >
                 <Lock className="w-4 h-4" />
                 Log out
