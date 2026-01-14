@@ -206,12 +206,6 @@ const ensureKnownAgents = () => {
   });
 };
 
-ensureDefaultAdmin();
-ensureKnownAgents();
-if (KNOWN_LAUNDRY_SET.size) {
-  KNOWN_LAUNDRY_IDS.forEach(ensureDefaultCameras);
-}
-
 const PORT = Number(process.env.CENTRAL_PORT || 4000);
 const HEARTBEAT_STALE_MS = 30_000;
 const CAMERA_FRAME_TIMEOUT_MS = Number(process.env.CAMERA_FRAME_TIMEOUT_MS || 4000);
@@ -385,6 +379,12 @@ const ensureDefaultCameras = (agentId: string) => {
     });
   });
 };
+
+ensureDefaultAdmin();
+ensureKnownAgents();
+if (KNOWN_LAUNDRY_SET.size) {
+  KNOWN_LAUNDRY_IDS.forEach(ensureDefaultCameras);
+}
 
 const buildCameraAgentPayload = (camera: CameraRow) => {
   const streamKey = buildStreamKey(camera);
