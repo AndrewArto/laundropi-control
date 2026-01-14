@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { LayoutDashboard, CalendarClock, Settings, Trash2, Cpu, Server, Pencil, Plus, Lock, Coins, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ChevronDown, ChevronUp, Download } from 'lucide-react';
 import RelayCard from './components/RelayCard';
 import { Relay, Schedule, RelayType, RelayGroup, RevenueEntry, RevenueAuditEntry, RevenueSummary, UiUser, CameraConfig } from './types';
-import { ApiService } from './services/api';
+import { ApiService, resolveBaseUrl } from './services/api';
 import { DAYS_OF_WEEK } from './constants';
 
 enum Tab {
@@ -312,10 +312,15 @@ const App: React.FC = () => {
   const cameraDraftKey = (agentId: string, cameraId: string) => `${agentId}::${cameraId}`;
   const cameraPositionOrder = (position: string) => (position === 'front' ? 0 : position === 'back' ? 1 : 9);
 
+  const cameraPreviewBase = resolveBaseUrl();
+
   const buildCameraPreviewUrl = (camera: CameraConfig, agentId: string) => {
-    const base = camera.previewUrl || `/api/agents/${encodeURIComponent(agentId)}/cameras/${encodeURIComponent(camera.id)}/frame`;
-    const sep = base.includes('?') ? '&' : '?';
-    return `${base}${sep}t=${cameraRefreshTick}`;
+    const raw = camera.previewUrl || `/api/agents/${encodeURIComponent(agentId)}/cameras/${encodeURIComponent(camera.id)}/frame`;
+    const absolute = cameraPreviewBase && !/^https?:\/\//i.test(raw)
+      ? `${cameraPreviewBase}${raw.startsWith('/') ? '' : '/'}${raw}`
+      : raw;
+    const sep = absolute.includes('?') ? '&' : '?';
+    return `${absolute}${sep}t=${cameraRefreshTick}`;
   };
 
   const getCameraSlots = (agentId: string) => {
