@@ -3,6 +3,10 @@ import { Relay, Schedule, RelayType, RelayGroup, RevenueEntry, RevenueAuditEntry
 
 const BASE_URL = (() => {
   if (typeof window === 'undefined') return '';
+  const envBase = (import.meta as any).env?.VITE_CENTRAL_URL;
+  if (typeof envBase === 'string' && envBase.trim()) {
+    return envBase.trim().replace(/\/$/, '');
+  }
   const { hostname, port, protocol } = window.location;
   if (port === '3000') {
     return `${protocol}//${hostname}:4000`;

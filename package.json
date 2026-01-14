@@ -11,7 +11,7 @@
     "dev:all": "concurrently \"npm:dev:ui\" \"npm:dev:server\"",
     "dev:central": "ts-node --transpile-only --compiler-options '{\"module\":\"CommonJS\",\"moduleResolution\":\"node\"}' src/server/index.ts",
     "dev:agent": "ts-node --transpile-only --compiler-options '{\"module\":\"CommonJS\",\"moduleResolution\":\"node\"}' src/device/agent.ts",
-    "dev:local:ui": "vite",
+    "dev:local:ui": "VITE_CENTRAL_URL=http://localhost:3001 vite",
     "dev:local:central": "CENTRAL_ENV_FILE=./config/local/central.env npm run dev:central",
     "dev:local:agent:brandoa1": "AGENT_ENV_FILE=./config/local/agent.brandoa1.env npm run dev:agent",
     "dev:local:agent:brandoa2": "AGENT_ENV_FILE=./config/local/agent.brandoa2.env npm run dev:agent",
