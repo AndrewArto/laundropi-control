@@ -1,18 +1,22 @@
 
 import { Relay, Schedule, RelayType, RelayGroup, RevenueEntry, RevenueAuditEntry, RevenueSummary, RevenueDeduction, UiUser, CameraConfig } from '../types';
 
-const BASE_URL = (() => {
-  if (typeof window === 'undefined') return '';
-  const envBase = (import.meta as any).env?.VITE_CENTRAL_URL;
-  if (typeof envBase === 'string' && envBase.trim()) {
+type LocationLike = { hostname: string; port: string; protocol: string };
+
+export const resolveBaseUrl = (options?: { envBase?: string; location?: LocationLike | null }) => {
+  const envBase = (typeof options?.envBase === 'string' ? options.envBase : (import.meta as any).env?.VITE_CENTRAL_URL) || '';
+  if (envBase.trim()) {
     return envBase.trim().replace(/\/$/, '');
   }
-  const { hostname, port, protocol } = window.location;
-  if (port === '3000') {
-    return `${protocol}//${hostname}:4000`;
+  const location = options?.location ?? (typeof window === 'undefined' ? null : window.location);
+  if (!location) return '';
+  if (location.port === '3000') {
+    return `${location.protocol}//${location.hostname}:4000`;
   }
   return '';
-})();
+};
+
+const BASE_URL = resolveBaseUrl();
 
 const API_BASE = BASE_URL ? `${BASE_URL}/api` : '/api';
 const AUTH_BASE = BASE_URL ? `${BASE_URL}/auth` : '/auth';
