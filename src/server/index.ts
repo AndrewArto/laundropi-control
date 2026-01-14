@@ -357,7 +357,7 @@ const saveSecretValue = (secretId: string, kind: string, value: string) => {
   });
 };
 
-const ensureDefaultCameras = (agentId: string) => {
+function ensureDefaultCameras(agentId: string) {
   const existing = listCameras(agentId);
   const existingByPosition = new Map(existing.map(camera => [camera.position, camera]));
   const now = Date.now();
@@ -378,7 +378,7 @@ const ensureDefaultCameras = (agentId: string) => {
       updatedAt: now,
     });
   });
-};
+}
 
 ensureDefaultAdmin();
 ensureKnownAgents();
