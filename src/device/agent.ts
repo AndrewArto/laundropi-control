@@ -79,7 +79,8 @@ const buildGo2rtcConfig = (cameras: CameraConfig[]) => {
     lines.push('  # no RTSP cameras configured');
   } else {
     active.forEach(cam => {
-      lines.push(`  ${cam.streamKey}: ${cam.rtspUrl}`);
+      const quoted = JSON.stringify(cam.rtspUrl);
+      lines.push(`  ${cam.streamKey}: ${quoted}`);
     });
   }
   return `${lines.join('\n')}\n`;
