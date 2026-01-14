@@ -649,15 +649,20 @@ const buildCameraPatternSvg = (camera: CameraRow) => {
       <stop offset="100%" stop-color="#1e293b"/>
     </linearGradient>
     <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
-      <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#1f2937" stroke-width="1"/>
+      <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#334155" stroke-width="1" opacity="0.65"/>
+    </pattern>
+    <pattern id="diag" width="80" height="80" patternUnits="userSpaceOnUse">
+      <path d="M -20 20 L 20 -20 M 0 40 L 40 0 M 20 60 L 60 20 M 40 80 L 80 40" fill="none" stroke="#475569" stroke-width="2" opacity="0.4"/>
     </pattern>
   </defs>
   <rect width="100%" height="100%" fill="url(#bg)"/>
   <rect width="100%" height="100%" fill="url(#grid)"/>
-  <rect x="24" y="24" width="${width - 48}" height="${height - 48}" rx="18" fill="none" stroke="#334155" stroke-width="2"/>
+  <rect width="100%" height="100%" fill="url(#diag)"/>
+  <rect x="24" y="24" width="${width - 48}" height="${height - 48}" rx="18" fill="none" stroke="#475569" stroke-width="2"/>
   <circle cx="${width - 58}" cy="50" r="8" fill="#22c55e"/>
   <text x="48" y="78" fill="#e2e8f0" font-size="22" font-family="Arial, sans-serif">${title}</text>
   <text x="48" y="110" fill="#94a3b8" font-size="14" font-family="Arial, sans-serif">Mock camera · ${subtitle}</text>
+  <text x="50%" y="55%" fill="#38bdf8" fill-opacity="0.18" font-size="96" font-weight="700" text-anchor="middle" font-family="Arial, sans-serif">MOCK</text>
   <text x="48" y="${height - 40}" fill="#64748b" font-size="12" font-family="Arial, sans-serif">Pattern feed (no camera configured)</text>
 </svg>`.trim();
 };
