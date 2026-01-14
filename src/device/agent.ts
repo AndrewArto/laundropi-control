@@ -22,7 +22,7 @@ const AGENT_WS_URL = process.env.AGENT_WS_URL || 'ws://localhost:4000/agent';
 const SCHEDULE_STORAGE_PATH = process.env.AGENT_SCHEDULE_PATH || '/var/lib/laundropi/schedule.json';
 const GO2RTC_CONFIG_PATH = process.env.GO2RTC_CONFIG_PATH || '/var/lib/laundropi/go2rtc.yaml';
 const GO2RTC_API_URL = process.env.GO2RTC_API_URL || 'http://127.0.0.1:1984';
-const GO2RTC_FRAME_PATH = process.env.GO2RTC_FRAME_PATH || '/api/frame';
+const GO2RTC_FRAME_PATH = process.env.GO2RTC_FRAME_PATH || '/api/frame.jpeg';
 const GO2RTC_RELOAD_URL = process.env.GO2RTC_RELOAD_URL || '';
 const CAMERA_FRAME_FETCH_TIMEOUT_MS = Number(process.env.CAMERA_FRAME_FETCH_TIMEOUT_MS || 3000);
 
