@@ -14,6 +14,7 @@ enum Tab {
 
 const AGENT_STALE_MS = 8_000;
 const PENDING_RELAY_TTL_MS = 5_000;
+const CAMERA_FRAME_REFRESH_MS = 1_000;
 const DEFAULT_AGENT_ID = (import.meta as any).env?.VITE_AGENT_ID ?? 'dev-agent';
 const DEFAULT_AGENT_SECRET = (import.meta as any).env?.VITE_AGENT_SECRET ?? 'secret';
 const IS_TEST_ENV = (typeof process !== 'undefined' && process.env?.NODE_ENV === 'test') || false;
@@ -842,7 +843,7 @@ const App: React.FC = () => {
     if (!isAuthenticated || activeTab !== Tab.DASHBOARD) return;
     const timer = setInterval(() => {
       setCameraRefreshTick((prev) => prev + 1);
-    }, 4000);
+    }, CAMERA_FRAME_REFRESH_MS);
     return () => clearInterval(timer);
   }, [isAuthenticated, activeTab]);
 
