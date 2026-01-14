@@ -46,6 +46,7 @@ vi.mock('../../services/api', () => ({
     login: mocks.login,
     logout: mocks.logout,
   },
+  resolveBaseUrl: () => '',
 }));
 
 // Render App directly; for the test we only check the form logic
