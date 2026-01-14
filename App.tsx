@@ -1554,26 +1554,35 @@ const App: React.FC = () => {
                     return (
                       <div key={camera.id} className="bg-slate-900/40 border border-slate-700 rounded-lg overflow-hidden">
                         <div className="flex items-center justify-between gap-2 px-3 py-2 border-b border-slate-700">
-                          {isRelayEditMode ? (
-                            <input
-                              value={nameValue}
-                              onChange={(e) => handleCameraNameInput(laundry.id, camera.id, e.target.value)}
-                              className="flex-1 min-w-0 bg-transparent text-sm text-slate-200 focus:outline-none"
-                              placeholder="Camera name"
-                            />
-                          ) : (
-                            <div className="text-sm text-slate-200 truncate">{camera.name}</div>
-                          )}
-                          <span className="text-[10px] uppercase tracking-wide text-slate-500">{camera.position}</span>
-                          {isRelayEditMode && (
-                            <button
-                              onClick={() => handleCameraNameSave(laundry.id, camera.id)}
-                              disabled={saving}
-                              className="text-[10px] px-2 py-1 rounded-md border border-slate-600 text-slate-300 hover:border-slate-500 hover:text-white disabled:opacity-50"
-                            >
-                              Save
-                            </button>
-                          )}
+                          <div className="flex-1 min-w-0">
+                            {isRelayEditMode ? (
+                              <input
+                                value={nameValue}
+                                onChange={(e) => handleCameraNameInput(laundry.id, camera.id, e.target.value)}
+                                className="w-full bg-transparent text-sm text-slate-200 focus:outline-none"
+                                placeholder="Camera name"
+                              />
+                            ) : (
+                              <div className="text-sm text-slate-200 truncate">{camera.name}</div>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2 shrink-0">
+                            <span className="text-[10px] uppercase tracking-wide text-slate-500">{camera.position}</span>
+                            {camera.sourceType === 'pattern' && (
+                              <span className="text-[10px] px-2 py-1 rounded-full border border-amber-400 text-amber-200 bg-amber-500/10">
+                                Mock
+                              </span>
+                            )}
+                            {isRelayEditMode && (
+                              <button
+                                onClick={() => handleCameraNameSave(laundry.id, camera.id)}
+                                disabled={saving}
+                                className="text-[10px] px-2 py-1 rounded-md border border-slate-600 text-slate-300 hover:border-slate-500 hover:text-white disabled:opacity-50"
+                              >
+                                Save
+                              </button>
+                            )}
+                          </div>
                         </div>
                         <div className="relative aspect-video bg-slate-950">
                           <img
@@ -1581,14 +1590,9 @@ const App: React.FC = () => {
                             alt={`${camera.name} feed`}
                             className="absolute inset-0 w-full h-full object-cover"
                           />
-                          {!online && (
+                          {!online && camera.sourceType !== 'pattern' && (
                             <div className="absolute inset-0 bg-slate-900/70 flex items-center justify-center text-xs text-slate-300">
                               Offline
-                            </div>
-                          )}
-                          {camera.sourceType === 'pattern' && (
-                            <div className="absolute top-2 right-2 text-[10px] px-2 py-1 rounded-full border border-amber-400 text-amber-200 bg-amber-500/10">
-                              Mock
                             </div>
                           )}
                         </div>

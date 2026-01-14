@@ -20,6 +20,7 @@
     "deploy:mock:prod": "bash deploy/deploy-mock.sh prod",
     "build": "vite build",
     "preview": "vite preview",
+    "pretest": "npm rebuild better-sqlite3",
     "test": "vitest run",
     "start": "node server.js"
   },
