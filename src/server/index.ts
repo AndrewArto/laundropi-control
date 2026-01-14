@@ -123,6 +123,7 @@ const isValidUsername = (val: string) => {
 
 const ALLOW_INSECURE = asBool(process.env.ALLOW_INSECURE, false);
 const REQUIRE_UI_AUTH = asBool(process.env.REQUIRE_UI_AUTH, true) && !ALLOW_INSECURE;
+const CAMERA_ALLOW_NON_RTSP = asBool(process.env.CAMERA_ALLOW_NON_RTSP, false);
 const SESSION_SECRET = process.env.SESSION_SECRET || '';
 const SESSION_TTL_HOURS = Number(process.env.SESSION_TTL_HOURS || 12);
 const SESSION_COOKIE_NAME = process.env.SESSION_COOKIE_NAME || 'laundropi_session';
@@ -302,12 +303,17 @@ const normalizeRtspUrl = (value?: string | null): string | null => {
   if (!trimmed) return null;
   try {
     const parsed = new URL(trimmed);
-    if (parsed.protocol !== 'rtsp:') return null;
-    parsed.username = '';
-    parsed.password = '';
-    return parsed.toString();
-  } catch {
+    if (parsed.protocol === 'rtsp:') {
+      parsed.username = '';
+      parsed.password = '';
+      return parsed.toString();
+    }
+    if (CAMERA_ALLOW_NON_RTSP) {
+      return trimmed;
+    }
     return null;
+  } catch {
+    return CAMERA_ALLOW_NON_RTSP ? trimmed : null;
   }
 };
 
@@ -322,6 +328,7 @@ const buildStreamKey = (camera: CameraRow) => {
 const attachRtspCredentials = (rtspUrl: string, username?: string | null, password?: string | null) => {
   try {
     const parsed = new URL(rtspUrl);
+    if (parsed.protocol !== 'rtsp:') return rtspUrl;
     if (username) parsed.username = username;
     if (password) parsed.password = password;
     return parsed.toString();
