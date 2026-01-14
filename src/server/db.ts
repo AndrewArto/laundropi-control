@@ -1,3 +1,4 @@
+import './env';
 import Database = require('better-sqlite3');
 
 export type AgentRecord = {

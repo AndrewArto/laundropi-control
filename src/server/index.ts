@@ -2,11 +2,9 @@ import * as http from 'http';
 import express = require('express');
 import cors = require('cors');
 import { WebSocketServer, WebSocket } from 'ws';
-import * as dotenv from 'dotenv';
 import * as crypto from 'crypto';
 import { listAgents, updateHeartbeat, saveMeta, getAgent, updateRelayMeta, listSchedules, upsertSchedule, deleteSchedule, listGroups, listGroupsForMembership, upsertGroup, deleteGroup, GroupRow, deleteAgent, upsertAgent, upsertCommand, listPendingCommands, deleteCommand, updateCommandsForRelay, expireOldCommands, insertLead, getLastLeadTimestampForIp, getRevenueEntry, listRevenueEntriesBetween, listRevenueEntries, listRevenueEntryDatesBetween, upsertRevenueEntry, insertRevenueAudit, listRevenueAudit, RevenueEntryRow, listUiUsers, getUiUser, createUiUser, updateUiUserRole, updateUiUserPassword, updateUiUserLastLogin, countUiUsers, listCameras, getCamera, upsertCamera, deleteCamera, upsertIntegrationSecret, getIntegrationSecret, deleteIntegrationSecret, CameraRow } from './db';
 
-dotenv.config({ path: process.env.CENTRAL_ENV_FILE || '.env.central' });
 
 const asBool = (val: string | undefined, fallback = false) => {
   if (val === undefined) return fallback;
