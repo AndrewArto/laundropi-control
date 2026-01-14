@@ -118,6 +118,9 @@ export type CameraRow = {
 };
 
 const dbPath = process.env.CENTRAL_DB_PATH || './central.db';
+if (process.env.NODE_ENV !== 'test') {
+  console.log(`[central] DB path ${dbPath}`);
+}
 const db = new Database(dbPath);
 
 db.pragma('journal_mode = WAL');
