@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { LayoutDashboard, CalendarClock, Settings, Trash2, Cpu, Server, Pencil, Plus, Lock, Coins, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ChevronDown, ChevronUp, Download } from 'lucide-react';
+import { LayoutDashboard, CalendarClock, Settings, Trash2, Cpu, Server, Pencil, Plus, Lock, Coins, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ChevronDown, ChevronUp, Download, Camera as CameraIcon, CameraOff as CameraOffIcon } from 'lucide-react';
 import RelayCard from './components/RelayCard';
 import { Relay, Schedule, RelayType, RelayGroup, RevenueEntry, RevenueAuditEntry, RevenueSummary, UiUser, CameraConfig } from './types';
 import { ApiService, resolveBaseUrl } from './services/api';
@@ -178,6 +178,7 @@ const App: React.FC = () => {
   const [cameraSaving, setCameraSaving] = useState<Record<string, boolean>>({});
   const [cameraSaveErrors, setCameraSaveErrors] = useState<Record<string, string | null>>({});
   const [cameraRefreshTick, setCameraRefreshTick] = useState(0);
+  const [cameraPreviewErrors, setCameraPreviewErrors] = useState<Record<string, boolean>>({});
   const [cameraVisibility, setCameraVisibility] = useState<Record<string, boolean>>({});
   const [isPageVisible, setIsPageVisible] = useState(() => {
     if (typeof document === 'undefined') return true;
@@ -389,6 +390,7 @@ const App: React.FC = () => {
     setCameraSaving({});
     setCameraSaveErrors({});
     setCameraRefreshTick(0);
+    setCameraPreviewErrors({});
     setAgentId(null);
     setAgentHeartbeat(null);
     setIsMockMode(true);
@@ -1654,8 +1656,9 @@ const App: React.FC = () => {
                     const saveError = cameraSaveErrors[draftKey];
                     const inView = cameraVisibility[draftKey];
                     const shouldPollCamera = isPageVisible && (inView ?? true);
+                    const previewError = cameraPreviewErrors[draftKey];
                     const canShowPreview = camera.enabled && shouldPollCamera && (camera.sourceType === 'pattern' || online);
-                    const showPaused = camera.enabled && !shouldPollCamera && (camera.sourceType === 'pattern' || online);
+                    const showPlaceholder = !canShowPreview || Boolean(previewError);
                     const cameraToggleDisabled = !serverOnline || saving;
                     return (
                       <div
@@ -1686,13 +1689,15 @@ const App: React.FC = () => {
                             <button
                               onClick={() => handleCameraEnabledToggle(laundry.id, camera.id)}
                               disabled={cameraToggleDisabled}
-                              className={`text-[10px] px-2 py-1 rounded-md border transition-colors ${
+                              title={camera.enabled ? 'Disable camera' : 'Enable camera'}
+                              aria-label={camera.enabled ? 'Disable camera' : 'Enable camera'}
+                              className={`p-1.5 rounded-md border transition-colors ${
                                 camera.enabled
-                                  ? 'border-red-400 text-red-200 bg-red-500/10 hover:border-red-300'
-                                  : 'border-emerald-400 text-emerald-200 bg-emerald-500/10 hover:border-emerald-300'
+                                  ? 'border-emerald-400 text-emerald-200 bg-emerald-500/10 hover:border-emerald-300'
+                                  : 'border-red-400 text-red-200 bg-red-500/10 hover:border-red-300'
                               } disabled:opacity-50 disabled:cursor-not-allowed`}
                             >
-                              {camera.enabled ? 'Disable' : 'Enable'}
+                              {camera.enabled ? <CameraIcon className="w-3.5 h-3.5" /> : <CameraOffIcon className="w-3.5 h-3.5" />}
                             </button>
                             {isRelayEditMode && (
                               <button
@@ -1705,27 +1710,24 @@ const App: React.FC = () => {
                             )}
                           </div>
                         </div>
-                        <div className="relative aspect-video bg-slate-950">
+                        <div className="relative aspect-video bg-slate-900">
                           {canShowPreview && (
                             <img
                               src={buildCameraPreviewUrl(camera, laundry.id)}
                               alt={`${camera.name} feed`}
-                              className="absolute inset-0 w-full h-full object-cover"
+                              onError={() => setCameraPreviewErrors(prev => (prev[draftKey] ? prev : { ...prev, [draftKey]: true }))}
+                              onLoad={() => setCameraPreviewErrors(prev => {
+                                if (!prev[draftKey]) return prev;
+                                const next = { ...prev };
+                                delete next[draftKey];
+                                return next;
+                              })}
+                              className={`absolute inset-0 w-full h-full object-cover transition-opacity ${previewError ? 'opacity-0' : 'opacity-100'}`}
                             />
                           )}
-                          {!camera.enabled && (
-                            <div className="absolute inset-0 bg-slate-950/80 flex items-center justify-center text-xs text-slate-300">
-                              Disabled
-                            </div>
-                          )}
-                          {camera.enabled && !online && camera.sourceType !== 'pattern' && (
-                            <div className="absolute inset-0 bg-slate-900/70 flex items-center justify-center text-xs text-slate-300">
-                              Offline
-                            </div>
-                          )}
-                          {showPaused && (
-                            <div className="absolute inset-0 bg-slate-950/80 flex items-center justify-center text-xs text-slate-300">
-                              Paused
+                          {showPlaceholder && (
+                            <div className="absolute inset-0 flex items-center justify-center text-slate-500">
+                              <CameraOffIcon className="w-16 h-16" />
                             </div>
                           )}
                         </div>
