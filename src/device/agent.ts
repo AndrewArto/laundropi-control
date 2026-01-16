@@ -24,7 +24,13 @@ const GO2RTC_CONFIG_PATH = process.env.GO2RTC_CONFIG_PATH || '/var/lib/laundropi
 const GO2RTC_API_URL = process.env.GO2RTC_API_URL || 'http://127.0.0.1:1984';
 const GO2RTC_FRAME_PATH = process.env.GO2RTC_FRAME_PATH || '/api/frame.jpeg';
 const GO2RTC_RELOAD_URL = process.env.GO2RTC_RELOAD_URL || '';
-const CAMERA_FRAME_FETCH_TIMEOUT_MS = Number(process.env.CAMERA_FRAME_FETCH_TIMEOUT_MS || 3000);
+const parseDurationMs = (value: string | undefined, fallback: number) => {
+  const num = Number(value);
+  return Number.isFinite(num) && num >= 0 ? num : fallback;
+};
+
+const CAMERA_FRAME_FETCH_TIMEOUT_MS = parseDurationMs(process.env.CAMERA_FRAME_FETCH_TIMEOUT_MS, 3000);
+const CAMERA_FRAME_CACHE_MS = parseDurationMs(process.env.CAMERA_FRAME_CACHE_MS, 900);
 
 let ws: WebSocket | null = null;
 let heartbeatTimer: NodeJS.Timeout | null = null;
@@ -60,6 +66,8 @@ type CameraConfig = {
 
 let cameraConfigs: CameraConfig[] = [];
 const cameraConfigById = new Map<string, CameraConfig>();
+const cameraFrameCache = new Map<string, { ts: number; contentType: string; data: string }>();
+const cameraFrameInFlight = new Map<string, Promise<FrameResult>>();
 
 const ensureGo2rtcDir = () => {
   const dir = path.dirname(GO2RTC_CONFIG_PATH);
@@ -199,6 +207,37 @@ async function handleCameraFrameRequest(cameraId: string, requestId: string) {
     send({ type: 'camera_frame', requestId, ok: false, error: 'camera not configured' });
     return;
   }
+  const result = await getCameraFrame(camera);
+  if (result.ok) {
+    send({
+      type: 'camera_frame',
+      requestId,
+      ok: true,
+      contentType: result.contentType,
+      data: result.data,
+    });
+    return;
+  }
+  send({ type: 'camera_frame', requestId, ok: false, error: result.error });
+}
+
+type FrameResult =
+  | { ok: true; contentType: string; data: string; ts: number }
+  | { ok: false; error: string; ts: number };
+
+const getCachedFrame = (cameraId: string) => {
+  if (CAMERA_FRAME_CACHE_MS <= 0) return null;
+  const cached = cameraFrameCache.get(cameraId);
+  if (!cached) return null;
+  if (Date.now() - cached.ts > CAMERA_FRAME_CACHE_MS) {
+    cameraFrameCache.delete(cameraId);
+    return null;
+  }
+  return cached;
+};
+
+const fetchCameraFrame = async (camera: CameraConfig): Promise<FrameResult> => {
+  const timestamp = Date.now();
   try {
     const base = GO2RTC_API_URL.replace(/\/$/, '');
     const pathPart = GO2RTC_FRAME_PATH.startsWith('/') ? GO2RTC_FRAME_PATH : `/${GO2RTC_FRAME_PATH}`;
@@ -209,22 +248,37 @@ async function handleCameraFrameRequest(cameraId: string, requestId: string) {
     const res = await fetch(url.toString(), { signal: controller.signal });
     clearTimeout(timeout);
     if (!res.ok) {
-      send({ type: 'camera_frame', requestId, ok: false, error: `go2rtc ${res.status}` });
-      return;
+      return { ok: false, error: `go2rtc ${res.status}`, ts: timestamp };
     }
     const buf = Buffer.from(await res.arrayBuffer());
+    if (!buf.length) {
+      return { ok: false, error: 'empty frame', ts: timestamp };
+    }
     const contentType = res.headers.get('content-type') || 'image/jpeg';
-    send({
-      type: 'camera_frame',
-      requestId,
-      ok: true,
-      contentType,
-      data: buf.toString('base64'),
-    });
+    return { ok: true, contentType, data: buf.toString('base64'), ts: timestamp };
   } catch (err) {
-    send({ type: 'camera_frame', requestId, ok: false, error: 'frame fetch failed' });
+    return { ok: false, error: 'frame fetch failed', ts: timestamp };
   }
-}
+};
+
+const getCameraFrame = async (camera: CameraConfig): Promise<FrameResult> => {
+  const cached = getCachedFrame(camera.id);
+  if (cached) {
+    return { ok: true, contentType: cached.contentType, data: cached.data, ts: cached.ts };
+  }
+  let inflight = cameraFrameInFlight.get(camera.id);
+  if (!inflight) {
+    inflight = fetchCameraFrame(camera).finally(() => {
+      cameraFrameInFlight.delete(camera.id);
+    });
+    cameraFrameInFlight.set(camera.id, inflight);
+  }
+  const result = await inflight;
+  if (result.ok && CAMERA_FRAME_CACHE_MS > 0) {
+    cameraFrameCache.set(camera.id, { ts: result.ts, contentType: result.contentType, data: result.data });
+  }
+  return result;
+};
 
 function send(payload: any) {
   if (!ws || ws.readyState !== WebSocket.OPEN) return;
