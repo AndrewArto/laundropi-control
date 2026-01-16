@@ -373,7 +373,17 @@ function ensureDefaultCameras(agentId: string) {
   const existingByPosition = new Map(existing.map(camera => [camera.position, camera]));
   const now = Date.now();
   CAMERA_POSITIONS.forEach(position => {
-    if (existingByPosition.has(position)) return;
+    const current = existingByPosition.get(position);
+    if (current) {
+      if (current.sourceType === 'pattern' && current.enabled) {
+        upsertCamera({
+          ...current,
+          enabled: false,
+          updatedAt: now,
+        });
+      }
+      return;
+    }
     const id = buildCameraId(agentId, position);
     upsertCamera({
       id,
@@ -384,7 +394,7 @@ function ensureDefaultCameras(agentId: string) {
       rtspUrl: null,
       usernameSecretId: null,
       passwordSecretId: null,
-      enabled: true,
+      enabled: false,
       createdAt: now,
       updatedAt: now,
     });

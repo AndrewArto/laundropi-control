@@ -349,7 +349,7 @@ const App: React.FC = () => {
         name: def.name,
         position: def.position,
         sourceType: 'pattern' as const,
-        enabled: true,
+        enabled: false,
         previewUrl: `/api/agents/${encodeURIComponent(agentId)}/cameras/${encodeURIComponent(id)}/frame`,
       };
     });
@@ -1187,26 +1187,31 @@ const App: React.FC = () => {
     }
   };
 
-  const handleCameraEnabledToggle = async (agentId: string, cameraId: string) => {
+  const handleCameraEnabledToggle = async (agentId: string, camera: CameraConfig) => {
     if (!serverOnline) return;
-    const key = cameraDraftKey(agentId, cameraId);
+    const key = cameraDraftKey(agentId, camera.id);
     const list = cameraConfigs[agentId] || [];
-    const current = list.find(cam => cam.id === cameraId);
-    if (!current) return;
+    const current = list.find(cam => cam.id === camera.id) || camera;
     const currentEnabled = current.enabled;
     const nextEnabled = !currentEnabled;
     setCameraSaving(prev => ({ ...prev, [key]: true }));
     setCameraSaveErrors(prev => ({ ...prev, [key]: null }));
     setCameraConfigs(prev => {
       const existing = prev[agentId] || [];
-      const nextList = existing.map(cam => cam.id === cameraId ? { ...cam, enabled: nextEnabled } : cam);
+      const found = existing.some(cam => cam.id === camera.id);
+      const nextList = found
+        ? existing.map(cam => cam.id === camera.id ? { ...cam, enabled: nextEnabled } : cam)
+        : [...existing, { ...camera, enabled: nextEnabled }];
       return { ...prev, [agentId]: nextList };
     });
     try {
-      const res = await ApiService.updateCamera(agentId, cameraId, { enabled: nextEnabled });
+      const res = await ApiService.updateCamera(agentId, camera.id, { enabled: nextEnabled });
       setCameraConfigs(prev => {
         const existing = prev[agentId] || [];
-        const nextList = existing.map(cam => cam.id === cameraId ? { ...cam, enabled: res.camera.enabled } : cam);
+        const found = existing.some(cam => cam.id === camera.id);
+        const nextList = found
+          ? existing.map(cam => cam.id === camera.id ? { ...cam, enabled: res.camera.enabled } : cam)
+          : [...existing, { ...camera, enabled: res.camera.enabled }];
         return { ...prev, [agentId]: nextList };
       });
     } catch (err) {
@@ -1214,7 +1219,10 @@ const App: React.FC = () => {
       console.error('Camera enable toggle failed', err);
       setCameraConfigs(prev => {
         const existing = prev[agentId] || [];
-        const nextList = existing.map(cam => cam.id === cameraId ? { ...cam, enabled: currentEnabled } : cam);
+        const found = existing.some(cam => cam.id === camera.id);
+        const nextList = found
+          ? existing.map(cam => cam.id === camera.id ? { ...cam, enabled: currentEnabled } : cam)
+          : [...existing, { ...camera, enabled: currentEnabled }];
         return { ...prev, [agentId]: nextList };
       });
       setCameraSaveErrors(prev => ({ ...prev, [key]: 'Failed to update camera state.' }));
@@ -1687,7 +1695,7 @@ const App: React.FC = () => {
                               </span>
                             )}
                             <button
-                              onClick={() => handleCameraEnabledToggle(laundry.id, camera.id)}
+                              onClick={() => handleCameraEnabledToggle(laundry.id, camera)}
                               disabled={cameraToggleDisabled}
                               title={camera.enabled ? 'Disable camera' : 'Enable camera'}
                               aria-label={camera.enabled ? 'Disable camera' : 'Enable camera'}
