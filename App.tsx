@@ -1126,6 +1126,42 @@ const App: React.FC = () => {
     }
   };
 
+  const handleCameraEnabledToggle = async (agentId: string, cameraId: string) => {
+    if (!serverOnline) return;
+    const key = cameraDraftKey(agentId, cameraId);
+    const list = cameraConfigs[agentId] || [];
+    const current = list.find(cam => cam.id === cameraId);
+    if (!current) return;
+    const currentEnabled = current.enabled;
+    const nextEnabled = !currentEnabled;
+    setCameraSaving(prev => ({ ...prev, [key]: true }));
+    setCameraSaveErrors(prev => ({ ...prev, [key]: null }));
+    setCameraConfigs(prev => {
+      const existing = prev[agentId] || [];
+      const nextList = existing.map(cam => cam.id === cameraId ? { ...cam, enabled: nextEnabled } : cam);
+      return { ...prev, [agentId]: nextList };
+    });
+    try {
+      const res = await ApiService.updateCamera(agentId, cameraId, { enabled: nextEnabled });
+      setCameraConfigs(prev => {
+        const existing = prev[agentId] || [];
+        const nextList = existing.map(cam => cam.id === cameraId ? { ...cam, enabled: res.camera.enabled } : cam);
+        return { ...prev, [agentId]: nextList };
+      });
+    } catch (err) {
+      if (handleAuthFailure(err)) return;
+      console.error('Camera enable toggle failed', err);
+      setCameraConfigs(prev => {
+        const existing = prev[agentId] || [];
+        const nextList = existing.map(cam => cam.id === cameraId ? { ...cam, enabled: currentEnabled } : cam);
+        return { ...prev, [agentId]: nextList };
+      });
+      setCameraSaveErrors(prev => ({ ...prev, [key]: 'Failed to update camera state.' }));
+    } finally {
+      setCameraSaving(prev => ({ ...prev, [key]: false }));
+    }
+  };
+
   const handleToggleVisibility = async (id: number, agent: string = primaryAgentId) => {
     if (!serverOnline) return;
     const key = relayDraftKey(agent, id);
@@ -1557,6 +1593,7 @@ const App: React.FC = () => {
                     const nameValue = cameraNameDrafts[key] ?? camera.name;
                     const saving = Boolean(cameraSaving[key]);
                     const saveError = cameraSaveErrors[key];
+                    const cameraToggleDisabled = !serverOnline || saving;
                     return (
                       <div key={camera.id} className="bg-slate-900/40 border border-slate-700 rounded-lg overflow-hidden">
                         <div className="flex items-center justify-between gap-2 px-3 py-2 border-b border-slate-700">
@@ -1579,6 +1616,17 @@ const App: React.FC = () => {
                                 Mock
                               </span>
                             )}
+                            <button
+                              onClick={() => handleCameraEnabledToggle(laundry.id, camera.id)}
+                              disabled={cameraToggleDisabled}
+                              className={`text-[10px] px-2 py-1 rounded-md border transition-colors ${
+                                camera.enabled
+                                  ? 'border-red-400 text-red-200 bg-red-500/10 hover:border-red-300'
+                                  : 'border-emerald-400 text-emerald-200 bg-emerald-500/10 hover:border-emerald-300'
+                              } disabled:opacity-50 disabled:cursor-not-allowed`}
+                            >
+                              {camera.enabled ? 'Disable' : 'Enable'}
+                            </button>
                             {isRelayEditMode && (
                               <button
                                 onClick={() => handleCameraNameSave(laundry.id, camera.id)}
@@ -1591,12 +1639,19 @@ const App: React.FC = () => {
                           </div>
                         </div>
                         <div className="relative aspect-video bg-slate-950">
-                          <img
-                            src={buildCameraPreviewUrl(camera, laundry.id)}
-                            alt={`${camera.name} feed`}
-                            className="absolute inset-0 w-full h-full object-cover"
-                          />
-                          {!online && camera.sourceType !== 'pattern' && (
+                          {camera.enabled && (
+                            <img
+                              src={buildCameraPreviewUrl(camera, laundry.id)}
+                              alt={`${camera.name} feed`}
+                              className="absolute inset-0 w-full h-full object-cover"
+                            />
+                          )}
+                          {!camera.enabled && (
+                            <div className="absolute inset-0 bg-slate-950/80 flex items-center justify-center text-xs text-slate-300">
+                              Disabled
+                            </div>
+                          )}
+                          {camera.enabled && !online && camera.sourceType !== 'pattern' && (
                             <div className="absolute inset-0 bg-slate-900/70 flex items-center justify-center text-xs text-slate-300">
                               Offline
                             </div>
