@@ -14,7 +14,7 @@ enum Tab {
 
 const AGENT_STALE_MS = 8_000;
 const PENDING_RELAY_TTL_MS = 5_000;
-const CAMERA_FRAME_REFRESH_MS = 1_000;
+const CAMERA_FRAME_REFRESH_MS = 3_000;
 const DEFAULT_AGENT_ID = (import.meta as any).env?.VITE_AGENT_ID ?? 'dev-agent';
 const DEFAULT_AGENT_SECRET = (import.meta as any).env?.VITE_AGENT_SECRET ?? 'secret';
 const IS_TEST_ENV = (typeof process !== 'undefined' && process.env?.NODE_ENV === 'test') || false;
@@ -178,6 +178,13 @@ const App: React.FC = () => {
   const [cameraSaving, setCameraSaving] = useState<Record<string, boolean>>({});
   const [cameraSaveErrors, setCameraSaveErrors] = useState<Record<string, string | null>>({});
   const [cameraRefreshTick, setCameraRefreshTick] = useState(0);
+  const [cameraVisibility, setCameraVisibility] = useState<Record<string, boolean>>({});
+  const [isPageVisible, setIsPageVisible] = useState(() => {
+    if (typeof document === 'undefined') return true;
+    return document.visibilityState === 'visible';
+  });
+  const cameraObserverRef = React.useRef<IntersectionObserver | null>(null);
+  const cameraCardRefs = React.useRef<Map<string, HTMLDivElement>>(new Map());
   const isLaundryOnline = React.useCallback((laundry: Laundry) => {
     const fresh = laundry.lastHeartbeat ? (Date.now() - laundry.lastHeartbeat) < AGENT_STALE_MS : false;
     return serverOnline && laundry.isOnline && fresh;
@@ -347,6 +354,24 @@ const App: React.FC = () => {
     });
     return slots.sort((a, b) => cameraPositionOrder(a.position) - cameraPositionOrder(b.position));
   };
+  const registerCameraCard = React.useCallback((key: string, node: HTMLDivElement | null) => {
+    const observer = cameraObserverRef.current;
+    const existing = cameraCardRefs.current.get(key);
+    if (existing && observer) observer.unobserve(existing);
+    if (!node) {
+      cameraCardRefs.current.delete(key);
+      setCameraVisibility((prev) => {
+        if (!(key in prev)) return prev;
+        const next = { ...prev };
+        delete next[key];
+        return next;
+      });
+      return;
+    }
+    node.dataset.cameraKey = key;
+    cameraCardRefs.current.set(key, node);
+    if (observer) observer.observe(node);
+  }, []);
 
   const resetUiState = () => {
     setRelays([]);
@@ -840,12 +865,46 @@ const App: React.FC = () => {
   }, [isAuthenticated]);
 
   useEffect(() => {
-    if (!isAuthenticated || activeTab !== Tab.DASHBOARD) return;
+    if (!isAuthenticated || activeTab !== Tab.DASHBOARD || !isPageVisible) return;
     const timer = setInterval(() => {
       setCameraRefreshTick((prev) => prev + 1);
     }, CAMERA_FRAME_REFRESH_MS);
     return () => clearInterval(timer);
-  }, [isAuthenticated, activeTab]);
+  }, [isAuthenticated, activeTab, isPageVisible]);
+
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    const handleVisibility = () => {
+      setIsPageVisible(document.visibilityState === 'visible');
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => document.removeEventListener('visibilitychange', handleVisibility);
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !('IntersectionObserver' in window)) return;
+    const observer = new IntersectionObserver((entries) => {
+      setCameraVisibility((prev) => {
+        let next = prev;
+        entries.forEach((entry) => {
+          const target = entry.target as HTMLElement;
+          const key = target.dataset.cameraKey;
+          if (!key) return;
+          const visible = entry.isIntersecting;
+          if (prev[key] === visible) return;
+          if (next === prev) next = { ...prev };
+          next[key] = visible;
+        });
+        return next;
+      });
+    }, { rootMargin: '120px 0px', threshold: 0.1 });
+    cameraObserverRef.current = observer;
+    cameraCardRefs.current.forEach((node) => observer.observe(node));
+    return () => {
+      observer.disconnect();
+      cameraObserverRef.current = null;
+    };
+  }, []);
 
   useEffect(() => {
     isAuthenticatedRef.current = isAuthenticated;
@@ -1589,13 +1648,21 @@ const App: React.FC = () => {
                 </div>
                 <div className="grid gap-3 sm:grid-cols-2">
                   {cameras.map(camera => {
-                    const key = cameraDraftKey(laundry.id, camera.id);
-                    const nameValue = cameraNameDrafts[key] ?? camera.name;
-                    const saving = Boolean(cameraSaving[key]);
-                    const saveError = cameraSaveErrors[key];
+                    const draftKey = cameraDraftKey(laundry.id, camera.id);
+                    const nameValue = cameraNameDrafts[draftKey] ?? camera.name;
+                    const saving = Boolean(cameraSaving[draftKey]);
+                    const saveError = cameraSaveErrors[draftKey];
+                    const inView = cameraVisibility[draftKey];
+                    const shouldPollCamera = isPageVisible && (inView ?? true);
+                    const canShowPreview = camera.enabled && shouldPollCamera && (camera.sourceType === 'pattern' || online);
+                    const showPaused = camera.enabled && !shouldPollCamera && (camera.sourceType === 'pattern' || online);
                     const cameraToggleDisabled = !serverOnline || saving;
                     return (
-                      <div key={camera.id} className="bg-slate-900/40 border border-slate-700 rounded-lg overflow-hidden">
+                      <div
+                        key={camera.id}
+                        ref={(node) => registerCameraCard(draftKey, node)}
+                        className="bg-slate-900/40 border border-slate-700 rounded-lg overflow-hidden"
+                      >
                         <div className="flex items-center justify-between gap-2 px-3 py-2 border-b border-slate-700">
                           <div className="flex-1 min-w-0">
                             {isRelayEditMode ? (
@@ -1639,7 +1706,7 @@ const App: React.FC = () => {
                           </div>
                         </div>
                         <div className="relative aspect-video bg-slate-950">
-                          {camera.enabled && (
+                          {canShowPreview && (
                             <img
                               src={buildCameraPreviewUrl(camera, laundry.id)}
                               alt={`${camera.name} feed`}
@@ -1654,6 +1721,11 @@ const App: React.FC = () => {
                           {camera.enabled && !online && camera.sourceType !== 'pattern' && (
                             <div className="absolute inset-0 bg-slate-900/70 flex items-center justify-center text-xs text-slate-300">
                               Offline
+                            </div>
+                          )}
+                          {showPaused && (
+                            <div className="absolute inset-0 bg-slate-950/80 flex items-center justify-center text-xs text-slate-300">
+                              Paused
                             </div>
                           )}
                         </div>

@@ -208,19 +208,25 @@ const ensureKnownAgents = () => {
 const PORT = Number(process.env.CENTRAL_PORT || 4000);
 const HEARTBEAT_STALE_MS = 30_000;
 const CAMERA_FRAME_TIMEOUT_MS = Number(process.env.CAMERA_FRAME_TIMEOUT_MS || 4000);
+const cameraFrameCacheMs = Number(process.env.CAMERA_FRAME_CACHE_MS || 1500);
+const CAMERA_FRAME_CACHE_MS = Number.isFinite(cameraFrameCacheMs) ? cameraFrameCacheMs : 1500;
 
 type AgentSocketRecord = { socket: WebSocket; lastHeartbeat: number };
 const agents: Map<string, AgentSocketRecord> = new Map();
 const relayStateCache: Map<string, Map<number, string>> = new Map();
 
 type CameraFrameResult = { contentType: string; data: Buffer };
+type CameraFrameCacheEntry = { contentType: string; data: Buffer; ts: number };
 type PendingCameraFrame = {
   resolve: (result: CameraFrameResult) => void;
   reject: (err: Error) => void;
   timer: NodeJS.Timeout;
+  cacheKey: string;
 };
 
 const pendingCameraFrames: Map<string, PendingCameraFrame> = new Map();
+const cameraFrameCache: Map<string, CameraFrameCacheEntry> = new Map();
+const cameraFrameInFlight: Map<string, Promise<CameraFrameResult>> = new Map();
 
 const normalizeTime = (val?: string | null): string | null => {
   if (!val) return null;
@@ -628,19 +634,32 @@ const pushCameraConfigToAgent = (agentId: string) => {
 };
 
 const requestCameraFrame = (agentId: string, cameraId: string): Promise<CameraFrameResult> => {
+  const cacheKey = `${agentId}::${cameraId}`;
+  if (CAMERA_FRAME_CACHE_MS > 0) {
+    const cached = cameraFrameCache.get(cacheKey);
+    if (cached && Date.now() - cached.ts <= CAMERA_FRAME_CACHE_MS) {
+      return Promise.resolve({ contentType: cached.contentType, data: cached.data });
+    }
+  }
+  const inflight = cameraFrameInFlight.get(cacheKey);
+  if (inflight) return inflight;
+
   const target = agents.get(agentId);
   if (!target || target.socket.readyState !== WebSocket.OPEN) {
     return Promise.reject(new Error('agent not connected'));
   }
   const requestId = crypto.randomUUID();
-  return new Promise((resolve, reject) => {
+  const promise = new Promise<CameraFrameResult>((resolve, reject) => {
     const timer = setTimeout(() => {
       pendingCameraFrames.delete(requestId);
+      cameraFrameInFlight.delete(cacheKey);
       reject(new Error('camera frame timeout'));
     }, CAMERA_FRAME_TIMEOUT_MS);
-    pendingCameraFrames.set(requestId, { resolve, reject, timer });
+    pendingCameraFrames.set(requestId, { resolve, reject, timer, cacheKey });
     target.socket.send(JSON.stringify({ type: 'camera_frame_request', cameraId, requestId }));
   });
+  cameraFrameInFlight.set(cacheKey, promise);
+  return promise;
 };
 
 const buildCameraPatternSvg = (camera: CameraRow) => {
@@ -1630,8 +1649,13 @@ wss.on('connection', (socket) => {
         if (msg.ok && msg.data) {
           const buffer = Buffer.from(msg.data, 'base64');
           const contentType = typeof msg.contentType === 'string' ? msg.contentType : 'image/jpeg';
+          if (CAMERA_FRAME_CACHE_MS > 0) {
+            cameraFrameCache.set(pending.cacheKey, { contentType, data: buffer, ts: Date.now() });
+          }
+          cameraFrameInFlight.delete(pending.cacheKey);
           pending.resolve({ contentType, data: buffer });
         } else {
+          cameraFrameInFlight.delete(pending.cacheKey);
           pending.reject(new Error(msg.error || 'camera frame failed'));
         }
         return;

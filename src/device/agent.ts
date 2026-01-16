@@ -30,7 +30,7 @@ const parseDurationMs = (value: string | undefined, fallback: number) => {
 };
 
 const CAMERA_FRAME_FETCH_TIMEOUT_MS = parseDurationMs(process.env.CAMERA_FRAME_FETCH_TIMEOUT_MS, 3000);
-const CAMERA_FRAME_CACHE_MS = parseDurationMs(process.env.CAMERA_FRAME_CACHE_MS, 900);
+const CAMERA_FRAME_CACHE_MS = parseDurationMs(process.env.CAMERA_FRAME_CACHE_MS, 2500);
 
 let ws: WebSocket | null = null;
 let heartbeatTimer: NodeJS.Timeout | null = null;
