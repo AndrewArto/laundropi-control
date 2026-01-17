@@ -1286,8 +1286,11 @@ const App: React.FC = () => {
     const current = list.find(cam => cam.id === camera.id) || camera;
     const currentEnabled = current.enabled;
     const nextEnabled = !currentEnabled;
+    const useToggleLoading = camera.sourceType !== 'pattern';
     setCameraSaving(prev => ({ ...prev, [key]: true }));
-    setCameraToggleLoading(prev => ({ ...prev, [key]: true }));
+    if (useToggleLoading) {
+      setCameraToggleLoading(prev => ({ ...prev, [key]: true }));
+    }
     setCameraSaveErrors(prev => ({ ...prev, [key]: null }));
     setCameraWarmup(prev => {
       if (!nextEnabled || camera.sourceType === 'pattern') {
@@ -1351,7 +1354,9 @@ const App: React.FC = () => {
       });
     } finally {
       setCameraSaving(prev => ({ ...prev, [key]: false }));
-      setCameraToggleLoading(prev => ({ ...prev, [key]: false }));
+      if (useToggleLoading) {
+        setCameraToggleLoading(prev => ({ ...prev, [key]: false }));
+      }
     }
   };
 
@@ -1801,7 +1806,8 @@ const App: React.FC = () => {
                       : false;
                     const canRequestPreview = camera.enabled && shouldPollCamera && (camera.sourceType === 'pattern' || online);
                     const canShowPreview = canRequestPreview && hasFrame;
-                    const showLoading = (toggleLoading && camera.enabled) || (warmupActive && !hasFrame);
+                    const showLoading = camera.sourceType !== 'pattern'
+                      && ((toggleLoading && camera.enabled) || (warmupActive && !hasFrame));
                     const showPlaceholder = !canShowPreview && !showLoading;
                     const cameraToggleDisabled = !serverOnline || saving;
                     const showMockBadge = camera.sourceType === 'pattern';
