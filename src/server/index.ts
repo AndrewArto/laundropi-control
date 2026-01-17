@@ -208,8 +208,10 @@ const ensureKnownAgents = () => {
 const PORT = Number(process.env.CENTRAL_PORT || 4000);
 const HEARTBEAT_STALE_MS = 30_000;
 const CAMERA_FRAME_TIMEOUT_MS = Number(process.env.CAMERA_FRAME_TIMEOUT_MS || 4000);
-const cameraFrameCacheMs = Number(process.env.CAMERA_FRAME_CACHE_MS || 1500);
-const CAMERA_FRAME_CACHE_MS = Number.isFinite(cameraFrameCacheMs) ? cameraFrameCacheMs : 1500;
+const cameraFrameCacheMs = Number(process.env.CAMERA_FRAME_CACHE_MS || 5000);
+const CAMERA_FRAME_CACHE_MS = Number.isFinite(cameraFrameCacheMs) ? cameraFrameCacheMs : 5000;
+const cameraFrameMinIntervalMs = Number(process.env.CAMERA_FRAME_MIN_INTERVAL_MS || CAMERA_FRAME_CACHE_MS);
+const CAMERA_FRAME_MIN_INTERVAL_MS = Number.isFinite(cameraFrameMinIntervalMs) ? cameraFrameMinIntervalMs : CAMERA_FRAME_CACHE_MS;
 
 type AgentSocketRecord = { socket: WebSocket; lastHeartbeat: number };
 const agents: Map<string, AgentSocketRecord> = new Map();
@@ -227,6 +229,7 @@ type PendingCameraFrame = {
 const pendingCameraFrames: Map<string, PendingCameraFrame> = new Map();
 const cameraFrameCache: Map<string, CameraFrameCacheEntry> = new Map();
 const cameraFrameInFlight: Map<string, Promise<CameraFrameResult>> = new Map();
+const cameraFrameLastFetch: Map<string, number> = new Map();
 
 const normalizeTime = (val?: string | null): string | null => {
   if (!val) return null;
@@ -645,14 +648,21 @@ const pushCameraConfigToAgent = (agentId: string) => {
 
 const requestCameraFrame = (agentId: string, cameraId: string): Promise<CameraFrameResult> => {
   const cacheKey = `${agentId}::${cameraId}`;
+  const now = Date.now();
+  const cached = cameraFrameCache.get(cacheKey);
   if (CAMERA_FRAME_CACHE_MS > 0) {
-    const cached = cameraFrameCache.get(cacheKey);
-    if (cached && Date.now() - cached.ts <= CAMERA_FRAME_CACHE_MS) {
+    if (cached && now - cached.ts <= CAMERA_FRAME_CACHE_MS) {
       return Promise.resolve({ contentType: cached.contentType, data: cached.data });
     }
   }
   const inflight = cameraFrameInFlight.get(cacheKey);
   if (inflight) return inflight;
+  if (CAMERA_FRAME_MIN_INTERVAL_MS > 0) {
+    const lastFetch = cameraFrameLastFetch.get(cacheKey);
+    if (cached && lastFetch && (now - lastFetch) < CAMERA_FRAME_MIN_INTERVAL_MS) {
+      return Promise.resolve({ contentType: cached.contentType, data: cached.data });
+    }
+  }
 
   const target = agents.get(agentId);
   if (!target || target.socket.readyState !== WebSocket.OPEN) {
@@ -1659,8 +1669,10 @@ wss.on('connection', (socket) => {
         if (msg.ok && msg.data) {
           const buffer = Buffer.from(msg.data, 'base64');
           const contentType = typeof msg.contentType === 'string' ? msg.contentType : 'image/jpeg';
+          const fetchedAt = Date.now();
+          cameraFrameLastFetch.set(pending.cacheKey, fetchedAt);
           if (CAMERA_FRAME_CACHE_MS > 0) {
-            cameraFrameCache.set(pending.cacheKey, { contentType, data: buffer, ts: Date.now() });
+            cameraFrameCache.set(pending.cacheKey, { contentType, data: buffer, ts: fetchedAt });
           }
           cameraFrameInFlight.delete(pending.cacheKey);
           pending.resolve({ contentType, data: buffer });

@@ -14,7 +14,7 @@ enum Tab {
 
 const AGENT_STALE_MS = 8_000;
 const PENDING_RELAY_TTL_MS = 5_000;
-const CAMERA_FRAME_REFRESH_MS = 3_000;
+const CAMERA_FRAME_REFRESH_MS = 5_000;
 const CAMERA_WARMUP_MS = 15_000;
 const DEFAULT_AGENT_ID = (import.meta as any).env?.VITE_AGENT_ID ?? 'dev-agent';
 const DEFAULT_AGENT_SECRET = (import.meta as any).env?.VITE_AGENT_SECRET ?? 'secret';
