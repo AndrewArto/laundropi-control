@@ -1290,7 +1290,7 @@ const App: React.FC = () => {
     setCameraToggleLoading(prev => ({ ...prev, [key]: true }));
     setCameraSaveErrors(prev => ({ ...prev, [key]: null }));
     setCameraWarmup(prev => {
-      if (!nextEnabled) {
+      if (!nextEnabled || camera.sourceType === 'pattern') {
         if (!prev[key]) return prev;
         const next = { ...prev };
         delete next[key];
@@ -1343,6 +1343,12 @@ const App: React.FC = () => {
         return { ...prev, [agentId]: nextList };
       });
       setCameraSaveErrors(prev => ({ ...prev, [key]: 'Failed to update camera state.' }));
+      setCameraWarmup(prev => {
+        if (!prev[key]) return prev;
+        const next = { ...prev };
+        delete next[key];
+        return next;
+      });
     } finally {
       setCameraSaving(prev => ({ ...prev, [key]: false }));
       setCameraToggleLoading(prev => ({ ...prev, [key]: false }));
@@ -1798,7 +1804,7 @@ const App: React.FC = () => {
                     const showLoading = (toggleLoading && camera.enabled) || (warmupActive && !hasFrame);
                     const showPlaceholder = !canShowPreview && !showLoading;
                     const cameraToggleDisabled = !serverOnline || saving;
-                    const showMockBadge = camera.sourceType === 'pattern' && !warmupActive;
+                    const showMockBadge = camera.sourceType === 'pattern';
                     return (
                       <div
                         key={camera.id}
