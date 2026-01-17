@@ -50,6 +50,25 @@ describe('Camera API', () => {
     expect(updateRes.body.camera.name).toBe('Entrance Cam');
   });
 
+  it('keeps mock cameras enabled when toggled', async () => {
+    const app = await setupApp();
+    const agentId = 'test-agent';
+
+    const listRes = await request(app).get(`/api/agents/${agentId}/cameras`).expect(200);
+    const cameraId = listRes.body.cameras[0].id;
+
+    const updateRes = await request(app)
+      .put(`/api/agents/${agentId}/cameras/${cameraId}`)
+      .send({ enabled: true })
+      .expect(200);
+
+    expect(updateRes.body.camera.enabled).toBe(true);
+
+    const listRes2 = await request(app).get(`/api/agents/${agentId}/cameras`).expect(200);
+    const updated = listRes2.body.cameras.find((cam: any) => cam.id === cameraId);
+    expect(updated.enabled).toBe(true);
+  });
+
   it('rejects non-rtsp sources unless allowed', async () => {
     const agentId = 'test-agent';
     const app = await setupApp();

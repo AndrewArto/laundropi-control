@@ -378,13 +378,6 @@ function ensureDefaultCameras(agentId: string) {
   CAMERA_POSITIONS.forEach(position => {
     const current = existingByPosition.get(position);
     if (current) {
-      if (current.sourceType === 'pattern' && current.enabled) {
-        upsertCamera({
-          ...current,
-          enabled: false,
-          updatedAt: now,
-        });
-      }
       return;
     }
     const id = buildCameraId(agentId, position);
