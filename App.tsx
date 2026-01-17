@@ -176,6 +176,7 @@ const App: React.FC = () => {
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [cameraNameDrafts, setCameraNameDrafts] = useState<Record<string, string>>({});
   const [cameraSaving, setCameraSaving] = useState<Record<string, boolean>>({});
+  const [cameraToggleLoading, setCameraToggleLoading] = useState<Record<string, boolean>>({});
   const [cameraSaveErrors, setCameraSaveErrors] = useState<Record<string, string | null>>({});
   const [cameraRefreshTick, setCameraRefreshTick] = useState(0);
   const [cameraPreviewErrors, setCameraPreviewErrors] = useState<Record<string, boolean>>({});
@@ -388,6 +389,7 @@ const App: React.FC = () => {
     setCameraError(null);
     setCameraNameDrafts({});
     setCameraSaving({});
+    setCameraToggleLoading({});
     setCameraSaveErrors({});
     setCameraRefreshTick(0);
     setCameraPreviewErrors({});
@@ -1195,6 +1197,7 @@ const App: React.FC = () => {
     const currentEnabled = current.enabled;
     const nextEnabled = !currentEnabled;
     setCameraSaving(prev => ({ ...prev, [key]: true }));
+    setCameraToggleLoading(prev => ({ ...prev, [key]: true }));
     setCameraSaveErrors(prev => ({ ...prev, [key]: null }));
     setCameraConfigs(prev => {
       const existing = prev[agentId] || [];
@@ -1228,6 +1231,7 @@ const App: React.FC = () => {
       setCameraSaveErrors(prev => ({ ...prev, [key]: 'Failed to update camera state.' }));
     } finally {
       setCameraSaving(prev => ({ ...prev, [key]: false }));
+      setCameraToggleLoading(prev => ({ ...prev, [key]: false }));
     }
   };
 
@@ -1661,6 +1665,7 @@ const App: React.FC = () => {
                     const draftKey = cameraDraftKey(laundry.id, camera.id);
                     const nameValue = cameraNameDrafts[draftKey] ?? camera.name;
                     const saving = Boolean(cameraSaving[draftKey]);
+                    const toggleLoading = Boolean(cameraToggleLoading[draftKey]);
                     const saveError = cameraSaveErrors[draftKey];
                     const inView = cameraVisibility[draftKey];
                     const shouldPollCamera = isPageVisible && (inView ?? true);
@@ -1733,7 +1738,15 @@ const App: React.FC = () => {
                               className={`absolute inset-0 w-full h-full object-cover transition-opacity ${previewError ? 'opacity-0' : 'opacity-100'}`}
                             />
                           )}
-                          {showPlaceholder && (
+                          {toggleLoading && (
+                            <div className="absolute inset-0 bg-slate-950/80 flex items-center justify-center text-slate-200">
+                              <div className="flex items-center gap-2 text-xs">
+                                <span className="w-4 h-4 rounded-full border-2 border-slate-500 border-t-slate-200 animate-spin" />
+                                Loading...
+                              </div>
+                            </div>
+                          )}
+                          {showPlaceholder && !toggleLoading && (
                             <div className="absolute inset-0 flex items-center justify-center text-slate-500">
                               <CameraOffIcon className="w-16 h-16" />
                             </div>
