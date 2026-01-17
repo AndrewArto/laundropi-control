@@ -182,6 +182,7 @@ const App: React.FC = () => {
   const [cameraRefreshTick, setCameraRefreshTick] = useState(0);
   const [cameraPreviewErrors, setCameraPreviewErrors] = useState<Record<string, boolean>>({});
   const [cameraWarmup, setCameraWarmup] = useState<Record<string, number>>({});
+  const [cameraFrameSources, setCameraFrameSources] = useState<Record<string, string>>({});
   const [cameraVisibility, setCameraVisibility] = useState<Record<string, boolean>>({});
   const [isPageVisible, setIsPageVisible] = useState(() => {
     if (typeof document === 'undefined') return true;
@@ -189,6 +190,7 @@ const App: React.FC = () => {
   });
   const cameraObserverRef = React.useRef<IntersectionObserver | null>(null);
   const cameraCardRefs = React.useRef<Map<string, HTMLDivElement>>(new Map());
+  const cameraFrameInFlightRef = React.useRef<Set<string>>(new Set());
   const isLaundryOnline = React.useCallback((laundry: Laundry) => {
     const fresh = laundry.lastHeartbeat ? (Date.now() - laundry.lastHeartbeat) < AGENT_STALE_MS : false;
     return serverOnline && laundry.isOnline && fresh;
@@ -396,6 +398,7 @@ const App: React.FC = () => {
     setCameraRefreshTick(0);
     setCameraPreviewErrors({});
     setCameraWarmup({});
+    setCameraFrameSources({});
     setAgentId(null);
     setAgentHeartbeat(null);
     setIsMockMode(true);
@@ -895,6 +898,63 @@ const App: React.FC = () => {
   }, [cameraRefreshTick, cameraConfigs]);
 
   useEffect(() => {
+    if (!isAuthenticated || activeTab !== Tab.DASHBOARD || !isPageVisible) return;
+    if (typeof Image === 'undefined') return;
+    const inFlight = cameraFrameInFlightRef.current;
+    laundries.forEach(laundry => {
+      const online = isLaundryOnline(laundry);
+      const cameras = getCameraSlots(laundry.id);
+      cameras.forEach(camera => {
+        const key = cameraDraftKey(laundry.id, camera.id);
+        const inView = cameraVisibility[key];
+        const shouldPollCamera = isPageVisible && (inView ?? true);
+        const canRequestPreview = camera.enabled && shouldPollCamera && (camera.sourceType === 'pattern' || online);
+        if (!canRequestPreview) return;
+        if (inFlight.has(key)) return;
+        const src = buildCameraPreviewUrl(camera, laundry.id);
+        inFlight.add(key);
+        const img = new Image();
+        img.onload = () => {
+          inFlight.delete(key);
+          setCameraFrameSources(prev => (prev[key] === src ? prev : { ...prev, [key]: src }));
+          setCameraPreviewErrors(prev => {
+            if (!prev[key]) return prev;
+            const next = { ...prev };
+            delete next[key];
+            return next;
+          });
+          setCameraWarmup(prev => {
+            if (!prev[key]) return prev;
+            const next = { ...prev };
+            delete next[key];
+            return next;
+          });
+        };
+        img.onerror = () => {
+          inFlight.delete(key);
+          setCameraPreviewErrors(prev => (prev[key] ? prev : { ...prev, [key]: true }));
+          setCameraWarmup(prev => {
+            if (!prev[key]) return prev;
+            const next = { ...prev };
+            delete next[key];
+            return next;
+          });
+        };
+        img.src = src;
+      });
+    });
+  }, [
+    activeTab,
+    cameraConfigs,
+    cameraRefreshTick,
+    cameraVisibility,
+    isAuthenticated,
+    isPageVisible,
+    laundries,
+    isLaundryOnline,
+  ]);
+
+  useEffect(() => {
     if (typeof document === 'undefined') return;
     const handleVisibility = () => {
       setIsPageVisible(document.visibilityState === 'visible');
@@ -1234,6 +1294,12 @@ const App: React.FC = () => {
         return next;
       });
     }
+    setCameraFrameSources(prev => {
+      if (!prev[key]) return prev;
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
     setCameraConfigs(prev => {
       const existing = prev[agentId] || [];
       const found = existing.some(cam => cam.id === camera.id);
@@ -1705,14 +1771,16 @@ const App: React.FC = () => {
                     const saveError = cameraSaveErrors[draftKey];
                     const inView = cameraVisibility[draftKey];
                     const shouldPollCamera = isPageVisible && (inView ?? true);
-                    const previewError = cameraPreviewErrors[draftKey];
+                    const frameSrc = cameraFrameSources[draftKey];
+                    const hasFrame = Boolean(frameSrc);
                     const warmupStartedAt = cameraWarmup[draftKey];
                     const warmupActive = typeof warmupStartedAt === 'number'
                       ? (Date.now() - warmupStartedAt) < CAMERA_WARMUP_MS
                       : false;
-                    const canShowPreview = camera.enabled && shouldPollCamera && (camera.sourceType === 'pattern' || online);
-                    const showPlaceholder = !canShowPreview || Boolean(previewError);
-                    const showLoading = (toggleLoading && camera.enabled) || warmupActive;
+                    const canRequestPreview = camera.enabled && shouldPollCamera && (camera.sourceType === 'pattern' || online);
+                    const canShowPreview = canRequestPreview && hasFrame;
+                    const showLoading = (toggleLoading && camera.enabled) || (warmupActive && !hasFrame);
+                    const showPlaceholder = !canShowPreview && !showLoading;
                     const cameraToggleDisabled = !serverOnline || saving;
                     const showMockBadge = camera.sourceType === 'pattern' && !warmupActive;
                     return (
@@ -1766,34 +1834,11 @@ const App: React.FC = () => {
                           </div>
                         </div>
                         <div className="relative aspect-video bg-slate-900">
-                          {canShowPreview && (
+                          {canShowPreview && frameSrc && (
                             <img
-                              src={buildCameraPreviewUrl(camera, laundry.id)}
+                              src={frameSrc}
                               alt={`${camera.name} feed`}
-                              onError={() => {
-                                setCameraPreviewErrors(prev => (prev[draftKey] ? prev : { ...prev, [draftKey]: true }));
-                                setCameraWarmup(prev => {
-                                  if (!prev[draftKey]) return prev;
-                                  const next = { ...prev };
-                                  delete next[draftKey];
-                                  return next;
-                                });
-                              }}
-                              onLoad={() => {
-                                setCameraPreviewErrors(prev => {
-                                  if (!prev[draftKey]) return prev;
-                                  const next = { ...prev };
-                                  delete next[draftKey];
-                                  return next;
-                                });
-                                setCameraWarmup(prev => {
-                                  if (!prev[draftKey]) return prev;
-                                  const next = { ...prev };
-                                  delete next[draftKey];
-                                  return next;
-                                });
-                              }}
-                              className={`absolute inset-0 w-full h-full object-cover transition-opacity ${previewError ? 'opacity-0' : 'opacity-100'}`}
+                              className="absolute inset-0 w-full h-full object-cover"
                             />
                           )}
                           {showLoading && (
