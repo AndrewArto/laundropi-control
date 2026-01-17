@@ -68,6 +68,7 @@ let cameraConfigs: CameraConfig[] = [];
 const cameraConfigById = new Map<string, CameraConfig>();
 const cameraFrameCache = new Map<string, { ts: number; contentType: string; data: string }>();
 const cameraFrameInFlight = new Map<string, Promise<FrameResult>>();
+let lastGo2rtcPayload: string | null = null;
 
 const ensureGo2rtcDir = () => {
   const dir = path.dirname(GO2RTC_CONFIG_PATH);
@@ -82,11 +83,11 @@ ensureGo2rtcDir();
 
 const buildGo2rtcConfig = (cameras: CameraConfig[]) => {
   const lines: string[] = ['streams:'];
-  const active = cameras.filter(cam => cam.enabled && cam.sourceType === 'rtsp' && cam.rtspUrl);
-  if (!active.length) {
-    lines.push('  # no RTSP cameras configured');
+  const sources = cameras.filter(cam => cam.sourceType === 'rtsp' && cam.rtspUrl);
+  if (!sources.length) {
+    lines.push('  # no RTSP camera sources configured');
   } else {
-    active.forEach(cam => {
+    sources.forEach(cam => {
       const quoted = JSON.stringify(cam.rtspUrl);
       lines.push(`  ${cam.streamKey}: ${quoted}`);
     });
@@ -97,7 +98,20 @@ const buildGo2rtcConfig = (cameras: CameraConfig[]) => {
 const writeGo2rtcConfig = (cameras: CameraConfig[]) => {
   try {
     const payload = buildGo2rtcConfig(cameras);
+    if (payload === lastGo2rtcPayload) return;
+    try {
+      if (fs.existsSync(GO2RTC_CONFIG_PATH)) {
+        const existing = fs.readFileSync(GO2RTC_CONFIG_PATH, 'utf8');
+        if (existing === payload) {
+          lastGo2rtcPayload = payload;
+          return;
+        }
+      }
+    } catch (err) {
+      console.warn('[agent] failed to read existing go2rtc config', err);
+    }
     fs.writeFileSync(GO2RTC_CONFIG_PATH, payload, 'utf8');
+    lastGo2rtcPayload = payload;
     if (GO2RTC_RELOAD_URL) {
       void fetch(GO2RTC_RELOAD_URL, { method: 'POST' }).catch(err => {
         console.warn('[agent] go2rtc reload failed', err);
