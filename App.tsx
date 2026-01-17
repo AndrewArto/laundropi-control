@@ -329,11 +329,12 @@ const App: React.FC = () => {
 
   const cameraPreviewBase = resolveBaseUrl();
 
-  const buildCameraPreviewUrl = (camera: CameraConfig, agentId: string) => {
+  const buildCameraPreviewUrl = (camera: CameraConfig, agentId: string, options?: { cacheBust?: boolean }) => {
     const raw = camera.previewUrl || `/api/agents/${encodeURIComponent(agentId)}/cameras/${encodeURIComponent(camera.id)}/frame`;
     const absolute = cameraPreviewBase && !/^https?:\/\//i.test(raw)
       ? `${cameraPreviewBase}${raw.startsWith('/') ? '' : '/'}${raw}`
       : raw;
+    if (options?.cacheBust === false) return absolute;
     const sep = absolute.includes('?') ? '&' : '?';
     return `${absolute}${sep}t=${cameraRefreshTick}`;
   };
@@ -920,8 +921,9 @@ const App: React.FC = () => {
         const shouldPollCamera = isPageVisible && (inView ?? true);
         const canRequestPreview = camera.enabled && shouldPollCamera && (camera.sourceType === 'pattern' || online);
         if (!canRequestPreview) return;
+        if (camera.sourceType === 'pattern') return;
         if (inFlight.has(key)) return;
-        const src = buildCameraPreviewUrl(camera, laundry.id);
+        const src = buildCameraPreviewUrl(camera, laundry.id, { cacheBust: true });
         inFlight.add(key);
         const img = new Image();
         img.onload = () => {
@@ -1782,7 +1784,11 @@ const App: React.FC = () => {
                     const inView = cameraVisibility[draftKey];
                     const shouldPollCamera = isPageVisible && (inView ?? true);
                     const frameSrc = cameraFrameSources[draftKey];
-                    const hasFrame = Boolean(frameSrc);
+                    const patternFallbackSrc = camera.sourceType === 'pattern'
+                      ? buildCameraPreviewUrl(camera, laundry.id, { cacheBust: false })
+                      : undefined;
+                    const effectiveFrameSrc = frameSrc || patternFallbackSrc;
+                    const hasFrame = Boolean(effectiveFrameSrc);
                     const warmupStartedAt = cameraWarmup[draftKey];
                     const warmupActive = typeof warmupStartedAt === 'number'
                       ? (Date.now() - warmupStartedAt) < CAMERA_WARMUP_MS
@@ -1844,9 +1850,9 @@ const App: React.FC = () => {
                           </div>
                         </div>
                         <div className="relative aspect-video bg-slate-900">
-                          {canShowPreview && frameSrc && (
+                          {canShowPreview && effectiveFrameSrc && (
                             <img
-                              src={frameSrc}
+                              src={effectiveFrameSrc}
                               alt={`${camera.name} feed`}
                               className="absolute inset-0 w-full h-full object-cover"
                             />
