@@ -15,6 +15,7 @@ enum Tab {
 const AGENT_STALE_MS = 8_000;
 const PENDING_RELAY_TTL_MS = 5_000;
 const CAMERA_FRAME_REFRESH_MS = 3_000;
+const CAMERA_WARMUP_MS = 15_000;
 const DEFAULT_AGENT_ID = (import.meta as any).env?.VITE_AGENT_ID ?? 'dev-agent';
 const DEFAULT_AGENT_SECRET = (import.meta as any).env?.VITE_AGENT_SECRET ?? 'secret';
 const IS_TEST_ENV = (typeof process !== 'undefined' && process.env?.NODE_ENV === 'test') || false;
@@ -180,6 +181,7 @@ const App: React.FC = () => {
   const [cameraSaveErrors, setCameraSaveErrors] = useState<Record<string, string | null>>({});
   const [cameraRefreshTick, setCameraRefreshTick] = useState(0);
   const [cameraPreviewErrors, setCameraPreviewErrors] = useState<Record<string, boolean>>({});
+  const [cameraWarmup, setCameraWarmup] = useState<Record<string, number>>({});
   const [cameraVisibility, setCameraVisibility] = useState<Record<string, boolean>>({});
   const [isPageVisible, setIsPageVisible] = useState(() => {
     if (typeof document === 'undefined') return true;
@@ -393,6 +395,7 @@ const App: React.FC = () => {
     setCameraSaveErrors({});
     setCameraRefreshTick(0);
     setCameraPreviewErrors({});
+    setCameraWarmup({});
     setAgentId(null);
     setAgentHeartbeat(null);
     setIsMockMode(true);
@@ -877,6 +880,21 @@ const App: React.FC = () => {
   }, [isAuthenticated, activeTab, isPageVisible]);
 
   useEffect(() => {
+    if (!Object.keys(cameraWarmup).length) return;
+    const now = Date.now();
+    setCameraWarmup(prev => {
+      let next = prev;
+      Object.entries(prev).forEach(([key, startedAt]) => {
+        if (now - startedAt > CAMERA_WARMUP_MS) {
+          if (next === prev) next = { ...prev };
+          delete next[key];
+        }
+      });
+      return next;
+    });
+  }, [cameraRefreshTick, cameraConfigs]);
+
+  useEffect(() => {
     if (typeof document === 'undefined') return;
     const handleVisibility = () => {
       setIsPageVisible(document.visibilityState === 'visible');
@@ -1199,6 +1217,23 @@ const App: React.FC = () => {
     setCameraSaving(prev => ({ ...prev, [key]: true }));
     setCameraToggleLoading(prev => ({ ...prev, [key]: true }));
     setCameraSaveErrors(prev => ({ ...prev, [key]: null }));
+    setCameraWarmup(prev => {
+      if (!nextEnabled) {
+        if (!prev[key]) return prev;
+        const next = { ...prev };
+        delete next[key];
+        return next;
+      }
+      return { ...prev, [key]: Date.now() };
+    });
+    if (nextEnabled) {
+      setCameraPreviewErrors(prev => {
+        if (!prev[key]) return prev;
+        const next = { ...prev };
+        delete next[key];
+        return next;
+      });
+    }
     setCameraConfigs(prev => {
       const existing = prev[agentId] || [];
       const found = existing.some(cam => cam.id === camera.id);
@@ -1217,6 +1252,7 @@ const App: React.FC = () => {
           : [...existing, { ...camera, enabled: res.camera.enabled }];
         return { ...prev, [agentId]: nextList };
       });
+      void fetchCameras();
     } catch (err) {
       if (handleAuthFailure(err)) return;
       console.error('Camera enable toggle failed', err);
@@ -1670,9 +1706,15 @@ const App: React.FC = () => {
                     const inView = cameraVisibility[draftKey];
                     const shouldPollCamera = isPageVisible && (inView ?? true);
                     const previewError = cameraPreviewErrors[draftKey];
+                    const warmupStartedAt = cameraWarmup[draftKey];
+                    const warmupActive = typeof warmupStartedAt === 'number'
+                      ? (Date.now() - warmupStartedAt) < CAMERA_WARMUP_MS
+                      : false;
                     const canShowPreview = camera.enabled && shouldPollCamera && (camera.sourceType === 'pattern' || online);
                     const showPlaceholder = !canShowPreview || Boolean(previewError);
+                    const showLoading = (toggleLoading && camera.enabled) || warmupActive;
                     const cameraToggleDisabled = !serverOnline || saving;
+                    const showMockBadge = camera.sourceType === 'pattern' && !warmupActive;
                     return (
                       <div
                         key={camera.id}
@@ -1694,7 +1736,7 @@ const App: React.FC = () => {
                           </div>
                           <div className="flex items-center gap-2 shrink-0">
                             <span className="text-[10px] uppercase tracking-wide text-slate-500">{camera.position}</span>
-                            {camera.sourceType === 'pattern' && (
+                            {showMockBadge && (
                               <span className="text-[10px] px-2 py-1 rounded-full border border-amber-400 text-amber-200 bg-amber-500/10">
                                 Mock
                               </span>
@@ -1728,17 +1770,33 @@ const App: React.FC = () => {
                             <img
                               src={buildCameraPreviewUrl(camera, laundry.id)}
                               alt={`${camera.name} feed`}
-                              onError={() => setCameraPreviewErrors(prev => (prev[draftKey] ? prev : { ...prev, [draftKey]: true }))}
-                              onLoad={() => setCameraPreviewErrors(prev => {
-                                if (!prev[draftKey]) return prev;
-                                const next = { ...prev };
-                                delete next[draftKey];
-                                return next;
-                              })}
+                              onError={() => {
+                                setCameraPreviewErrors(prev => (prev[draftKey] ? prev : { ...prev, [draftKey]: true }));
+                                setCameraWarmup(prev => {
+                                  if (!prev[draftKey]) return prev;
+                                  const next = { ...prev };
+                                  delete next[draftKey];
+                                  return next;
+                                });
+                              }}
+                              onLoad={() => {
+                                setCameraPreviewErrors(prev => {
+                                  if (!prev[draftKey]) return prev;
+                                  const next = { ...prev };
+                                  delete next[draftKey];
+                                  return next;
+                                });
+                                setCameraWarmup(prev => {
+                                  if (!prev[draftKey]) return prev;
+                                  const next = { ...prev };
+                                  delete next[draftKey];
+                                  return next;
+                                });
+                              }}
                               className={`absolute inset-0 w-full h-full object-cover transition-opacity ${previewError ? 'opacity-0' : 'opacity-100'}`}
                             />
                           )}
-                          {toggleLoading && (
+                          {showLoading && (
                             <div className="absolute inset-0 bg-slate-950/80 flex items-center justify-center text-slate-200">
                               <div className="flex items-center gap-2 text-xs">
                                 <span className="w-4 h-4 rounded-full border-2 border-slate-500 border-t-slate-200 animate-spin" />
@@ -1746,7 +1804,7 @@ const App: React.FC = () => {
                               </div>
                             </div>
                           )}
-                          {showPlaceholder && !toggleLoading && (
+                          {showPlaceholder && !showLoading && (
                             <div className="absolute inset-0 flex items-center justify-center text-slate-500">
                               <CameraOffIcon className="w-16 h-16" />
                             </div>
