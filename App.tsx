@@ -191,6 +191,7 @@ const App: React.FC = () => {
   const cameraObserverRef = React.useRef<IntersectionObserver | null>(null);
   const cameraCardRefs = React.useRef<Map<string, HTMLDivElement>>(new Map());
   const cameraFrameInFlightRef = React.useRef<Set<string>>(new Set());
+  const cameraRefCallbacks = React.useRef<Map<string, (node: HTMLDivElement | null) => void>>(new Map());
   const isLaundryOnline = React.useCallback((laundry: Laundry) => {
     const fresh = laundry.lastHeartbeat ? (Date.now() - laundry.lastHeartbeat) < AGENT_STALE_MS : false;
     return serverOnline && laundry.isOnline && fresh;
@@ -378,6 +379,13 @@ const App: React.FC = () => {
     cameraCardRefs.current.set(key, node);
     if (observer) observer.observe(node);
   }, []);
+  const getCameraCardRef = React.useCallback((key: string) => {
+    const cached = cameraRefCallbacks.current.get(key);
+    if (cached) return cached;
+    const cb = (node: HTMLDivElement | null) => registerCameraCard(key, node);
+    cameraRefCallbacks.current.set(key, cb);
+    return cb;
+  }, [registerCameraCard]);
 
   const resetUiState = () => {
     setRelays([]);
@@ -399,6 +407,8 @@ const App: React.FC = () => {
     setCameraPreviewErrors({});
     setCameraWarmup({});
     setCameraFrameSources({});
+    cameraCardRefs.current.clear();
+    cameraRefCallbacks.current.clear();
     setAgentId(null);
     setAgentHeartbeat(null);
     setIsMockMode(true);
@@ -1786,7 +1796,7 @@ const App: React.FC = () => {
                     return (
                       <div
                         key={camera.id}
-                        ref={(node) => registerCameraCard(draftKey, node)}
+                        ref={getCameraCardRef(draftKey)}
                         className="bg-slate-900/40 border border-slate-700 rounded-lg overflow-hidden"
                       >
                         <div className="flex items-center justify-between gap-2 px-3 py-2 border-b border-slate-700">
