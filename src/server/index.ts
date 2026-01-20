@@ -785,6 +785,7 @@ const pushCameraConfigToAgent = (agentId: string) => {
   if (!target || target.socket.readyState !== WebSocket.OPEN) return;
   ensureDefaultCameras(agentId);
   const cameras = listCameras(agentId).map(buildCameraAgentPayload);
+  console.log('[central] pushCameraConfigToAgent', agentId, JSON.stringify(cameras, null, 2));
   target.socket.send(JSON.stringify({ type: 'update_cameras', cameras }));
 };
 
