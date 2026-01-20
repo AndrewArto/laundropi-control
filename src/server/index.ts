@@ -444,10 +444,12 @@ const buildStreamKey = (camera: CameraRow) => {
 const attachRtspCredentials = (rtspUrl: string, username?: string | null, password?: string | null) => {
   try {
     const parsed = new URL(rtspUrl);
+
+    // Only attach credentials to RTSP URLs, pass through other protocols (ffmpeg:, etc.)
     if (parsed.protocol !== 'rtsp:') {
-      console.warn(`[central] Invalid RTSP URL protocol: ${parsed.protocol}`);
       return rtspUrl;
     }
+
     // URL constructor automatically encodes credentials to prevent injection
     if (username) parsed.username = encodeURIComponent(username);
     if (password) parsed.password = encodeURIComponent(password);
