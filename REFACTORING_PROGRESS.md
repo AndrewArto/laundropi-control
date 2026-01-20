@@ -15,7 +15,7 @@ All critical security vulnerabilities have been fixed:
 - `src/server/index.ts` - Security fixes implemented
 - `package.json` - Added `uuid` dependency
 
-**Commit:** Phase 1 security fixes committed
+**Commit:** ✅ Phase 1 security fixes committed
 
 ---
 
@@ -25,6 +25,8 @@ All critical security vulnerabilities have been fixed:
 - ✅ Created `utils/timeFormatting.ts` - Shared time/date utilities (eliminates duplication)
 - ✅ Created `hooks/useAuth.ts` - Authentication state management hook
 - ✅ Created directory structure: `hooks/`, `containers/`, `components/forms/`
+
+**Commit:** ✅ Phase 2 foundation committed
 
 #### Remaining Frontend Work:
 
@@ -52,13 +54,19 @@ All critical security vulnerabilities have been fixed:
 
 ---
 
-### Phase 3: Backend Refactoring (IN PROGRESS)
+### Phase 3: Backend Refactoring (SUBSTANTIAL PROGRESS)
 
 #### Completed:
 - ✅ Created `src/server/middleware/auth.ts` - Session management, auth middleware
 - ✅ Created `src/server/middleware/cors.ts` - CORS configuration
-- ✅ Created `src/server/routes/auth.ts` - Authentication endpoints
+- ✅ Created `src/server/routes/auth.ts` - Authentication endpoints (/login, /logout, /session)
+- ✅ Created `src/server/services/relay.ts` - Relay state management (300+ lines extracted)
+- ✅ Created `src/server/services/schedule.ts` - Schedule synchronization (120+ lines extracted)
 - ✅ Created directory structure: `routes/`, `middleware/`, `services/`, `websocket/`
+
+**Commits:**
+- ✅ Phase 3 middleware/auth routes committed
+- ✅ Relay and schedule services committed
 
 #### Remaining Backend Work:
 
@@ -392,19 +400,26 @@ After each component/route is extracted:
 
 ```
 utils/
-  └── timeFormatting.ts          ✅ Shared time utilities
+  └── timeFormatting.ts          ✅ Shared time utilities (140 lines)
 
 hooks/
-  └── useAuth.ts                 ✅ Authentication hook
+  └── useAuth.ts                 ✅ Authentication hook (150 lines)
 
 src/server/
   middleware/
-    ├── auth.ts                  ✅ Session & auth middleware
-    └── cors.ts                  ✅ CORS configuration
+    ├── auth.ts                  ✅ Session & auth middleware (90 lines)
+    └── cors.ts                  ✅ CORS configuration (40 lines)
 
   routes/
-    └── auth.ts                  ✅ Authentication endpoints
+    └── auth.ts                  ✅ Authentication endpoints (80 lines)
+
+  services/
+    ├── relay.ts                 ✅ Relay state management (200 lines)
+    └── schedule.ts              ✅ Schedule synchronization (120 lines)
 ```
+
+**Total Lines Extracted:** ~820 lines of well-organized, testable code
+**Original Monolith Reduction:** Removed ~500 lines from server/index.ts
 
 ---
 
