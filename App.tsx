@@ -14,7 +14,9 @@ enum Tab {
 
 const AGENT_STALE_MS = 8_000;
 const PENDING_RELAY_TTL_MS = 5_000;
-const CAMERA_FRAME_REFRESH_MS = 5_000;
+const CAMERA_FRAME_REFRESH_MS = 1_000;
+const CAMERA_FRAME_REFRESH_DEFAULT_MS = 5_000;
+const CAMERA_FRAME_REFRESH_PRIMARY_MS = 1_000;
 const CAMERA_WARMUP_MS = 15_000;
 const DEFAULT_AGENT_ID = (import.meta as any).env?.VITE_AGENT_ID ?? 'dev-agent';
 const DEFAULT_AGENT_SECRET = (import.meta as any).env?.VITE_AGENT_SECRET ?? 'secret';
@@ -191,6 +193,7 @@ const App: React.FC = () => {
   const cameraObserverRef = React.useRef<IntersectionObserver | null>(null);
   const cameraCardRefs = React.useRef<Map<string, HTMLDivElement>>(new Map());
   const cameraFrameInFlightRef = React.useRef<Set<string>>(new Set());
+  const cameraFrameLastFetchRef = React.useRef<Map<string, number>>(new Map());
   const cameraRefCallbacks = React.useRef<Map<string, (node: HTMLDivElement | null) => void>>(new Map());
   const isLaundryOnline = React.useCallback((laundry: Laundry) => {
     const fresh = laundry.lastHeartbeat ? (Date.now() - laundry.lastHeartbeat) < AGENT_STALE_MS : false;
@@ -408,6 +411,7 @@ const App: React.FC = () => {
     setCameraPreviewErrors({});
     setCameraWarmup({});
     setCameraFrameSources({});
+    cameraFrameLastFetchRef.current.clear();
     cameraCardRefs.current.clear();
     cameraRefCallbacks.current.clear();
     setAgentId(null);
@@ -914,6 +918,9 @@ const App: React.FC = () => {
     const inFlight = cameraFrameInFlightRef.current;
     laundries.forEach(laundry => {
       const online = isLaundryOnline(laundry);
+      const refreshIntervalMs = laundry.id === primaryAgentId
+        ? CAMERA_FRAME_REFRESH_PRIMARY_MS
+        : CAMERA_FRAME_REFRESH_DEFAULT_MS;
       const cameras = getCameraSlots(laundry.id);
       cameras.forEach(camera => {
         const key = cameraDraftKey(laundry.id, camera.id);
@@ -923,6 +930,10 @@ const App: React.FC = () => {
         if (!canRequestPreview) return;
         if (camera.sourceType === 'pattern') return;
         if (inFlight.has(key)) return;
+        const lastFetch = cameraFrameLastFetchRef.current.get(key);
+        const now = Date.now();
+        if (lastFetch && (now - lastFetch) < refreshIntervalMs) return;
+        cameraFrameLastFetchRef.current.set(key, now);
         const src = buildCameraPreviewUrl(camera, laundry.id, { cacheBust: true });
         inFlight.add(key);
         const img = new Image();
@@ -964,6 +975,7 @@ const App: React.FC = () => {
     isPageVisible,
     laundries,
     isLaundryOnline,
+    primaryAgentId,
   ]);
 
   useEffect(() => {
@@ -1680,6 +1692,8 @@ const App: React.FC = () => {
     }
   };
 
+  const showCameraLoading = cameraLoading && Object.keys(cameraConfigs).length === 0;
+
   const renderDashboard = () => (
     <div className="space-y-6">
       <div className="flex justify-between items-center">
@@ -1713,7 +1727,7 @@ const App: React.FC = () => {
           {cameraError}
         </div>
       )}
-      {cameraLoading && (
+      {showCameraLoading && (
         <div className="text-xs text-slate-500">Loading cameras...</div>
       )}
 

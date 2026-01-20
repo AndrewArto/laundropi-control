@@ -15,7 +15,8 @@
     "dev:local:central": "CENTRAL_ENV_FILE=./config/local/central.env npm run dev:central",
     "dev:local:agent:brandoa1": "AGENT_ENV_FILE=./config/local/agent.brandoa1.env npm run dev:agent",
     "dev:local:agent:brandoa2": "AGENT_ENV_FILE=./config/local/agent.brandoa2.env npm run dev:agent",
-    "dev:local": "concurrently \"npm:dev:local:ui\" \"npm:dev:local:central\" \"npm:dev:local:agent:brandoa1\" \"npm:dev:local:agent:brandoa2\"",
+    "dev:local": "concurrently \"npm:dev:local:ui\" \"npm:dev:local:central\" \"npm:dev:local:agent:brandoa1\" \"npm:dev:local:agent:brandoa2\" \"npm:dev:local:go2rtc\"",
+    "dev:local:go2rtc": "bash scripts/go2rtc-dev.sh",
     "deploy:mock:dev": "bash deploy/deploy-mock.sh dev",
     "deploy:mock:prod": "bash deploy/deploy-mock.sh prod",
     "build": "vite build",
@@ -33,6 +34,7 @@
     "lucide-react": "^0.453.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
+    "uuid": "^13.0.0",
     "ws": "^8.18.0"
   },
   "devDependencies": {
@@ -43,6 +45,7 @@
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@types/supertest": "^6.0.3",
+    "@types/uuid": "^10.0.0",
     "@types/ws": "^8.5.12",
     "@vitejs/plugin-react": "^4.3.2",
     "concurrently": "^9.1.0",
