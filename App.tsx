@@ -941,8 +941,6 @@ const App: React.FC = () => {
     if (typeof Image === 'undefined') return;
     laundries.forEach(laundry => {
       const online = isLaundryOnline(laundry);
-      // Use 1 second refresh for all cameras
-      const refreshIntervalMs = CAMERA_FRAME_REFRESH_MS;
       const cameras = getCameraSlots(laundry.id);
       cameras.forEach(camera => {
         const key = cameraDraftKey(laundry.id, camera.id);
@@ -954,14 +952,10 @@ const App: React.FC = () => {
           return;
         }
         if (camera.sourceType === 'pattern') return;
-        // Check timing - only fetch if enough time has passed since last fetch
+        // Note: Server has proper rate limiting (1000ms cache), so we don't need client-side throttling
+        // Just fetch on every tick and let server handle caching
         const lastFetch = cameraFrameLastFetchRef.current.get(key);
         const now = Date.now();
-        if (lastFetch && (now - lastFetch) < refreshIntervalMs) {
-          console.log(`[Camera] ${key} skip: fetched ${now - lastFetch}ms ago (need ${refreshIntervalMs}ms)`);
-          return;
-        }
-        // Note: We allow concurrent requests - browser handles it and timing check prevents spam
         console.log(`[Camera] Fetching ${key}, last: ${lastFetch ? now - lastFetch : 'never'}ms ago`);
         cameraFrameLastFetchRef.current.set(key, now);
         const src = buildCameraPreviewUrl(camera, laundry.id, { cacheBust: true });
