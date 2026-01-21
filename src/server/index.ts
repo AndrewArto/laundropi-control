@@ -801,20 +801,30 @@ const requestCameraFrame = (agentId: string, cameraId: string): Promise<CameraFr
   const now = Date.now();
   const cached = cameraFrameCache.get(cacheKey);
   const cacheMs = getCameraFrameCacheMs(agentId);
-  if (cacheMs > 0) {
-    if (cached && now - cached.ts <= cacheMs) {
-      return Promise.resolve({ contentType: cached.contentType, data: cached.data });
-    }
+
+  // Check cache freshness
+  if (cacheMs > 0 && cached && now - cached.ts <= cacheMs) {
+    console.log(`[camera] ${cacheKey} CACHE HIT (age: ${now - cached.ts}ms, limit: ${cacheMs}ms)`);
+    return Promise.resolve({ contentType: cached.contentType, data: cached.data });
   }
+
+  // Check in-flight request
   const inflight = cameraFrameInFlight.get(cacheKey);
-  if (inflight) return inflight;
-  const minIntervalMs = getCameraFrameMinIntervalMs(agentId);
-  if (minIntervalMs > 0) {
-    const lastFetch = cameraFrameLastFetch.get(cacheKey);
-    if (cached && lastFetch && (now - lastFetch) < minIntervalMs) {
-      return Promise.resolve({ contentType: cached.contentType, data: cached.data });
-    }
+  if (inflight) {
+    console.log(`[camera] ${cacheKey} IN FLIGHT (returning existing promise)`);
+    return inflight;
   }
+
+  // Check minimum interval
+  const minIntervalMs = getCameraFrameMinIntervalMs(agentId);
+  const lastFetch = cameraFrameLastFetch.get(cacheKey);
+  if (minIntervalMs > 0 && cached && lastFetch && (now - lastFetch) < minIntervalMs) {
+    console.log(`[camera] ${cacheKey} INTERVAL BLOCK (last fetch: ${now - lastFetch}ms ago, need: ${minIntervalMs}ms)`);
+    return Promise.resolve({ contentType: cached.contentType, data: cached.data });
+  }
+
+  console.log(`[camera] ${cacheKey} FETCH NEW (last: ${lastFetch ? now - lastFetch : 'never'}ms ago)`);
+  cameraFrameLastFetch.set(cacheKey, now);
 
   const target = agents.get(agentId);
   if (!target || target.socket.readyState !== WebSocket.OPEN) {
@@ -1826,6 +1836,7 @@ wss.on('connection', (socket) => {
           const buffer = Buffer.from(msg.data, 'base64');
           const contentType = typeof msg.contentType === 'string' ? msg.contentType : 'image/jpeg';
           const fetchedAt = Date.now();
+          console.log(`[camera] ${pending.cacheKey} RECEIVED from agent (${buffer.length} bytes)`);
           cameraFrameLastFetch.set(pending.cacheKey, fetchedAt);
           if (CAMERA_FRAME_CACHE_MS > 0) {
             cameraFrameCache.set(pending.cacheKey, { contentType, data: buffer, ts: fetchedAt });
@@ -1833,6 +1844,7 @@ wss.on('connection', (socket) => {
           cameraFrameInFlight.delete(pending.cacheKey);
           pending.resolve({ contentType, data: buffer });
         } else {
+          console.log(`[camera] ${pending.cacheKey} ERROR from agent: ${msg.error || 'unknown'}`);
           cameraFrameInFlight.delete(pending.cacheKey);
           pending.reject(new Error(msg.error || 'camera frame failed'));
         }
