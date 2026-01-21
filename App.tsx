@@ -951,6 +951,7 @@ const App: React.FC = () => {
         const lastFetch = cameraFrameLastFetchRef.current.get(key);
         const now = Date.now();
         if (lastFetch && (now - lastFetch) < refreshIntervalMs) return;
+        console.log(`[Camera] Fetching ${key}, last: ${lastFetch ? now - lastFetch : 'never'}ms ago`);
         cameraFrameLastFetchRef.current.set(key, now);
         const src = buildCameraPreviewUrl(camera, laundry.id, { cacheBust: true });
         inFlight.add(key);
