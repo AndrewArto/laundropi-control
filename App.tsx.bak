@@ -11,7 +11,6 @@ import { useSchedules } from './hooks/useSchedules';
 import { useUsers } from './hooks/useUsers';
 import { useGroups } from './hooks/useGroups';
 import { DashboardView } from './components/views/DashboardView';
-import { SchedulesView } from './components/views/SchedulesView';
 
 enum Tab {
   DASHBOARD = 'DASHBOARD',
@@ -1449,42 +1448,420 @@ const App: React.FC = () => {
     />
   );
 
-const renderScheduler = () => (
-    <SchedulesView
-      laundries={laundries}
-      newGroupSelections={newGroupSelections}
-      newGroupName={newGroupName}
-      newGroupOnTime={newGroupOnTime}
-      newGroupOffTime={newGroupOffTime}
-      newGroupDays={newGroupDays}
-      isNewGroupVisible={isNewGroupVisible}
-      groups={groups}
-      editingGroupId={editingGroupId}
-      controlsDisabled={controlsDisabled}
-      groupSelectionTouched={groupSelectionTouched}
-      serverOnline={serverOnline}
-      groupEditAreaRef={groupEditAreaRef}
-      DAYS_OF_WEEK={DAYS_OF_WEEK}
-      setIsNewGroupVisible={setIsNewGroupVisible}
-      setNewGroupName={setNewGroupName}
-      setNewGroupSelections={setNewGroupSelections}
-      setNewGroupOnTime={setNewGroupOnTime}
-      setNewGroupOffTime={setNewGroupOffTime}
-      setNewGroupDays={setNewGroupDays}
-      setGroups={setGroups}
-      setEditingGroupId={setEditingGroupId}
-      setGroupSelectionTouched={setGroupSelectionTouched}
-      isLaundryOnline={isLaundryOnline}
-      selectionKey={selectionKey}
-      dedupeSelections={dedupeSelections}
-      normalizeTimeInput={normalizeTimeInput}
-      to24h={to24h}
-      handleAddGroup={handleAddGroup}
-      handleUpdateGroup={handleUpdateGroup}
-      handleDeleteGroup={handleDeleteGroup}
-      handleToggleGroupPower={handleToggleGroupPower}
-    />
-  );
+  const renderScheduler = () => {
+    const visibleByLaundry = laundries.map(l => ({
+      ...l,
+      visibleRelays: (l.relays || []).filter(r => !r.isHidden),
+    }));
+    const selectionSet = new Set(newGroupSelections.map(sel => selectionKey(sel.agentId, sel.relayId)));
+    return (
+      <div className="space-y-6 max-w-full overflow-hidden">
+          <div className="space-y-3 max-w-full overflow-hidden">
+          <div className="flex items-center gap-2 justify-between">
+            <div className="flex items-center gap-2">
+              <CalendarClock className="w-5 h-5 text-emerald-400" />
+              <h2 className="text-xl font-bold text-white">Groups & Schedules</h2>
+            </div>
+            <button
+              onClick={() => {
+                setIsNewGroupVisible(v => !v);
+                if (!isNewGroupVisible) {
+                  setNewGroupName('New Group');
+                  setNewGroupSelections([]);
+                  setGroupSelectionTouched(false);
+                  setNewGroupOnTime('');
+                  setNewGroupOffTime('');
+                  setNewGroupDays([...DAYS_OF_WEEK]);
+                }
+              }}
+              disabled={controlsDisabled}
+              className="flex items-center gap-2 px-3 py-2 text-sm font-semibold rounded-lg border border-indigo-500 text-indigo-200 bg-indigo-500/10 hover:bg-indigo-500/20 disabled:opacity-50"
+            >
+              <Plus className="w-4 h-4" />
+              {isNewGroupVisible ? 'Close' : 'Add Group'}
+            </button>
+          </div>
+          {isNewGroupVisible && (
+          <div className="bg-slate-800 border border-slate-700 rounded-xl p-4 space-y-4 max-w-full w-full box-border">
+            <div className="grid gap-3">
+              <input
+                value={newGroupName}
+                onChange={(e) => setNewGroupName(e.target.value)}
+                disabled={controlsDisabled}
+                className="w-full bg-slate-900/60 border border-slate-700 rounded-md px-3 py-2 text-sm text-slate-100 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                placeholder="Group name"
+              />
+              <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="text-sm text-slate-300">Laundries</p>
+                    <div className="flex gap-2 text-xs">
+                      <button
+                        onClick={() => {
+                          setGroupSelectionTouched(true);
+                          const allVisible = visibleByLaundry.flatMap(l => l.visibleRelays.map(r => ({ agentId: l.id, relayId: r.id })));
+                          setNewGroupSelections(dedupeSelections(allVisible));
+                        }}
+                        disabled={controlsDisabled}
+                        className="px-2 py-1 rounded-md border border-slate-600 text-slate-300 hover:border-slate-500 hover:text-white transition-colors"
+                      >
+                        Select all
+                      </button>
+                      <button
+                      onClick={() => setNewGroupSelections([])}
+                      disabled={controlsDisabled}
+                      className="px-2 py-1 rounded-md border border-slate-600 text-slate-300 hover:border-slate-500 hover:text-white transition-colors"
+                    >
+                      Deselect all
+                    </button>
+                    </div>
+                </div>
+                <div className="space-y-3">
+                  {visibleByLaundry.map(l => {
+                    const online = isLaundryOnline(l);
+                    return (
+                      <div key={`laundry-select-${l.id}`} className="bg-slate-900/40 border border-slate-700 rounded-lg p-3 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="text-sm text-slate-200">{l.name}</span>
+                          <span className={`text-[11px] px-2 py-0.5 rounded-full border ${online ? 'border-emerald-500 text-emerald-200 bg-emerald-500/10' : 'border-slate-600 text-slate-400'}`}>
+                            {online ? 'Online' : 'Offline'}
+                          </span>
+                        </div>
+                        <div className="flex gap-2 flex-wrap">
+                          {l.visibleRelays.length === 0 && <span className="text-xs text-slate-500">No relays</span>}
+                          {l.visibleRelays.map(relay => {
+                            const key = selectionKey(l.id, relay.id);
+                            const selected = selectionSet.has(key);
+                            return (
+                              <button
+                                key={`${l.id}-relay-${relay.id}`}
+                                onClick={() => {
+                                  setGroupSelectionTouched(true);
+                                  setNewGroupSelections(prev => {
+                                    const exists = prev.some(s => selectionKey(s.agentId, s.relayId) === key);
+                                    const next = exists
+                                      ? prev.filter(s => selectionKey(s.agentId, s.relayId) !== key)
+                                      : [...prev, { agentId: l.id, relayId: relay.id }];
+                                    return dedupeSelections(next);
+                                  });
+                                }}
+                                disabled={controlsDisabled}
+                                className={`px-3 py-2 rounded-lg text-xs font-medium border transition-colors flex items-center gap-2 ${
+                                  selected ? 'bg-indigo-600 text-white border-indigo-500' : 'bg-slate-900/40 text-slate-300 border-slate-700 hover:border-slate-600'
+                                } ${controlsDisabled ? 'opacity-60 cursor-not-allowed' : ''}`}
+                              >
+                                <span className={`w-2 h-2 rounded-full ${relay.isOn ? 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.7)]' : 'bg-slate-500'}`}></span>
+                                {relay.name}
+                                <span className="text-[10px] text-slate-400">#{relay.id}</span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-full">
+                <div className="min-w-0 w-full overflow-hidden">
+                  <label className="text-sm text-slate-300 block mb-1">On time (optional)</label>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    pattern="^([01]?\\d|2[0-3]):[0-5]\\d$"
+                    maxLength={5}
+                    placeholder="HH:MM"
+                    value={newGroupOnTime}
+                    onChange={(e) => setNewGroupOnTime(normalizeTimeInput(e.target.value))}
+                    onBlur={(e) => setNewGroupOnTime(to24h(e.target.value) || '')}
+                    disabled={controlsDisabled}
+                    className="time-input w-full max-w-full min-w-0 box-border bg-slate-900/50 border border-slate-700 rounded-xl px-3 py-3 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all"
+                    style={{ color: '#dbeafe', WebkitTextFillColor: '#dbeafe' }}
+                  />
+                </div>
+                <div className="min-w-0 w-full overflow-hidden">
+                  <label className="text-sm text-slate-300 block mb-1">Off time (optional)</label>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    pattern="^([01]?\\d|2[0-3]):[0-5]\\d$"
+                    maxLength={5}
+                    placeholder="HH:MM"
+                    value={newGroupOffTime}
+                    onChange={(e) => setNewGroupOffTime(normalizeTimeInput(e.target.value))}
+                    onBlur={(e) => setNewGroupOffTime(to24h(e.target.value) || '')}
+                    disabled={controlsDisabled}
+                    className="time-input w-full max-w-full min-w-0 box-border bg-slate-900/50 border border-slate-700 rounded-xl px-3 py-3 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all"
+                    style={{ color: '#dbeafe', WebkitTextFillColor: '#dbeafe' }}
+                  />
+                </div>
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-sm text-slate-300">Days</p>
+                  <div className="flex gap-2 text-xs">
+                    <button
+                      onClick={() => setNewGroupDays([...DAYS_OF_WEEK])}
+                      disabled={controlsDisabled}
+                      className="px-2 py-1 rounded-md border border-slate-600 text-slate-300 hover:border-slate-500 hover:text-white transition-colors"
+                    >
+                      Select all
+                    </button>
+                    <button
+                      onClick={() => setNewGroupDays([])}
+                      disabled={controlsDisabled}
+                      className="px-2 py-1 rounded-md border border-slate-600 text-slate-300 hover:border-slate-500 hover:text-white transition-colors"
+                    >
+                      Deselect all
+                    </button>
+                  </div>
+                </div>
+                <div className="flex gap-2 flex-wrap">
+                  {DAYS_OF_WEEK.map(day => (
+                    <button
+                      key={day}
+                      onClick={() => setNewGroupDays(prev => prev.includes(day) ? prev.filter(d => d !== day) : [...prev, day])}
+                      disabled={controlsDisabled}
+                      className={`px-3 py-2 rounded-lg text-xs font-semibold border transition-colors ${newGroupDays.includes(day) ? 'bg-indigo-600 text-white border-indigo-500' : 'bg-slate-900/40 text-slate-300 border-slate-700 hover:border-slate-600'}`}
+                    >
+                      {day}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <button
+                onClick={handleAddGroup}
+                className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-sm font-semibold transition-colors disabled:opacity-50"
+                disabled={!newGroupName.trim() || newGroupSelections.length === 0 || controlsDisabled}
+              >
+                Save Group
+              </button>
+            </div>
+          </div>
+          )}
+        </div>
+
+        <div className="space-y-3">
+          {groups.length === 0 ? (
+            <div className="text-center py-12 text-slate-500 bg-slate-800/30 rounded-xl border border-dashed border-slate-700">
+              No groups yet.
+            </div>
+          ) : (
+            groups.map(group => {
+              const selectedSet = new Set(
+                (group.entries || []).flatMap(e => (e.relayIds || []).map(id => selectionKey(e.agentId, id)))
+              );
+              return (
+                <div
+                  key={group.id}
+                  ref={editingGroupId === group.id ? groupEditAreaRef : null}
+                  className="bg-slate-800 p-4 rounded-xl border border-slate-700 space-y-3"
+                >
+                  <div className="flex justify-between gap-3 items-start">
+                    {editingGroupId === group.id ? (
+                      <input
+                        value={group.name}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setGroups(prev => prev.map(g => g.id === group.id ? { ...g, name: val } : g));
+                          handleUpdateGroup(group.id, { name: val });
+                        }}
+                        className="flex-1 bg-slate-900/60 border border-slate-700 rounded-md px-3 py-2 text-sm text-slate-100 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                      />
+                    ) : (
+                      <span className="flex-1 text-sm font-semibold text-white">{group.name}</span>
+                    )}
+                    <div className="flex gap-2 items-center">
+                      <button
+                        onClick={() => handleToggleGroupPower(group.id, 'ON')}
+                        disabled={controlsDisabled}
+                        className="px-3 py-2 rounded-md text-xs font-semibold border border-emerald-500 text-emerald-200 bg-emerald-500/10"
+                      >
+                        ON
+                      </button>
+                      <button
+                        onClick={() => handleToggleGroupPower(group.id, 'OFF')}
+                        disabled={controlsDisabled}
+                        className="px-3 py-2 rounded-md text-xs font-semibold border border-red-500 text-red-200 bg-red-500/10"
+                      >
+                        OFF
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    {visibleByLaundry.map(l => {
+                      const relaysToShow = editingGroupId === group.id
+                        ? l.visibleRelays
+                        : l.visibleRelays.filter(relay => selectedSet.has(selectionKey(l.id, relay.id)));
+                      if (!relaysToShow.length && editingGroupId !== group.id) return null;
+                      return (
+                        <div key={`group-${group.id}-${l.id}`} className="bg-slate-900/40 border border-slate-700 rounded-lg p-3">
+                          <div className="text-xs text-slate-300 mb-2">{l.name}</div>
+                          <div className="flex gap-2 flex-wrap">
+                            {relaysToShow.length === 0 && <span className="text-xs text-slate-500">No relays</span>}
+                            {relaysToShow.map(relay => {
+                              const key = selectionKey(l.id, relay.id);
+                              const selected = selectedSet.has(key);
+                              return (
+                                <button
+                                  key={key}
+                                  onClick={() => {
+                                    if (editingGroupId !== group.id) return;
+                                    setGroups(prev => prev.map(g => {
+                                      if (g.id !== group.id) return g;
+                                      const entriesMap = new Map<string, number[]>();
+                                      const baseEntries = g.entries && g.entries.length ? g.entries : [{ agentId: l.id, relayIds: [] }];
+                                      baseEntries.forEach(e => entriesMap.set(e.agentId, [...e.relayIds]));
+                                      const list = entriesMap.get(l.id) || [];
+                                      const exists = list.includes(relay.id);
+                                      const nextList = exists ? list.filter(r => r !== relay.id) : [...list, relay.id];
+                                      entriesMap.set(l.id, nextList);
+                                      const entriesArr = Array.from(entriesMap.entries()).map(([agentId, relayIds]) => ({
+                                        agentId,
+                                        relayIds: relayIds.filter(Boolean),
+                                      })).filter(e => e.relayIds.length);
+                                      const nextGroup = { ...g, entries: entriesArr, relayIds: entriesArr.flatMap(e => e.relayIds) };
+                                      handleUpdateGroup(group.id, { entries: entriesArr });
+                                      return nextGroup;
+                                    }));
+                                  }}
+                                  disabled={controlsDisabled || editingGroupId !== group.id}
+                                  className={`px-3 py-2 rounded-lg text-xs font-medium border transition-colors flex items-center gap-2 ${
+                                    selected ? 'bg-indigo-600 text-white border-indigo-500' : 'bg-slate-900/40 text-slate-300 border-slate-700 hover:border-slate-600'
+                                  } ${editingGroupId === group.id ? '' : 'opacity-60 cursor-not-allowed'}`}
+                                >
+                                  <span
+                                    className="w-2 h-2 rounded-full"
+                                    style={relay.isOn ? { backgroundColor: '#34d399', boxShadow: '0 0 8px rgba(52, 211, 153, 0.7)' } : { backgroundColor: '#64748b' }}
+                                  />
+                                  {relay.name}
+                                  <span className="text-[10px] text-slate-400">#{relay.id}</span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-full">
+                    <div className="min-w-0 w-full overflow-hidden">
+                      <label className="text-sm text-slate-300 block mb-1">On time</label>
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        pattern="^([01]?\\d|2[0-3]):[0-5]\\d$"
+                        maxLength={5}
+                        placeholder="HH:MM"
+                        value={group.onTime || ''}
+                        onChange={(e) => {
+                          if (editingGroupId !== group.id) return;
+                          const next = normalizeTimeInput(e.target.value);
+                          setGroups(prev => prev.map(g => g.id === group.id ? { ...g, onTime: next } : g));
+                        }}
+                        onBlur={(e) => {
+                          if (editingGroupId !== group.id) return;
+                          const val = to24h(e.target.value);
+                          setGroups(prev => prev.map(g => g.id === group.id ? { ...g, onTime: val || '' } : g));
+                          handleUpdateGroup(group.id, { onTime: val || null });
+                        }}
+                        disabled={editingGroupId !== group.id || controlsDisabled}
+                        className={`time-input w-full max-w-full min-w-0 box-border bg-slate-900/50 border border-slate-700 rounded-xl px-3 py-3 text-sm text-slate-100 placeholder-slate-300 focus:outline-none focus:border-indigo-200 focus:ring-1 focus:ring-indigo-200 disabled:text-slate-100 disabled:placeholder-slate-200 disabled:opacity-100 transition-all ${editingGroupId === group.id ? '' : 'opacity-60 cursor-not-allowed'}`}
+                        style={{ color: '#dbeafe', WebkitTextFillColor: '#dbeafe' }}
+                      />
+                    </div>
+                    <div className="min-w-0 w-full overflow-hidden">
+                      <label className="text-sm text-slate-300 block mb-1">Off time</label>
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        pattern="^([01]?\\d|2[0-3]):[0-5]\\d$"
+                        maxLength={5}
+                        placeholder="HH:MM"
+                        value={group.offTime || ''}
+                        onChange={(e) => {
+                          if (editingGroupId !== group.id) return;
+                          const next = normalizeTimeInput(e.target.value);
+                          setGroups(prev => prev.map(g => g.id === group.id ? { ...g, offTime: next } : g));
+                        }}
+                        onBlur={(e) => {
+                          if (editingGroupId !== group.id) return;
+                          const val = to24h(e.target.value);
+                          setGroups(prev => prev.map(g => g.id === group.id ? { ...g, offTime: val || '' } : g));
+                          handleUpdateGroup(group.id, { offTime: val || null });
+                        }}
+                        disabled={editingGroupId !== group.id || controlsDisabled}
+                        className={`time-input w-full max-w-full min-w-0 box-border bg-slate-900/50 border border-slate-700 rounded-xl px-3 py-3 text-sm text-slate-100 placeholder-slate-300 focus:outline-none focus:border-indigo-200 focus:ring-1 focus:ring-indigo-200 disabled:text-slate-100 disabled:placeholder-slate-200 disabled:opacity-100 transition-all ${editingGroupId === group.id ? '' : 'opacity-60 cursor-not-allowed'}`}
+                        style={{ color: '#dbeafe', WebkitTextFillColor: '#dbeafe' }}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between">
+                    <div className="flex gap-2 flex-wrap">
+                      {DAYS_OF_WEEK.map(day => {
+                        const active = group.days?.includes(day);
+                        return (
+                          <button
+                            key={day}
+                            onClick={() => {
+                              if (editingGroupId !== group.id) return;
+                          const nextDays = active ? group.days.filter(d => d !== day) : [...(group.days || []), day];
+                          setGroups(prev => prev.map(g => g.id === group.id ? { ...g, days: nextDays } : g));
+                          handleUpdateGroup(group.id, { days: nextDays });
+                        }}
+                            disabled={editingGroupId !== group.id || controlsDisabled}
+                            className={`text-[10px] uppercase px-3 py-1 rounded border ${
+                              active ? 'text-indigo-200 bg-indigo-500/20 border-indigo-500/50' : 'text-slate-500 bg-slate-900/40 border-slate-700'
+                            } ${editingGroupId === group.id ? '' : 'opacity-60 cursor-not-allowed'}`}
+                          >
+                            {day.slice(0, 1)}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <div className="flex gap-2 items-center">
+                      <label className="text-xs text-slate-300 flex items-center gap-1">
+                        <input
+                          type="checkbox"
+                          checked={group.active}
+                          onChange={(e) => handleUpdateGroup(group.id, { active: e.target.checked })}
+                          disabled={controlsDisabled}
+                        />
+                        Schedule active
+                      </label>
+                      <div className="flex gap-2">
+                    <button
+                      onClick={() => setEditingGroupId(editingGroupId === group.id ? null : group.id)}
+                      data-edit-toggle="group"
+                      disabled={controlsDisabled}
+                      className={`p-2 rounded-lg ${editingGroupId === group.id ? 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/40' : 'text-slate-400 hover:text-white hover:bg-slate-700/50'}`}
+                      aria-label="Edit group"
+                    >
+                      <Pencil className="w-5 h-5" />
+                    </button>
+                    <button
+                      onClick={() => handleDeleteGroup(group.id)}
+                      disabled={controlsDisabled}
+                      className="p-2 text-slate-500 hover:text-red-400 hover:bg-red-400/10 rounded-lg transition-colors"
+                    >
+                      <Trash2 className="w-5 h-5" />
+                    </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+    </div>
+    );
+  };
 
   const renderRevenueCalendar = () => {
     const range = getMonthRange(revenueDate);
