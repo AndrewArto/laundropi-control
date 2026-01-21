@@ -951,12 +951,21 @@ const App: React.FC = () => {
         const inView = cameraVisibility[key];
         const shouldPollCamera = isPageVisible && (inView ?? true);
         const canRequestPreview = camera.enabled && shouldPollCamera && (camera.sourceType === 'pattern' || online);
-        if (!canRequestPreview) return;
+        if (!canRequestPreview) {
+          console.log(`[Camera] ${key} skip: enabled=${camera.enabled}, poll=${shouldPollCamera}, type=${camera.sourceType}, online=${online}`);
+          return;
+        }
         if (camera.sourceType === 'pattern') return;
-        if (inFlight.has(key)) return;
+        if (inFlight.has(key)) {
+          console.log(`[Camera] ${key} skip: already in flight`);
+          return;
+        }
         const lastFetch = cameraFrameLastFetchRef.current.get(key);
         const now = Date.now();
-        if (lastFetch && (now - lastFetch) < refreshIntervalMs) return;
+        if (lastFetch && (now - lastFetch) < refreshIntervalMs) {
+          console.log(`[Camera] ${key} skip: fetched ${now - lastFetch}ms ago (need ${refreshIntervalMs}ms)`);
+          return;
+        }
         console.log(`[Camera] Fetching ${key}, last: ${lastFetch ? now - lastFetch : 'never'}ms ago`);
         cameraFrameLastFetchRef.current.set(key, now);
         const src = buildCameraPreviewUrl(camera, laundry.id, { cacheBust: true });
