@@ -15,8 +15,6 @@ enum Tab {
 const AGENT_STALE_MS = 8_000;
 const PENDING_RELAY_TTL_MS = 5_000;
 const CAMERA_FRAME_REFRESH_MS = 1_000;
-const CAMERA_FRAME_REFRESH_DEFAULT_MS = 5_000;
-const CAMERA_FRAME_REFRESH_PRIMARY_MS = 1_000;
 const CAMERA_WARMUP_MS = 15_000;
 const DEFAULT_AGENT_ID = (import.meta as any).env?.VITE_AGENT_ID ?? 'dev-agent';
 const DEFAULT_AGENT_SECRET = (import.meta as any).env?.VITE_AGENT_SECRET ?? 'secret';
@@ -937,9 +935,8 @@ const App: React.FC = () => {
     const inFlight = cameraFrameInFlightRef.current;
     laundries.forEach(laundry => {
       const online = isLaundryOnline(laundry);
-      const refreshIntervalMs = laundry.id === primaryAgentId
-        ? CAMERA_FRAME_REFRESH_PRIMARY_MS
-        : CAMERA_FRAME_REFRESH_DEFAULT_MS;
+      // Use 1 second refresh for all cameras
+      const refreshIntervalMs = CAMERA_FRAME_REFRESH_MS;
       const cameras = getCameraSlots(laundry.id);
       cameras.forEach(camera => {
         const key = cameraDraftKey(laundry.id, camera.id);
