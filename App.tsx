@@ -911,10 +911,19 @@ const App: React.FC = () => {
 
   useEffect(() => {
     if (!isAuthenticated || activeTab !== Tab.DASHBOARD || !isPageVisible) return;
+    console.log('[Camera Timer] Starting interval, will tick every', CAMERA_FRAME_REFRESH_MS, 'ms');
+    const startTime = Date.now();
     const timer = setInterval(() => {
-      setCameraRefreshTick((prev) => prev + 1);
+      const elapsed = Date.now() - startTime;
+      setCameraRefreshTick((prev) => {
+        console.log('[Camera Timer] Tick', prev + 1, 'at', elapsed, 'ms');
+        return prev + 1;
+      });
     }, CAMERA_FRAME_REFRESH_MS);
-    return () => clearInterval(timer);
+    return () => {
+      console.log('[Camera Timer] Clearing interval');
+      clearInterval(timer);
+    };
   }, [isAuthenticated, activeTab, isPageVisible]);
 
   useEffect(() => {
