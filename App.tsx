@@ -194,7 +194,6 @@ const App: React.FC = () => {
   });
   const cameraObserverRef = React.useRef<IntersectionObserver | null>(null);
   const cameraCardRefs = React.useRef<Map<string, HTMLDivElement>>(new Map());
-  const cameraFrameInFlightRef = React.useRef<Set<string>>(new Set());
   const cameraFrameLastFetchRef = React.useRef<Map<string, number>>(new Map());
   const cameraRefCallbacks = React.useRef<Map<string, (node: HTMLDivElement | null) => void>>(new Map());
   const isLaundryOnline = React.useCallback((laundry: Laundry) => {
@@ -940,7 +939,6 @@ const App: React.FC = () => {
       return;
     }
     if (typeof Image === 'undefined') return;
-    const inFlight = cameraFrameInFlightRef.current;
     laundries.forEach(laundry => {
       const online = isLaundryOnline(laundry);
       // Use 1 second refresh for all cameras
@@ -956,28 +954,24 @@ const App: React.FC = () => {
           return;
         }
         if (camera.sourceType === 'pattern') return;
-        if (inFlight.has(key)) {
-          console.log(`[Camera] ${key} skip: already in flight`);
-          return;
-        }
+        // Check timing - only fetch if enough time has passed since last fetch
         const lastFetch = cameraFrameLastFetchRef.current.get(key);
         const now = Date.now();
         if (lastFetch && (now - lastFetch) < refreshIntervalMs) {
           console.log(`[Camera] ${key} skip: fetched ${now - lastFetch}ms ago (need ${refreshIntervalMs}ms)`);
           return;
         }
+        // Note: We allow concurrent requests - browser handles it and timing check prevents spam
         console.log(`[Camera] Fetching ${key}, last: ${lastFetch ? now - lastFetch : 'never'}ms ago`);
         cameraFrameLastFetchRef.current.set(key, now);
         const src = buildCameraPreviewUrl(camera, laundry.id, { cacheBust: true });
-        inFlight.add(key);
         const img = new Image();
-        // Timeout to prevent slow images from blocking forever
+        // Timeout to cleanup on slow/failed loads
         const timeoutId = setTimeout(() => {
-          inFlight.delete(key);
-        }, 5000); // 5 second timeout
+          console.log(`[Camera] ${key} timeout after 5s`);
+        }, 5000);
         img.onload = () => {
           clearTimeout(timeoutId);
-          inFlight.delete(key);
           setCameraFrameSources(prev => (prev[key] === src ? prev : { ...prev, [key]: src }));
           setCameraPreviewErrors(prev => {
             if (!prev[key]) return prev;
@@ -994,7 +988,6 @@ const App: React.FC = () => {
         };
         img.onerror = () => {
           clearTimeout(timeoutId);
-          inFlight.delete(key);
           setCameraPreviewErrors(prev => (prev[key] ? prev : { ...prev, [key]: true }));
           setCameraWarmup(prev => {
             if (!prev[key]) return prev;
