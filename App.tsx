@@ -9,6 +9,8 @@ import { useRelays } from './hooks/useRelays';
 import { useCameras } from './hooks/useCameras';
 import { useRevenue } from './hooks/useRevenue';
 import { useSchedules } from './hooks/useSchedules';
+import { useUsers } from './hooks/useUsers';
+import { useGroups } from './hooks/useGroups';
 
 enum Tab {
   DASHBOARD = 'DASHBOARD',
@@ -238,28 +240,81 @@ const App: React.FC = () => {
     resetRevenueState,
   } = useRevenue();
 
+  const {
+    users,
+    usersLoading,
+    usersError,
+    userCreateError,
+    userCreateLoading,
+    newUserName,
+    newUserPassword,
+    newUserRole,
+    userRoleDrafts,
+    userPasswordDrafts,
+    userSaving,
+    userSaveErrors,
+    setUsers,
+    setUsersLoading,
+    setUsersError,
+    setUserCreateError,
+    setUserCreateLoading,
+    setNewUserName,
+    setNewUserPassword,
+    setNewUserRole,
+    setUserRoleDrafts,
+    setUserPasswordDrafts,
+    setUserSaving,
+    setUserSaveErrors,
+    fetchUsers: fetchUsersFromHook,
+    handleCreateUser: handleCreateUserFromHook,
+    handleRoleSave: handleRoleSaveFromHook,
+    handlePasswordSave: handlePasswordSaveFromHook,
+    resetUsersState,
+  } = useUsers();
+
+  const {
+    groups,
+    newGroupName,
+    newGroupSelections,
+    newGroupOnTime,
+    newGroupOffTime,
+    newGroupDays,
+    editingGroupId,
+    groupSelectionTouched,
+    isNewGroupVisible,
+    setGroups,
+    setNewGroupName,
+    setNewGroupSelections,
+    setNewGroupOnTime,
+    setNewGroupOffTime,
+    setNewGroupDays,
+    setEditingGroupId,
+    setGroupSelectionTouched,
+    setIsNewGroupVisible,
+    handleAddGroup: handleAddGroupFromHook,
+    handleUpdateGroup: handleUpdateGroupFromHook,
+    handleDeleteGroup: handleDeleteGroupFromHook,
+    handleToggleGroupPower: handleToggleGroupPowerFromHook,
+    dedupeSelections,
+    resetGroupsState,
+  } = useGroups();
+
   // State reset callback for useAuth
   const resetUiStateCallback = React.useCallback(() => {
     resetRelayState();
     resetCameraState();
     resetSchedulesState();
     resetRevenueState();
-    setGroups([]);
+    resetUsersState();
+    resetGroupsState();
     setLaundries([]);
     setAgentId(null);
     setAgentHeartbeat(null);
     setIsMockMode(true);
     setIsRelayEditMode(false);
-    setNewGroupName('');
-    setNewGroupSelections([]);
-    setNewGroupOnTime('');
-    setNewGroupOffTime('');
-    setNewGroupDays([...DAYS_OF_WEEK]);
-    setGroupSelectionTouched(false);
-    setEditingGroupId(null);
     setServerOnline(true);
     setActiveTab(Tab.DASHBOARD);
-  }, [resetRelayState, resetCameraState, resetSchedulesState, resetRevenueState]);
+  }, [resetRelayState, resetCameraState, resetSchedulesState, resetRevenueState, resetUsersState, resetGroupsState]);
 
   const {
     isAuthenticated,
@@ -278,16 +333,7 @@ const App: React.FC = () => {
   } = useAuth(resetUiStateCallback);
 
   const [activeTab, setActiveTab] = useState<Tab>(Tab.DASHBOARD);
-  const [groups, setGroups] = useState<RelayGroup[]>([]);
   const [currentTime, setCurrentTime] = useState(new Date());
-  const [newGroupName, setNewGroupName] = useState('');
-  const [newGroupSelections, setNewGroupSelections] = useState<RelaySelection[]>([]);
-  const [newGroupOnTime, setNewGroupOnTime] = useState<string>('');
-  const [newGroupOffTime, setNewGroupOffTime] = useState<string>('');
-  const [newGroupDays, setNewGroupDays] = useState<string[]>([...DAYS_OF_WEEK]);
-  const [editingGroupId, setEditingGroupId] = useState<string | null>(null);
-  const [groupSelectionTouched, setGroupSelectionTouched] = useState(false);
-  const [isNewGroupVisible, setIsNewGroupVisible] = useState(false);
   const latestRelaysRef = React.useRef<Relay[]>([]);
   const [isRelayEditMode, setIsRelayEditMode] = useState(false);
   const isRelayEditModeRef = React.useRef(false);
@@ -345,19 +391,6 @@ const App: React.FC = () => {
   const pendingRelayStatesRef = React.useRef<Map<string, { state: boolean; updatedAt: number }>>(new Map());
   const laundryIdKey = React.useMemo(() => laundries.map(l => l.id).sort().join('|'), [laundries]);
 
-  const [users, setUsers] = useState<UiUser[]>([]);
-  const [usersLoading, setUsersLoading] = useState(false);
-  const [usersError, setUsersError] = useState<string | null>(null);
-  const [userCreateError, setUserCreateError] = useState<string | null>(null);
-  const [userCreateLoading, setUserCreateLoading] = useState(false);
-  const [newUserName, setNewUserName] = useState('');
-  const [newUserPassword, setNewUserPassword] = useState('');
-  const [newUserRole, setNewUserRole] = useState<'admin' | 'user'>('user');
-  const [userRoleDrafts, setUserRoleDrafts] = useState<Record<string, 'admin' | 'user'>>({});
-  const [userPasswordDrafts, setUserPasswordDrafts] = useState<Record<string, string>>({});
-  const [userSaving, setUserSaving] = useState<Record<string, boolean>>({});
-  const [userSaveErrors, setUserSaveErrors] = useState<Record<string, string | null>>({});
-
   const applyVisibility = (agentId: string, list: Relay[]) => {
     const visMap = relayVisibilityRef.current;
     return list.map(r => {
@@ -401,14 +434,6 @@ const App: React.FC = () => {
       return laundry;
     });
     return mutated ? merged : items;
-  };
-  const dedupeSelections = (items: RelaySelection[]) => {
-    const map = new Map<string, RelaySelection>();
-    items.forEach(sel => {
-      const key = selectionKey(sel.agentId, sel.relayId);
-      map.set(key, sel);
-    });
-    return Array.from(map.values());
   };
 
   const normalizeGroupPayload = (g: any, fallbackAgentId: string): RelayGroup => {
@@ -862,27 +887,6 @@ const App: React.FC = () => {
     URL.revokeObjectURL(url);
   };
 
-  const fetchUsers = async () => {
-    setUsersLoading(true);
-    setUsersError(null);
-    try {
-      const list = await ApiService.listUsers();
-      setUsers(list);
-      const roleDrafts: Record<string, 'admin' | 'user'> = {};
-      list.forEach(user => {
-        roleDrafts[user.username] = user.role;
-      });
-      setUserRoleDrafts(roleDrafts);
-      setUserSaveErrors({});
-    } catch (err) {
-      if (handleAuthFailure(err)) return;
-      console.error('User list fetch failed', err);
-      setUsersError('Unable to load users.');
-    } finally {
-      setUsersLoading(false);
-    }
-  };
-
   useEffect(() => {
     if (!isAuthenticated) return;
     setIsLoading(true);
@@ -1061,8 +1065,8 @@ const App: React.FC = () => {
   useEffect(() => {
     if (!isAuthenticated || authUser?.role !== 'admin') return;
     if (activeTab !== Tab.SETTINGS) return;
-    fetchUsers();
-  }, [activeTab, isAuthenticated, authUser?.role]);
+    fetchUsersFromHook(handleAuthFailure);
+  }, [activeTab, isAuthenticated, authUser?.role, fetchUsersFromHook, handleAuthFailure]);
 
   useEffect(() => {
     const primary = laundries[0];
@@ -1369,7 +1373,7 @@ const App: React.FC = () => {
         updatedGroups.forEach((g, idx) => {
           const prevGroup = prev[idx];
           if (JSON.stringify(prevGroup?.entries || []) !== JSON.stringify(g.entries || [])) {
-            handleUpdateGroup(g.id, { entries: g.entries });
+            handleUpdateGroupFromHook(g.id, { entries: g.entries }, primaryAgentId, laundries, to24h, normalizeGroupPayload);
           }
         });
         return updatedGroups;
@@ -1396,255 +1400,15 @@ const App: React.FC = () => {
     await ApiService.setRelayIcon(agent, id, iconType as RelayType);
   };
 
-  const handleAddGroup = async () => {
-    const selections = dedupeSelections(newGroupSelections);
-    if (selections.length === 0) return;
-    const onTime24 = to24h(newGroupOnTime);
-    const offTime24 = to24h(newGroupOffTime);
-    const entriesMap = new Map<string, number[]>();
-    selections.forEach(sel => {
-      const list = entriesMap.get(sel.agentId) || [];
-      list.push(sel.relayId);
-      entriesMap.set(sel.agentId, list);
-    });
-    const entries = Array.from(entriesMap.entries()).map(([agentId, relayIds]) => ({ agentId, relayIds }));
-    const payload: Omit<RelayGroup, 'id'> = {
-      name: newGroupName.trim(),
-      entries,
-      relayIds: entries.flatMap(e => e.relayIds),
-      onTime: onTime24,
-      offTime: offTime24,
-      days: newGroupDays,
-      active: Boolean(onTime24 || offTime24)
-    };
-    const added = await ApiService.addGroup(primaryAgentId, payload);
-    setGroups(prev => [...prev, normalizeGroupPayload(added, primaryAgentId)]);
-    setActiveTab(Tab.SCHEDULE);
-    // reset form
-    setNewGroupName('');
-    setNewGroupSelections([]);
-    setGroupSelectionTouched(false);
-    setNewGroupOnTime('');
-    setNewGroupOffTime('');
-    setNewGroupDays([...DAYS_OF_WEEK]);
-    setIsNewGroupVisible(false);
-  };
-
-  const handleUpdateGroup = async (groupId: string, updates: Partial<RelayGroup>) => {
-    const existing = groups.find(g => g.id === groupId);
-    if (!existing) return;
-    const visibleMap = new Map<string, Set<number>>();
-    laundries.forEach(l => {
-      visibleMap.set(l.id, new Set((l.relays || []).filter(r => !r.isHidden).map(r => r.id)));
-    });
-
-    const requestedEntries = Array.isArray((updates as any)?.entries) ? (updates as any).entries as RelayGroup['entries'] : undefined;
-    const fallbackRelayIds = updates.relayIds ?? existing.relayIds ?? [];
-
-    let entries: RelayGroup['entries'] = requestedEntries && requestedEntries.length
-      ? requestedEntries.map(e => ({ agentId: e.agentId, relayIds: Array.isArray(e.relayIds) ? e.relayIds.map(Number) : [] }))
-      : (existing.entries && existing.entries.length
-        ? existing.entries
-        : [{ agentId: primaryAgentId, relayIds: fallbackRelayIds.map(Number) }]);
-
-    entries = entries.map(e => {
-      const allowed = visibleMap.get(e.agentId);
-      const relayIds = allowed ? Array.from(new Set(e.relayIds.filter(id => allowed.has(id)))) : [];
-      return { ...e, relayIds };
-    }).filter(e => e.relayIds.length);
-
-    const next: RelayGroup = {
-      ...existing,
-      ...updates,
-      entries,
-      relayIds: entries.flatMap(e => e.relayIds),
-      onTime: updates.onTime === undefined ? existing.onTime : to24h(updates.onTime),
-      offTime: updates.offTime === undefined ? existing.offTime : to24h(updates.offTime),
-    };
-    const saved = await ApiService.updateGroup(primaryAgentId, groupId, {
-      name: next.name,
-      entries: next.entries,
-      relayIds: next.relayIds,
-      onTime: next.onTime || null,
-      offTime: next.offTime || null,
-      days: next.days,
-      active: next.active
-    });
-    setGroups(prev => prev.map(g => g.id === groupId ? normalizeGroupPayload(saved, primaryAgentId) : g));
-  };
-
-  const handleDeleteGroup = async (id: string) => {
-    setGroups(prev => prev.filter(g => g.id !== id));
-    await ApiService.deleteGroup(primaryAgentId, id);
-  };
-
-  const handleToggleGroupPower = async (id: string, action: 'ON' | 'OFF') => {
-    if (!serverOnline) return;
-    const group = groups.find(g => g.id === id);
-    const targetEntries = group?.entries || [];
-    const desiredOn = action === 'ON';
-
-    targetEntries.forEach(entry => {
-      entry.relayIds.forEach(rid => markPendingRelayState(entry.agentId, rid, desiredOn));
-      updateLaundryRelays(entry.agentId, rels => rels.map(r => entry.relayIds.includes(r.id) ? { ...r, isOn: desiredOn } : r));
-      if (entry.agentId === primaryAgentId) {
-        setRelays(prev => {
-          const updated = prev.map(r => entry.relayIds.includes(r.id) ? { ...r, isOn: desiredOn } : r);
-          latestRelaysRef.current = updated;
-          return updated;
-        });
-      }
-    });
-
-    try {
-      await ApiService.toggleGroup(primaryAgentId, id, action);
-    } catch (err) {
-      if (handleAuthFailure(err)) return;
-      console.error('Group toggle failed', err);
-    }
-  };
-
-  const updateRevenueDraft = (agentId: string, updater: (draft: RevenueDraft) => RevenueDraft) => {
-    setRevenueDrafts(prev => {
-      const current = prev[agentId] || buildRevenueDraft(revenueEntries[agentId] || null);
-      return { ...prev, [agentId]: updater(current) };
-    });
-    setRevenueSaveErrors(prev => ({ ...prev, [agentId]: null }));
-  };
-
-  const addRevenueDeduction = (agentId: string) => {
-    updateRevenueDraft(agentId, draft => ({
-      ...draft,
-      deductions: [...draft.deductions, { id: makeDeductionId(), amount: '', comment: '' }],
-    }));
-  };
-
-  const removeRevenueDeduction = (agentId: string, id: string) => {
-    updateRevenueDraft(agentId, draft => ({
-      ...draft,
-      deductions: draft.deductions.filter(item => item.id !== id),
-    }));
-  };
-
-  const handleRevenueSave = async (agentId: string) => {
-    const draft = revenueDrafts[agentId] || buildRevenueDraft(revenueEntries[agentId] || null);
-    const coinsTotal = parseMoneyInput(draft.coinsTotal);
-    const euroCoinsCount = parseCountInput(draft.euroCoinsCount);
-    const billsTotal = parseMoneyInput(draft.billsTotal);
-    if (coinsTotal === null) {
-      setRevenueSaveErrors(prev => ({ ...prev, [agentId]: 'Coins total must be a non-negative number.' }));
-      return;
-    }
-    if (euroCoinsCount === null) {
-      setRevenueSaveErrors(prev => ({ ...prev, [agentId]: 'Coin count must be a non-negative integer.' }));
-      return;
-    }
-    if (billsTotal === null) {
-      setRevenueSaveErrors(prev => ({ ...prev, [agentId]: 'Bills total must be a non-negative number.' }));
-      return;
-    }
-    const { list: deductions, error } = normalizeDeductionDrafts(draft.deductions);
-    if (error) {
-      setRevenueSaveErrors(prev => ({ ...prev, [agentId]: error }));
-      return;
-    }
-    setRevenueSaving(prev => ({ ...prev, [agentId]: true }));
-    setRevenueSaveErrors(prev => ({ ...prev, [agentId]: null }));
-    try {
-      const response = await ApiService.saveRevenueEntry(agentId, {
-        entryDate: revenueDate,
-        coinsTotal,
-        euroCoinsCount,
-        billsTotal,
-        deductions,
-      });
-      setRevenueEntries(prev => ({ ...prev, [agentId]: response.entry }));
-      setRevenueAudit(prev => ({ ...prev, [agentId]: response.audit || [] }));
-      setRevenueDrafts(prev => ({ ...prev, [agentId]: buildRevenueDraft(response.entry) }));
-      const summary = await ApiService.getRevenueSummary(revenueDate);
-      setRevenueSummary(summary);
-      if (revenueView === 'daily') {
-        fetchRevenueEntryDates();
-      }
-    } catch (err) {
-      if (handleAuthFailure(err)) return;
-      console.error('Revenue save failed', err);
-      setRevenueSaveErrors(prev => ({ ...prev, [agentId]: 'Failed to save revenue entry.' }));
-    } finally {
-      setRevenueSaving(prev => ({ ...prev, [agentId]: false }));
-    }
-  };
-
-  const handleCreateUser = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const username = newUserName.trim();
-    const password = newUserPassword;
-    if (!username || !password) {
-      setUserCreateError('Username and password are required.');
-      return;
-    }
-    setUserCreateError(null);
-    setUserCreateLoading(true);
-    try {
-      await ApiService.createUser(username, password, newUserRole);
-      setNewUserName('');
-      setNewUserPassword('');
-      setNewUserRole('user');
-      await fetchUsers();
-    } catch (err) {
-      if (handleAuthFailure(err)) return;
-      console.error('User create failed', err);
-      const status = (err as any)?.status;
-      if (status === 409) {
-        setUserCreateError('User already exists.');
-      } else if (status === 400) {
-        setUserCreateError('Username must be 1–64 chars with no spaces, and password is required.');
-      } else {
-        setUserCreateError('Failed to create user.');
-      }
-    } finally {
-      setUserCreateLoading(false);
-    }
-  };
-
-  const handleRoleSave = async (username: string) => {
-    const role = userRoleDrafts[username] || 'user';
-    setUserSaveErrors(prev => ({ ...prev, [username]: null }));
-    setUserSaving(prev => ({ ...prev, [username]: true }));
-    try {
-      await ApiService.updateUserRole(username, role);
-      await fetchUsers();
-    } catch (err) {
-      if (handleAuthFailure(err)) return;
-      console.error('Role update failed', err);
-      setUserSaveErrors(prev => ({ ...prev, [username]: 'Failed to update role.' }));
-    } finally {
-      setUserSaving(prev => ({ ...prev, [username]: false }));
-    }
-  };
-
-  const handlePasswordSave = async (username: string) => {
-    const password = userPasswordDrafts[username] || '';
-    if (!password) {
-      setUserSaveErrors(prev => ({ ...prev, [username]: 'Password cannot be empty.' }));
-      return;
-    }
-    setUserSaveErrors(prev => ({ ...prev, [username]: null }));
-    setUserSaving(prev => ({ ...prev, [username]: true }));
-    try {
-      await ApiService.updateUserPassword(username, password);
-      setUserPasswordDrafts(prev => ({ ...prev, [username]: '' }));
-      await fetchUsers();
-    } catch (err) {
-      if (handleAuthFailure(err)) return;
-      console.error('Password update failed', err);
-      setUserSaveErrors(prev => ({ ...prev, [username]: 'Failed to update password.' }));
-    } finally {
-      setUserSaving(prev => ({ ...prev, [username]: false }));
-    }
-  };
-
   const showCameraLoading = cameraLoading && Object.keys(cameraConfigs).length === 0;
+
+  // Wrapper functions for group operations
+  const handleAddGroup = () => handleAddGroupFromHook(primaryAgentId, to24h, normalizeGroupPayload, setActiveTab);
+  const handleUpdateGroup = (groupId: string, updates: Partial<RelayGroup>) =>
+    handleUpdateGroupFromHook(groupId, updates, primaryAgentId, laundries, to24h, normalizeGroupPayload);
+  const handleDeleteGroup = (id: string) => handleDeleteGroupFromHook(id, primaryAgentId);
+  const handleToggleGroupPower = (id: string, action: 'ON' | 'OFF') =>
+    handleToggleGroupPowerFromHook(id, action, primaryAgentId, serverOnline, markPendingRelayState, updateLaundryRelays, setRelays, latestRelaysRef, handleAuthFailure);
 
   const renderDashboard = () => (
     <div className="space-y-6">
@@ -2497,7 +2261,7 @@ const App: React.FC = () => {
                   onChange={(e) => {
                     const nextValue = e.target.value;
                     if (!isRevenueNumericInput(nextValue)) return;
-                    updateRevenueDraft(laundry.id, d => ({ ...d, coinsTotal: nextValue }));
+                    updateRevenueDraftFromHook(laundry.id, d => ({ ...d, coinsTotal: nextValue }));
                   }}
                   className={fieldClass(Boolean(coinsAudit))}
                   placeholder="0.00"
@@ -2517,7 +2281,7 @@ const App: React.FC = () => {
                   onChange={(e) => {
                     const nextValue = e.target.value;
                     if (!isRevenueNumericInput(nextValue)) return;
-                    updateRevenueDraft(laundry.id, d => ({ ...d, euroCoinsCount: nextValue }));
+                    updateRevenueDraftFromHook(laundry.id, d => ({ ...d, euroCoinsCount: nextValue }));
                   }}
                   className={fieldClass(Boolean(countAudit))}
                   placeholder="0"
@@ -2537,7 +2301,7 @@ const App: React.FC = () => {
                   onChange={(e) => {
                     const nextValue = e.target.value;
                     if (!isRevenueNumericInput(nextValue)) return;
-                    updateRevenueDraft(laundry.id, d => ({ ...d, billsTotal: nextValue }));
+                    updateRevenueDraftFromHook(laundry.id, d => ({ ...d, billsTotal: nextValue }));
                   }}
                   className={fieldClass(Boolean(billsAudit))}
                   placeholder="0.00"
@@ -2554,7 +2318,7 @@ const App: React.FC = () => {
               <div className="flex items-center justify-between">
                 <div className="text-sm text-slate-300">Deductions (comment required)</div>
                 <button
-                  onClick={() => addRevenueDeduction(laundry.id)}
+                  onClick={() => addRevenueDeductionFromHook(laundry.id)}
                   className="text-xs px-2 py-1 rounded-md border border-slate-600 text-slate-300 hover:border-slate-500 hover:text-white transition-colors"
                 >
                   Add deduction
@@ -2577,7 +2341,7 @@ const App: React.FC = () => {
                     onChange={(e) => {
                       const nextValue = e.target.value;
                       if (!isRevenueNumericInput(nextValue)) return;
-                      updateRevenueDraft(laundry.id, d => ({
+                      updateRevenueDraftFromHook(laundry.id, d => ({
                         ...d,
                         deductions: d.deductions.map(row => row.id === item.id ? { ...row, amount: nextValue } : row),
                       }));
@@ -2588,7 +2352,7 @@ const App: React.FC = () => {
                   <input
                     type="text"
                     value={item.comment}
-                    onChange={(e) => updateRevenueDraft(laundry.id, d => ({
+                    onChange={(e) => updateRevenueDraftFromHook(laundry.id, d => ({
                       ...d,
                       deductions: d.deductions.map(row => row.id === item.id ? { ...row, comment: e.target.value } : row),
                     }))}
@@ -2596,7 +2360,7 @@ const App: React.FC = () => {
                     placeholder="Reason"
                   />
                   <button
-                    onClick={() => removeRevenueDeduction(laundry.id, item.id)}
+                    onClick={() => removeRevenueDeductionFromHook(laundry.id, item.id)}
                     className="text-xs px-3 py-2 w-full sm:w-auto rounded-md border border-red-500/40 text-red-300 hover:text-red-200 hover:border-red-400 transition-colors"
                   >
                     Remove
@@ -2618,7 +2382,7 @@ const App: React.FC = () => {
                   : 'No entry recorded for this date.'}
               </div>
               <button
-                onClick={() => handleRevenueSave(laundry.id)}
+                onClick={() => handleRevenueSaveFromHook(laundry.id)}
                 disabled={saving}
                 className="px-4 py-2 rounded-md text-xs font-semibold border border-indigo-500 text-indigo-200 bg-indigo-500/10 hover:bg-indigo-500/20 disabled:opacity-50"
               >
@@ -2848,7 +2612,7 @@ const App: React.FC = () => {
                           <option value="user">user</option>
                         </select>
                         <button
-                          onClick={() => handleRoleSave(user.username)}
+                          onClick={() => handleRoleSaveFromHook(user.username, handleAuthFailure)}
                           disabled={saving}
                           className="px-2 py-1 text-xs rounded-md border border-indigo-500 text-indigo-200 bg-indigo-500/10 hover:bg-indigo-500/20 disabled:opacity-50"
                         >
@@ -2866,7 +2630,7 @@ const App: React.FC = () => {
                         className="flex-1 bg-slate-900/60 border border-slate-700 rounded-md px-3 py-2 text-sm text-slate-100 focus:outline-none focus:ring-1 focus:ring-indigo-500"
                       />
                       <button
-                        onClick={() => handlePasswordSave(user.username)}
+                        onClick={() => handlePasswordSaveFromHook(user.username, handleAuthFailure)}
                         disabled={saving}
                         className="px-3 py-2 text-xs rounded-md border border-amber-500 text-amber-200 bg-amber-500/10 hover:bg-amber-500/20 disabled:opacity-50"
                       >
@@ -2886,7 +2650,7 @@ const App: React.FC = () => {
           )}
         </div>
 
-        <form onSubmit={handleCreateUser} className="bg-slate-800 border border-slate-700 rounded-xl p-4 space-y-4">
+        <form onSubmit={(e) => handleCreateUserFromHook(e, handleAuthFailure)} className="bg-slate-800 border border-slate-700 rounded-xl p-4 space-y-4">
           <div className="flex items-center gap-2">
             <Plus className="w-4 h-4 text-indigo-300" />
             <h3 className="text-base font-semibold text-white">Add user</h3>
