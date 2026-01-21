@@ -1819,6 +1819,9 @@ const App: React.FC = () => {
                       ? buildCameraPreviewUrl(camera, laundry.id, { cacheBust: false })
                       : undefined;
                     const effectiveFrameSrc = frameSrc || patternFallbackSrc;
+                    if (camera.enabled && camera.sourceType !== 'pattern') {
+                      console.log(`[Render] ${draftKey} img src:`, effectiveFrameSrc);
+                    }
                     const hasFrame = Boolean(effectiveFrameSrc);
                     const warmupStartedAt = cameraWarmup[draftKey];
                     const warmupActive = typeof warmupStartedAt === 'number'
