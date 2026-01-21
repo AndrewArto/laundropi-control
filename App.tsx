@@ -909,19 +909,10 @@ const App: React.FC = () => {
 
   useEffect(() => {
     if (!isAuthenticated || activeTab !== Tab.DASHBOARD || !isPageVisible) return;
-    console.log('[Camera Timer] Starting interval, will tick every', CAMERA_FRAME_REFRESH_MS, 'ms');
-    const startTime = Date.now();
     const timer = setInterval(() => {
-      const elapsed = Date.now() - startTime;
-      setCameraRefreshTick((prev) => {
-        console.log('[Camera Timer] Tick', prev + 1, 'at', elapsed, 'ms');
-        return prev + 1;
-      });
+      setCameraRefreshTick((prev) => prev + 1);
     }, CAMERA_FRAME_REFRESH_MS);
-    return () => {
-      console.log('[Camera Timer] Clearing interval');
-      clearInterval(timer);
-    };
+    return () => clearInterval(timer);
   }, [isAuthenticated, activeTab, isPageVisible]);
 
   useEffect(() => {
@@ -940,11 +931,7 @@ const App: React.FC = () => {
   }, [cameraRefreshTick, cameraConfigs]);
 
   useEffect(() => {
-    console.log('[Camera useEffect] Triggered, tick:', cameraRefreshTick);
-    if (!isAuthenticated || activeTab !== Tab.DASHBOARD || !isPageVisible) {
-      console.log('[Camera useEffect] Early return: auth/tab/visible check');
-      return;
-    }
+    if (!isAuthenticated || activeTab !== Tab.DASHBOARD || !isPageVisible) return;
     if (typeof Image === 'undefined') return;
     laundries.forEach(laundry => {
       const online = isLaundryOnline(laundry);
@@ -954,13 +941,9 @@ const App: React.FC = () => {
         const inView = cameraVisibility[key];
         const shouldPollCamera = isPageVisible && (inView ?? true);
         const canRequestPreview = camera.enabled && shouldPollCamera && (camera.sourceType === 'pattern' || online);
-        if (!canRequestPreview) {
-          console.log(`[Camera] ${key} skip: enabled=${camera.enabled}, poll=${shouldPollCamera}, type=${camera.sourceType}, online=${online}`);
-          return;
-        }
+        if (!canRequestPreview) return;
         // Update the frame source URL directly - browser handles image loading and HTTP caching
         const src = buildCameraPreviewUrl(camera, laundry.id, { cacheBust: true });
-        console.log(`[Camera] Update ${key} src to tick ${cameraRefreshTick}`);
         setCameraFrameSources(prev => (prev[key] === src ? prev : { ...prev, [key]: src }));
       });
     });
@@ -1819,9 +1802,6 @@ const App: React.FC = () => {
                       ? buildCameraPreviewUrl(camera, laundry.id, { cacheBust: false })
                       : undefined;
                     const effectiveFrameSrc = frameSrc || patternFallbackSrc;
-                    if (camera.enabled && camera.sourceType !== 'pattern') {
-                      console.log(`[Render] ${draftKey} img src:`, effectiveFrameSrc);
-                    }
                     const hasFrame = Boolean(effectiveFrameSrc);
                     const warmupStartedAt = cameraWarmup[draftKey];
                     const warmupActive = typeof warmupStartedAt === 'number'

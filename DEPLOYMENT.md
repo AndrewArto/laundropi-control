@@ -285,12 +285,24 @@ INTEGRATION_SECRETS_KEY=<your-production-key>
 
 ### Raspberry Pi (.env or systemd environment)
 
+**Brandoa1** (fast refresh, stable power):
 ```bash
-# Agent configuration
-AGENT_ID=Laundromat1  # Or Laundromat2
-AGENT_SECRET=prod-secret-1  # Match central server
-AGENT_WS_URL=wss://your-domain.com/agent  # Use wss:// for secure
-MOCK_GPIO=false  # Real GPIO on production
+AGENT_ID=Brandoa1
+AGENT_SECRET=prod-secret-1
+AGENT_WS_URL=wss://ui.washcontrol.io/agent
+MOCK_GPIO=false
+CAMERA_FRAME_CACHE_MS=1000  # 1-second cache for fast refresh
+CAMERA_FRAME_FETCH_TIMEOUT_MS=3000
+```
+
+**Brandoa2** (slower refresh, weak power supply):
+```bash
+AGENT_ID=Brandoa2
+AGENT_SECRET=prod-secret-2
+AGENT_WS_URL=wss://ui.washcontrol.io/agent
+MOCK_GPIO=false
+CAMERA_FRAME_CACHE_MS=5000  # 5-second cache to reduce power load
+CAMERA_FRAME_FETCH_TIMEOUT_MS=3000
 ```
 
 ---
