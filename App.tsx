@@ -1451,7 +1451,7 @@ const App: React.FC = () => {
     />
   );
 
-const renderScheduler = () => (
+  const renderScheduler = () => (
     <SchedulesView
       laundries={laundries}
       newGroupSelections={newGroupSelections}
