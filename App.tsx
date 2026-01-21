@@ -618,18 +618,30 @@ const App: React.FC = () => {
         return;
       }
 
-      setLaundries(applyPendingRelayStates(items));
+      // Only update laundries if data actually changed
+      setLaundries(prev => {
+        const next = applyPendingRelayStates(items);
+        const hasChanges = JSON.stringify(prev) !== JSON.stringify(next);
+        return hasChanges ? next : prev;
+      });
+
       if (primaryData) {
-        setSchedules(primaryData.schedules);
+        // Only update schedules if data actually changed
+        setSchedules(prev => {
+          const hasChanges = JSON.stringify(prev) !== JSON.stringify(primaryData.schedules);
+          return hasChanges ? primaryData.schedules : prev;
+        });
         setGroups(prev => {
           if (primaryData?.groups && primaryData.groups.length > 0) {
-            return primaryData.groups.map(g => normalizeGroupPayload(g, items[0]?.id || primaryAgentId || DEFAULT_AGENT_ID));
+            const next = primaryData.groups.map(g => normalizeGroupPayload(g, items[0]?.id || primaryAgentId || DEFAULT_AGENT_ID));
+            const hasChanges = JSON.stringify(prev) !== JSON.stringify(next);
+            return hasChanges ? next : prev;
           }
           return prev;
         });
       } else {
-        setSchedules([]);
-        setGroups([]);
+        setSchedules(prev => prev.length > 0 ? [] : prev);
+        setGroups(prev => prev.length > 0 ? [] : prev);
       }
       setIsLoading(false);
     } catch (err) {
@@ -671,8 +683,15 @@ const App: React.FC = () => {
           nextDrafts[cameraDraftKey(agentId, camera.id)] = camera.name;
         });
       });
-      setCameraConfigs(nextConfigs);
-      setCameraNameDrafts(prev => ({ ...prev, ...nextDrafts }));
+      // Only update state if camera config actually changed
+      setCameraConfigs(prev => {
+        const hasChanges = JSON.stringify(prev) !== JSON.stringify(nextConfigs);
+        return hasChanges ? nextConfigs : prev;
+      });
+      setCameraNameDrafts(prev => {
+        const hasChanges = Object.keys(nextDrafts).some(key => prev[key] !== nextDrafts[key]);
+        return hasChanges ? { ...prev, ...nextDrafts } : prev;
+      });
     } catch (err) {
       if (handleAuthFailure(err)) return;
       console.error('Camera list fetch failed', err);
