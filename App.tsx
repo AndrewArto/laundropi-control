@@ -194,7 +194,6 @@ const App: React.FC = () => {
   });
   const cameraObserverRef = React.useRef<IntersectionObserver | null>(null);
   const cameraCardRefs = React.useRef<Map<string, HTMLDivElement>>(new Map());
-  const cameraFrameLastFetchRef = React.useRef<Map<string, number>>(new Map());
   const cameraRefCallbacks = React.useRef<Map<string, (node: HTMLDivElement | null) => void>>(new Map());
   const isLaundryOnline = React.useCallback((laundry: Laundry) => {
     const fresh = laundry.lastHeartbeat ? (Date.now() - laundry.lastHeartbeat) < AGENT_STALE_MS : false;
@@ -412,7 +411,6 @@ const App: React.FC = () => {
     setCameraPreviewErrors({});
     setCameraWarmup({});
     setCameraFrameSources({});
-    cameraFrameLastFetchRef.current.clear();
     cameraCardRefs.current.clear();
     cameraRefCallbacks.current.clear();
     setAgentId(null);
@@ -960,46 +958,10 @@ const App: React.FC = () => {
           console.log(`[Camera] ${key} skip: enabled=${camera.enabled}, poll=${shouldPollCamera}, type=${camera.sourceType}, online=${online}`);
           return;
         }
-        if (camera.sourceType === 'pattern') return;
-        // Note: Server has proper rate limiting (1000ms cache), so we don't need client-side throttling
-        // Just fetch on every tick and let server handle caching
-        const lastFetch = cameraFrameLastFetchRef.current.get(key);
-        const now = Date.now();
-        console.log(`[Camera] Fetching ${key}, last: ${lastFetch ? now - lastFetch : 'never'}ms ago`);
-        cameraFrameLastFetchRef.current.set(key, now);
+        // Update the frame source URL directly - browser handles image loading and HTTP caching
         const src = buildCameraPreviewUrl(camera, laundry.id, { cacheBust: true });
-        const img = new Image();
-        // Timeout to cleanup on slow/failed loads
-        const timeoutId = setTimeout(() => {
-          console.log(`[Camera] ${key} timeout after 5s`);
-        }, 5000);
-        img.onload = () => {
-          clearTimeout(timeoutId);
-          setCameraFrameSources(prev => (prev[key] === src ? prev : { ...prev, [key]: src }));
-          setCameraPreviewErrors(prev => {
-            if (!prev[key]) return prev;
-            const next = { ...prev };
-            delete next[key];
-            return next;
-          });
-          setCameraWarmup(prev => {
-            if (!prev[key]) return prev;
-            const next = { ...prev };
-            delete next[key];
-            return next;
-          });
-        };
-        img.onerror = () => {
-          clearTimeout(timeoutId);
-          setCameraPreviewErrors(prev => (prev[key] ? prev : { ...prev, [key]: true }));
-          setCameraWarmup(prev => {
-            if (!prev[key]) return prev;
-            const next = { ...prev };
-            delete next[key];
-            return next;
-          });
-        };
-        img.src = src;
+        console.log(`[Camera] Update ${key} src to tick ${cameraRefreshTick}`);
+        setCameraFrameSources(prev => (prev[key] === src ? prev : { ...prev, [key]: src }));
       });
     });
   }, [
