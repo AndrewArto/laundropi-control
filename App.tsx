@@ -950,12 +950,14 @@ const App: React.FC = () => {
         const now = Date.now();
         if (lastFetch && (now - lastFetch) < refreshIntervalMs) return;
         cameraFrameLastFetchRef.current.set(key, now);
-        const src = buildCameraPreviewUrl(camera, laundry.id, { cacheBust: true });
+        const srcWithCacheBust = buildCameraPreviewUrl(camera, laundry.id, { cacheBust: true });
+        const srcBase = buildCameraPreviewUrl(camera, laundry.id, { cacheBust: false });
         inFlight.add(key);
         const img = new Image();
         img.onload = () => {
           inFlight.delete(key);
-          setCameraFrameSources(prev => (prev[key] === src ? prev : { ...prev, [key]: src }));
+          // Store base URL without cache-bust to prevent flickering
+          setCameraFrameSources(prev => (prev[key] === srcBase ? prev : { ...prev, [key]: srcBase }));
           setCameraPreviewErrors(prev => {
             if (!prev[key]) return prev;
             const next = { ...prev };
@@ -979,7 +981,8 @@ const App: React.FC = () => {
             return next;
           });
         };
-        img.src = src;
+        // Load with cache-bust to get fresh frame, but store base URL
+        img.src = srcWithCacheBust;
       });
     });
   }, [
