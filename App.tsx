@@ -1364,7 +1364,7 @@ const App: React.FC = () => {
           : [...existing, { ...camera, enabled: res.camera.enabled }];
         return { ...prev, [agentId]: nextList };
       });
-      void fetchCameras();
+      // No need to fetchCameras() - we already updated the state above
     } catch (err) {
       if (handleAuthFailure(err)) return;
       console.error('Camera enable toggle failed', err);
