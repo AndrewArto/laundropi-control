@@ -11,6 +11,14 @@ interface Laundry {
   lastHeartbeat: number | null;
 }
 
+type RevenueDraftDeduction = { id: string; amount: string; comment: string };
+type RevenueDraft = {
+  coinsTotal: string;
+  euroCoinsCount: string;
+  billsTotal: string;
+  deductions: RevenueDraftDeduction[];
+};
+
 interface RevenueViewProps {
   authUser: UiUser | null;
   laundries: Laundry[];
@@ -24,10 +32,10 @@ interface RevenueViewProps {
   revenueEntries: Record<string, RevenueEntry | null>;
   revenueLoading: boolean;
   revenueError: string | null;
-  revenueSummary: RevenueSummary | null;
+  revenueSummary: { date: string; week: RevenueSummary; month: RevenueSummary } | null;
   revenueSaveErrors: Record<string, string | null>;
   revenueSaving: Record<string, boolean>;
-  revenueDrafts: Record<string, Partial<RevenueEntry>>;
+  revenueDrafts: Record<string, RevenueDraft>;
   revenueAudit: Record<string, RevenueAuditEntry[]>;
   revenueAllEntries: RevenueEntry[];
   revenueAllLoading: boolean;
@@ -38,8 +46,8 @@ interface RevenueViewProps {
   shiftDateByMonths: (dateStr: string, months: number) => string;
   formatMoney: (value: number) => string;
   formatTimestamp: (ts: string | number) => string;
-  buildRevenueDraft: (entry: RevenueEntry | null) => Partial<RevenueEntry>;
-  updateRevenueDraftFromHook: (agentId: string, updater: (draft: Partial<RevenueEntry>) => Partial<RevenueEntry>) => void;
+  buildRevenueDraft: (entry: RevenueEntry | null) => RevenueDraft;
+  updateRevenueDraftFromHook: (agentId: string, updater: (draft: RevenueDraft) => RevenueDraft) => void;
   isRevenueNumericInput: (value: string) => boolean;
   getLatestAudit: (agentId: string, field: string) => RevenueAuditEntry | undefined;
   getDeductionSummary: (value: any) => { total: number; count: number } | null;
