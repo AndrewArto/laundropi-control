@@ -269,6 +269,13 @@ const PRIMARY_CAMERA_FRAME_MIN_INTERVAL_MS = parseDurationMs(
   PRIMARY_CAMERA_FRAME_CACHE_MS
 );
 
+console.log('[central] Camera cache settings:', {
+  CAMERA_FRAME_CACHE_MS,
+  CAMERA_FRAME_MIN_INTERVAL_MS,
+  PRIMARY_CAMERA_FRAME_CACHE_MS,
+  PRIMARY_CAMERA_FRAME_MIN_INTERVAL_MS
+});
+
 const getCameraFrameCacheMs = (agentId: string) => (
   isPrimaryLaundry(agentId) ? PRIMARY_CAMERA_FRAME_CACHE_MS : CAMERA_FRAME_CACHE_MS
 );
