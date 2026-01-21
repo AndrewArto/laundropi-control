@@ -115,7 +115,9 @@ const isRevenueNumericInput = (value: string) => /^(\d+([.,]\d*)?|[.,]\d*)?$/.te
 const normalizeDecimalInput = (value: string) => value.replace(',', '.');
 
 const App: React.FC = () => {
-  console.log('[LaundroPi] App mounted render cycle start');
+  const renderCount = React.useRef(0);
+  renderCount.current += 1;
+  console.log(`[LaundroPi] Render #${renderCount.current}`, new Date().toISOString());
 
   type Laundry = {
     id: string;
@@ -953,7 +955,12 @@ const App: React.FC = () => {
         const src = buildCameraPreviewUrl(camera, laundry.id, { cacheBust: true });
         inFlight.add(key);
         const img = new Image();
+        // Timeout to prevent slow images from blocking forever
+        const timeoutId = setTimeout(() => {
+          inFlight.delete(key);
+        }, 5000); // 5 second timeout
         img.onload = () => {
+          clearTimeout(timeoutId);
           inFlight.delete(key);
           setCameraFrameSources(prev => (prev[key] === src ? prev : { ...prev, [key]: src }));
           setCameraPreviewErrors(prev => {
@@ -970,6 +977,7 @@ const App: React.FC = () => {
           });
         };
         img.onerror = () => {
+          clearTimeout(timeoutId);
           inFlight.delete(key);
           setCameraPreviewErrors(prev => (prev[key] ? prev : { ...prev, [key]: true }));
           setCameraWarmup(prev => {
