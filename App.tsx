@@ -1298,7 +1298,9 @@ const App: React.FC = () => {
       setCameraConfigs(prev => {
         const list = prev[agentId] || [];
         const nextList = list.map(cam => cam.id === cameraId ? { ...cam, name: res.camera.name } : cam);
-        return { ...prev, [agentId]: nextList };
+        // Only update if actually changed
+        const hasChanges = JSON.stringify(list) !== JSON.stringify(nextList);
+        return hasChanges ? { ...prev, [agentId]: nextList } : prev;
       });
       setCameraNameDrafts(prev => ({ ...prev, [key]: res.camera.name }));
     } catch (err) {
@@ -1352,7 +1354,9 @@ const App: React.FC = () => {
       const nextList = found
         ? existing.map(cam => cam.id === camera.id ? { ...cam, enabled: nextEnabled } : cam)
         : [...existing, { ...camera, enabled: nextEnabled }];
-      return { ...prev, [agentId]: nextList };
+      // Only update if actually changed
+      const hasChanges = JSON.stringify(existing) !== JSON.stringify(nextList);
+      return hasChanges ? { ...prev, [agentId]: nextList } : prev;
     });
     try {
       const res = await ApiService.updateCamera(agentId, camera.id, { enabled: nextEnabled });
@@ -1362,7 +1366,9 @@ const App: React.FC = () => {
         const nextList = found
           ? existing.map(cam => cam.id === camera.id ? { ...cam, enabled: res.camera.enabled } : cam)
           : [...existing, { ...camera, enabled: res.camera.enabled }];
-        return { ...prev, [agentId]: nextList };
+        // Only update if actually changed
+        const hasChanges = JSON.stringify(existing) !== JSON.stringify(nextList);
+        return hasChanges ? { ...prev, [agentId]: nextList } : prev;
       });
       // No need to fetchCameras() - we already updated the state above
     } catch (err) {
@@ -1374,7 +1380,9 @@ const App: React.FC = () => {
         const nextList = found
           ? existing.map(cam => cam.id === camera.id ? { ...cam, enabled: currentEnabled } : cam)
           : [...existing, { ...camera, enabled: currentEnabled }];
-        return { ...prev, [agentId]: nextList };
+        // Only update if actually changed
+        const hasChanges = JSON.stringify(existing) !== JSON.stringify(nextList);
+        return hasChanges ? { ...prev, [agentId]: nextList } : prev;
       });
       setCameraSaveErrors(prev => ({ ...prev, [key]: 'Failed to update camera state.' }));
       setCameraWarmup(prev => {
