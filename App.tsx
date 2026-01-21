@@ -4,6 +4,11 @@ import RelayCard from './components/RelayCard';
 import { Relay, Schedule, RelayType, RelayGroup, RevenueEntry, RevenueAuditEntry, RevenueSummary, UiUser, CameraConfig } from './types';
 import { ApiService, resolveBaseUrl } from './services/api';
 import { DAYS_OF_WEEK } from './constants';
+import { useAuth } from './hooks/useAuth';
+import { useRelays } from './hooks/useRelays';
+import { useCameras } from './hooks/useCameras';
+import { useRevenue } from './hooks/useRevenue';
+import { useSchedules } from './hooks/useSchedules';
 
 enum Tab {
   DASHBOARD = 'DASHBOARD',
@@ -140,15 +145,139 @@ const App: React.FC = () => {
     deductions: RevenueDraftDeduction[];
   };
 
+  // Custom hooks for state management
+  const {
+    relays,
+    relayNameDrafts,
+    relayVisibility,
+    toggleRelay,
+    saveRelayName,
+    updateRelayNameDraft,
+    toggleRelayVisibility,
+    updateRelayIcon,
+    setRelays,
+    setRelayNameDrafts,
+    setRelayVisibility,
+    getPendingRelayState,
+    setPendingRelayState,
+    applyPendingRelayStates: applyPendingRelayStatesFromHook,
+    resetRelayState,
+  } = useRelays();
+
+  const {
+    cameraConfigs,
+    cameraFrameSources,
+    cameraPreviewErrors,
+    cameraWarmup,
+    cameraVisibility,
+    cameraSaving,
+    cameraToggleLoading,
+    cameraSaveErrors,
+    cameraRefreshTick,
+    setCameraConfigs,
+    setCameraFrameSources,
+    setCameraPreviewErrors,
+    setCameraWarmup,
+    setCameraVisibility,
+    setCameraSaving,
+    setCameraToggleLoading,
+    setCameraSaveErrors,
+    setCameraRefreshTick,
+    handleCameraEnabledToggle: handleCameraEnabledToggleFromHook,
+    handleCameraSave: handleCameraSaveFromHook,
+    resetCameraState,
+  } = useCameras();
+
+  const {
+    schedules,
+    setSchedules,
+    addSchedule,
+    updateSchedule,
+    deleteSchedule,
+    removeRelayFromSchedules,
+    resetSchedulesState,
+  } = useSchedules();
+
+  const {
+    revenueDate,
+    revenueEntries,
+    revenueDrafts,
+    revenueAudit,
+    revenueSummary,
+    revenueLoading,
+    revenueError,
+    revenueSaving,
+    revenueSaveErrors,
+    revenueView,
+    revenueEntryDates,
+    revenueAllEntries,
+    revenueAllLoading,
+    revenueAllError,
+    isRevenueCalendarOpen,
+    setRevenueDate,
+    setRevenueEntries,
+    setRevenueDrafts,
+    setRevenueAudit,
+    setRevenueSummary,
+    setRevenueLoading,
+    setRevenueError,
+    setRevenueSaving,
+    setRevenueSaveErrors,
+    setRevenueView,
+    setRevenueEntryDates,
+    setRevenueAllEntries,
+    setRevenueAllLoading,
+    setRevenueAllError,
+    setIsRevenueCalendarOpen,
+    updateRevenueDraft: updateRevenueDraftFromHook,
+    addRevenueDeduction: addRevenueDeductionFromHook,
+    removeRevenueDeduction: removeRevenueDeductionFromHook,
+    handleRevenueSave: handleRevenueSaveFromHook,
+    getLatestAudit: getLatestAuditFromHook,
+    getDeductionSummary: getDeductionSummaryFromHook,
+    resetRevenueState,
+  } = useRevenue();
+
+  // State reset callback for useAuth
+  const resetUiStateCallback = React.useCallback(() => {
+    resetRelayState();
+    resetCameraState();
+    resetSchedulesState();
+    resetRevenueState();
+    setGroups([]);
+    setLaundries([]);
+    setAgentId(null);
+    setAgentHeartbeat(null);
+    setIsMockMode(true);
+    setIsRelayEditMode(false);
+    setNewGroupName('');
+    setNewGroupSelections([]);
+    setNewGroupOnTime('');
+    setNewGroupOffTime('');
+    setNewGroupDays([...DAYS_OF_WEEK]);
+    setGroupSelectionTouched(false);
+    setEditingGroupId(null);
+    setServerOnline(true);
+    setActiveTab(Tab.DASHBOARD);
+  }, [resetRelayState, resetCameraState, resetSchedulesState, resetRevenueState]);
+
+  const {
+    isAuthenticated,
+    isAuthReady,
+    authUser,
+    authLogin,
+    authPassword,
+    authError,
+    setAuthLogin,
+    setAuthPassword,
+    setAuthError,
+    handleLoginSubmit,
+    handleLogout,
+    handleAuthFailure,
+    isAuthenticatedRef,
+  } = useAuth(resetUiStateCallback);
+
   const [activeTab, setActiveTab] = useState<Tab>(Tab.DASHBOARD);
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [isAuthReady, setIsAuthReady] = useState(false);
-  const [authUser, setAuthUser] = useState<{ username: string; role: string } | null>(null);
-  const [authLogin, setAuthLogin] = useState('');
-  const [authPassword, setAuthPassword] = useState('');
-  const [authError, setAuthError] = useState('');
-  const [relays, setRelays] = useState<Relay[]>([]);
-  const [schedules, setSchedules] = useState<Schedule[]>([]);
   const [groups, setGroups] = useState<RelayGroup[]>([]);
   const [currentTime, setCurrentTime] = useState(new Date());
   const [newGroupName, setNewGroupName] = useState('');
@@ -165,9 +294,6 @@ const App: React.FC = () => {
   const editingGroupIdRef = React.useRef<string | null>(null);
   const relayEditAreaRef = React.useRef<HTMLDivElement | null>(null);
   const groupEditAreaRef = React.useRef<HTMLDivElement | null>(null);
-  const isAuthenticatedRef = React.useRef(false);
-  const [relayNameDrafts, setRelayNameDrafts] = useState<Record<string, string>>({});
-  const [relayVisibility, setRelayVisibility] = useState<Record<string, boolean>>({});
   const relayVisibilityRef = React.useRef<Record<string, boolean>>({});
   const [serverOnline, setServerOnline] = useState(true);
   const [agentId, setAgentId] = useState<string | null>(null);
@@ -176,18 +302,9 @@ const App: React.FC = () => {
   const controlsDisabled = IS_TEST_ENV ? false : (!serverOnline || !agentOnline);
   const [laundries, setLaundries] = useState<Laundry[]>([]);
   const laundriesRef = React.useRef<Laundry[]>([]);
-  const [cameraConfigs, setCameraConfigs] = useState<Record<string, CameraConfig[]>>({});
   const [cameraLoading, setCameraLoading] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [cameraNameDrafts, setCameraNameDrafts] = useState<Record<string, string>>({});
-  const [cameraSaving, setCameraSaving] = useState<Record<string, boolean>>({});
-  const [cameraToggleLoading, setCameraToggleLoading] = useState<Record<string, boolean>>({});
-  const [cameraSaveErrors, setCameraSaveErrors] = useState<Record<string, string | null>>({});
-  const [cameraRefreshTick, setCameraRefreshTick] = useState(0);
-  const [cameraPreviewErrors, setCameraPreviewErrors] = useState<Record<string, boolean>>({});
-  const [cameraWarmup, setCameraWarmup] = useState<Record<string, number>>({});
-  const [cameraFrameSources, setCameraFrameSources] = useState<Record<string, string>>({});
-  const [cameraVisibility, setCameraVisibility] = useState<Record<string, boolean>>({});
   const [isPageVisible, setIsPageVisible] = useState(() => {
     if (typeof document === 'undefined') return true;
     return document.visibilityState === 'visible';
@@ -227,22 +344,6 @@ const App: React.FC = () => {
   const [newLaundrySecret, setNewLaundrySecret] = useState(DEFAULT_AGENT_SECRET);
   const pendingRelayStatesRef = React.useRef<Map<string, { state: boolean; updatedAt: number }>>(new Map());
   const laundryIdKey = React.useMemo(() => laundries.map(l => l.id).sort().join('|'), [laundries]);
-
-  const [revenueDate, setRevenueDate] = useState<string>(() => toDateInput(new Date()));
-  const [revenueEntries, setRevenueEntries] = useState<Record<string, RevenueEntry | null>>({});
-  const [revenueDrafts, setRevenueDrafts] = useState<Record<string, RevenueDraft>>({});
-  const [revenueAudit, setRevenueAudit] = useState<Record<string, RevenueAuditEntry[]>>({});
-  const [revenueSummary, setRevenueSummary] = useState<{ date: string; week: RevenueSummary; month: RevenueSummary } | null>(null);
-  const [revenueLoading, setRevenueLoading] = useState(false);
-  const [revenueError, setRevenueError] = useState<string | null>(null);
-  const [revenueSaving, setRevenueSaving] = useState<Record<string, boolean>>({});
-  const [revenueSaveErrors, setRevenueSaveErrors] = useState<Record<string, string | null>>({});
-  const [revenueView, setRevenueView] = useState<'daily' | 'all'>('daily');
-  const [revenueEntryDates, setRevenueEntryDates] = useState<string[]>([]);
-  const [revenueAllEntries, setRevenueAllEntries] = useState<RevenueEntry[]>([]);
-  const [revenueAllLoading, setRevenueAllLoading] = useState(false);
-  const [revenueAllError, setRevenueAllError] = useState<string | null>(null);
-  const [isRevenueCalendarOpen, setIsRevenueCalendarOpen] = useState(false);
 
   const [users, setUsers] = useState<UiUser[]>([]);
   const [usersLoading, setUsersLoading] = useState(false);
@@ -391,70 +492,6 @@ const App: React.FC = () => {
     return cb;
   }, [registerCameraCard]);
 
-  const resetUiState = () => {
-    setRelays([]);
-    setSchedules([]);
-    setGroups([]);
-    setRelayNameDrafts({});
-    setRelayVisibility({});
-    relayVisibilityRef.current = {};
-    latestRelaysRef.current = [];
-    setLaundries([]);
-    setCameraConfigs({});
-    setCameraLoading(false);
-    setCameraError(null);
-    setCameraNameDrafts({});
-    setCameraSaving({});
-    setCameraToggleLoading({});
-    setCameraSaveErrors({});
-    setCameraRefreshTick(0);
-    setCameraPreviewErrors({});
-    setCameraWarmup({});
-    setCameraFrameSources({});
-    cameraCardRefs.current.clear();
-    cameraRefCallbacks.current.clear();
-    setAgentId(null);
-    setAgentHeartbeat(null);
-    setIsMockMode(true);
-    setIsRelayEditMode(false);
-    isRelayEditModeRef.current = false;
-    setNewGroupName('');
-    setNewGroupSelections([]);
-    setNewGroupOnTime('');
-    setNewGroupOffTime('');
-    setNewGroupDays([...DAYS_OF_WEEK]);
-    setGroupSelectionTouched(false);
-    setEditingGroupId(null);
-    editingGroupIdRef.current = null;
-    setServerOnline(true);
-    setRevenueEntries({});
-    setRevenueDrafts({});
-    setRevenueAudit({});
-    setRevenueSummary(null);
-    setRevenueLoading(false);
-    setRevenueError(null);
-    setRevenueSaving({});
-    setRevenueSaveErrors({});
-    setRevenueView('daily');
-    setRevenueEntryDates([]);
-    setRevenueAllEntries([]);
-    setRevenueAllLoading(false);
-    setRevenueAllError(null);
-    setIsRevenueCalendarOpen(false);
-    setRevenueDate(toDateInput(new Date()));
-    setUsers([]);
-    setUsersLoading(false);
-    setUsersError(null);
-    setUserCreateError(null);
-    setUserCreateLoading(false);
-    setNewUserName('');
-    setNewUserPassword('');
-    setNewUserRole('user');
-    setUserRoleDrafts({});
-    setUserPasswordDrafts({});
-    setUserSaving({});
-    setUserSaveErrors({});
-  };
 
   const buildRevenueDraft = (entry: RevenueEntry | null): RevenueDraft => ({
     coinsTotal: entry ? formatMoney(entry.coinsTotal) : '',
@@ -515,20 +552,6 @@ const App: React.FC = () => {
     }
   };
 
-  const handleAuthFailure = (err: unknown) => {
-    const status = (err as any)?.status;
-    if (status !== 401) return false;
-    setAuthError('Session expired. Please sign in again.');
-    setIsAuthenticated(false);
-    isAuthenticatedRef.current = false;
-    setAuthUser(null);
-    setAuthPassword('');
-    setActiveTab(Tab.DASHBOARD);
-    resetUiState();
-    setIsLoading(false);
-    return true;
-  };
-
   const [isMockMode, setIsMockMode] = useState(true);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -544,35 +567,15 @@ const App: React.FC = () => {
     console.log('[LaundroPi] DOM snapshot childCount:', root?.childElementCount, 'innerHTML len:', root?.innerHTML.length);
   });
 
+  // Set initial tab based on user role after auth
   useEffect(() => {
-    let cancelled = false;
-    const bootstrap = async () => {
-      try {
-        const session = await ApiService.getSession();
-        if (cancelled) return;
-        if (session?.user) {
-          setIsAuthenticated(true);
-          setAuthUser(session.user);
-          setActiveTab(session.user.role === 'admin' ? Tab.REVENUE : Tab.DASHBOARD);
-          setIsLoading(true);
-        } else {
-          setIsAuthenticated(false);
-          setAuthUser(null);
-          setIsLoading(false);
-        }
-      } catch {
-        if (!cancelled) {
-          setIsAuthenticated(false);
-          setAuthUser(null);
-          setIsLoading(false);
-        }
-      } finally {
-        if (!cancelled) setIsAuthReady(true);
-      }
-    };
-    bootstrap();
-    return () => { cancelled = true; };
-  }, []);
+    if (isAuthenticated && authUser) {
+      setActiveTab(authUser.role === 'admin' ? Tab.REVENUE : Tab.DASHBOARD);
+      setIsLoading(true);
+    } else {
+      setIsLoading(false);
+    }
+  }, [isAuthenticated, authUser]);
 
   // Fetch data
   const fetchLaundries = async (force = false) => {
@@ -1075,46 +1078,6 @@ const App: React.FC = () => {
       setIsMockMode(true);
     }
   }, [laundries]);
-
-  const handleLoginSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setAuthError('');
-    try {
-      const login = await ApiService.login(authLogin.trim(), authPassword);
-      setIsAuthenticated(true);
-      isAuthenticatedRef.current = true;
-      const nextUser = login.user || { username: authLogin.trim(), role: 'user' };
-      setAuthUser(nextUser);
-      setActiveTab(nextUser.role === 'admin' ? Tab.REVENUE : Tab.DASHBOARD);
-      setAuthPassword('');
-      resetUiState();
-      setIsLoading(true);
-    } catch (err) {
-      const status = (err as any)?.status;
-      if (status === 401) {
-        setAuthError('Invalid username or password.');
-      } else {
-        setAuthError('Could not sign in. Please try again.');
-      }
-    }
-  };
-
-  const handleLogout = async () => {
-    try {
-      await ApiService.logout();
-    } catch {
-      // ignore logout failures
-    }
-    setIsAuthenticated(false);
-    isAuthenticatedRef.current = false;
-    setAuthUser(null);
-    setAuthLogin('');
-    setAuthPassword('');
-    setAuthError('');
-    setActiveTab(Tab.DASHBOARD);
-    resetUiState();
-    setIsLoading(false);
-  };
 
   // Sync drafts and visibility
   useEffect(() => {
