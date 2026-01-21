@@ -117,7 +117,9 @@ const normalizeDecimalInput = (value: string) => value.replace(',', '.');
 const App: React.FC = () => {
   const renderCount = React.useRef(0);
   renderCount.current += 1;
-  console.log(`[LaundroPi] Render #${renderCount.current}`, new Date().toISOString());
+  if (renderCount.current % 10 === 0) {
+    console.log(`[LaundroPi] Render #${renderCount.current}`, new Date().toISOString());
+  }
 
   type Laundry = {
     id: string;
@@ -932,7 +934,11 @@ const App: React.FC = () => {
   }, [cameraRefreshTick, cameraConfigs]);
 
   useEffect(() => {
-    if (!isAuthenticated || activeTab !== Tab.DASHBOARD || !isPageVisible) return;
+    console.log('[Camera useEffect] Triggered, tick:', cameraRefreshTick);
+    if (!isAuthenticated || activeTab !== Tab.DASHBOARD || !isPageVisible) {
+      console.log('[Camera useEffect] Early return: auth/tab/visible check');
+      return;
+    }
     if (typeof Image === 'undefined') return;
     const inFlight = cameraFrameInFlightRef.current;
     laundries.forEach(laundry => {
