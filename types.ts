@@ -117,6 +117,19 @@ export interface Laundry {
   lastHeartbeat: number | null;
 }
 
+// Special agent ID for general business expenses (not tied to a specific laundromat)
+export const GENERAL_AGENT_ID = 'General';
+
+// Create a synthetic "General" laundry for finance/cost tracking
+export const GENERAL_LAUNDRY: Laundry = {
+  id: GENERAL_AGENT_ID,
+  name: 'General',
+  relays: [],
+  isOnline: true,
+  isMock: false,
+  lastHeartbeat: null,
+};
+
 export type RelaySelection = { agentId: string; relayId: number };
 
 export type DetergentType = 'blue' | 'green' | 'brown';
@@ -155,6 +168,7 @@ export interface ExpenditureImport {
 }
 
 export type ReconciliationStatus = 'new' | 'existing' | 'discrepancy' | 'ignored';
+export type TransactionType = 'expense' | 'stripe_credit' | 'other_credit';
 
 export interface ExpenditureTransaction {
   id: string;
@@ -164,6 +178,7 @@ export interface ExpenditureTransaction {
   amount: number;
   bankReference: string | null;
   category: string | null;
+  transactionType: TransactionType;  // Type of transaction (expense, stripe_credit, other_credit)
   reconciliationStatus: ReconciliationStatus;
   matchedDeductionKey: string | null;
   assignedAgentId: string | null;
@@ -206,4 +221,14 @@ export interface ProfitLossData {
 export interface LaundryInventory {
   agentId: string;
   items: InventoryItem[];
+}
+
+export interface ExpenditureAudit {
+  id?: number;
+  importId: string;
+  transactionId: string | null;
+  action: string;
+  details: string | null;
+  user: string;
+  createdAt: number;
 }

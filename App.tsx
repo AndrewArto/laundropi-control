@@ -10,6 +10,7 @@ import { useSchedules } from './hooks/useSchedules';
 import { useUsers } from './hooks/useUsers';
 import { useGroups } from './hooks/useGroups';
 import { useInventory } from './hooks/useInventory';
+import { useReconciliation } from './hooks/useReconciliation';
 import { DashboardView } from './components/views/DashboardView';
 import { SchedulesView } from './components/views/SchedulesView';
 import { RevenueView } from './components/views/RevenueView';
@@ -199,6 +200,32 @@ const App: React.FC = () => {
     viewAudit,
     closeAudit,
   } = useInventory();
+
+  const {
+    imports: bankImports,
+    activeImport: bankActiveImport,
+    transactions: bankTransactions,
+    summary: bankSummary,
+    loading: bankLoading,
+    uploading: bankUploading,
+    applying: bankApplying,
+    error: bankError,
+    pendingChanges: bankPendingChanges,
+    hasUnsavedChanges: bankHasUnsavedChanges,
+    fetchImports: fetchBankImports,
+    loadImport: loadBankImport,
+    uploadCsv: uploadBankCsv,
+    assignTransaction: assignBankTransaction,
+    assignStripeCredit: assignBankStripeCredit,
+    ignoreTransaction: ignoreBankTransaction,
+    unignoreTransaction: unignoreBankTransaction,
+    undoChange: undoBankChange,
+    applyChanges: applyBankChanges,
+    completeImport: completeBankImport,
+    cancelImport: cancelBankImport,
+    deleteImport: deleteBankImport,
+    clearActiveImport: clearBankActiveImport,
+  } = useReconciliation();
 
   // State reset callback for useAuth
   const resetUiStateCallback = React.useCallback(() => {
@@ -618,12 +645,19 @@ const App: React.FC = () => {
     return () => clearInterval(timer);
   }, [isAuthenticated, activeTab, isPageVisible]);
 
-  // Fetch inventory when inventory tab is active
+  // Fetch inventory on initial load and when inventory tab is active
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    fetchInventory();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAuthenticated]);
+
+  // Refresh inventory when inventory tab becomes active
   useEffect(() => {
     if (!isAuthenticated || activeTab !== Tab.INVENTORY) return;
     fetchInventory();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isAuthenticated, activeTab]);
+  }, [activeTab]);
 
   useEffect(() => {
     if (!Object.keys(cameraWarmup).length) return;
@@ -764,6 +798,13 @@ const App: React.FC = () => {
     if (activeTab !== Tab.REVENUE || revenueView !== 'all') return;
     fetchAllRevenueEntries();
   }, [activeTab, revenueView, isAuthenticated, authUser?.role]);
+
+  // Fetch bank imports when Bank Import tab is active
+  useEffect(() => {
+    if (!isAuthenticated || authUser?.role !== 'admin') return;
+    if (activeTab !== Tab.REVENUE || revenueView !== 'bankImport') return;
+    fetchBankImports();
+  }, [activeTab, revenueView, isAuthenticated, authUser?.role, fetchBankImports]);
 
   useEffect(() => {
     if (!isAuthenticated || authUser?.role !== 'admin') return;
@@ -1229,6 +1270,29 @@ const App: React.FC = () => {
       removeRevenueDeductionFromHook={removeRevenueDeductionFromHook}
       handleRevenueSaveFromHook={handleRevenueSaveFromHook}
       handleExportRevenueCsv={handleExportRevenueCsv}
+      // Bank Import props
+      bankImports={bankImports}
+      bankActiveImport={bankActiveImport}
+      bankTransactions={bankTransactions}
+      bankSummary={bankSummary}
+      bankLoading={bankLoading}
+      bankUploading={bankUploading}
+      bankApplying={bankApplying}
+      bankError={bankError}
+      bankPendingChanges={bankPendingChanges}
+      bankHasUnsavedChanges={bankHasUnsavedChanges}
+      onBankUploadCsv={uploadBankCsv}
+      onBankLoadImport={loadBankImport}
+      onBankAssignTransaction={assignBankTransaction}
+      onBankAssignStripeCredit={assignBankStripeCredit}
+      onBankIgnoreTransaction={ignoreBankTransaction}
+      onBankUnignoreTransaction={unignoreBankTransaction}
+      onBankUndoChange={undoBankChange}
+      onBankApplyChanges={applyBankChanges}
+      onBankCompleteImport={completeBankImport}
+      onBankCancelImport={cancelBankImport}
+      onBankDeleteImport={deleteBankImport}
+      onBankClearActiveImport={clearBankActiveImport}
     />
   );
 

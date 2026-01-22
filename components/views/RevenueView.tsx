@@ -1,6 +1,91 @@
-import React from 'react';
-import { Coins, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ChevronDown, ChevronUp, Download, CalendarClock } from 'lucide-react';
-import { RevenueEntry, RevenueAuditEntry, RevenueSummary, UiUser } from '../../types';
+import React, { useState } from 'react';
+import { Coins, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ChevronDown, ChevronUp, Download, CalendarClock, Upload, Building2 } from 'lucide-react';
+import { RevenueEntry, RevenueAuditEntry, RevenueSummary, UiUser, ExpenditureImport, ExpenditureTransaction, GENERAL_AGENT_ID, GENERAL_LAUNDRY } from '../../types';
+import { BankImportView } from './BankImportView';
+import type { ReconciliationSummary, PendingChange } from '../../hooks/useReconciliation';
+
+// Map field names to user-friendly labels
+const fieldLabels: Record<string, string> = {
+  coinsTotal: 'Revenue total',
+  euroCoinsCount: 'Coins in €1',
+  billsTotal: 'Bills total',
+  deductions: 'Deductions',
+  deductionsTotal: 'Deductions total',
+};
+
+const getFieldLabel = (field: string) => fieldLabels[field] || field;
+
+// Simple donut chart component for revenue/costs visualization
+interface DonutChartProps {
+  revenue: number;
+  costs: number;
+  size?: number;
+  label: string;
+  profitLoss: number;
+  formatMoney: (val: number) => string;
+}
+
+const DonutChart: React.FC<DonutChartProps> = ({ revenue, costs, size = 60, label, profitLoss, formatMoney }) => {
+  const total = revenue + costs;
+  const revenuePercent = total > 0 ? (revenue / total) * 100 : (revenue > 0 ? 100 : 50);
+  const strokeWidth = 6;
+  const radius = (size - strokeWidth) / 2;
+  const circumference = 2 * Math.PI * radius;
+  const revenueStroke = (revenuePercent / 100) * circumference;
+  const costsStroke = circumference - revenueStroke;
+
+  return (
+    <div className="flex items-center gap-2">
+      <svg width={size} height={size} className="transform -rotate-90 flex-shrink-0">
+        {/* Background circle */}
+        <circle
+          cx={size / 2}
+          cy={size / 2}
+          r={radius}
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={strokeWidth}
+          className="text-slate-700"
+        />
+        {/* Revenue arc (green) */}
+        <circle
+          cx={size / 2}
+          cy={size / 2}
+          r={radius}
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={strokeWidth}
+          strokeDasharray={`${revenueStroke} ${costsStroke}`}
+          strokeDashoffset={0}
+          className="text-emerald-500"
+          strokeLinecap="round"
+        />
+        {/* Costs arc (red) - starts where revenue ends */}
+        {costs > 0 && (
+          <circle
+            cx={size / 2}
+            cy={size / 2}
+            r={radius}
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={strokeWidth}
+            strokeDasharray={`${costsStroke} ${revenueStroke}`}
+            strokeDashoffset={-revenueStroke}
+            className="text-red-400"
+            strokeLinecap="round"
+          />
+        )}
+      </svg>
+      <div className="text-left min-w-0">
+        <div className="text-[10px] text-slate-500 uppercase">{label}</div>
+        <div className="text-xs text-white">€{formatMoney(revenue)}</div>
+        <div className={`text-xs font-semibold ${profitLoss >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+          P/L €{formatMoney(profitLoss)}
+        </div>
+      </div>
+    </div>
+  );
+};
 
 interface Laundry {
   id: string;
@@ -22,8 +107,8 @@ type RevenueDraft = {
 interface RevenueViewProps {
   authUser: UiUser | null;
   laundries: Laundry[];
-  revenueView: 'daily' | 'all';
-  setRevenueView: React.Dispatch<React.SetStateAction<'daily' | 'all'>>;
+  revenueView: 'daily' | 'all' | 'bankImport';
+  setRevenueView: React.Dispatch<React.SetStateAction<'daily' | 'all' | 'bankImport'>>;
   revenueDate: string;
   setRevenueDate: React.Dispatch<React.SetStateAction<string>>;
   isRevenueCalendarOpen: boolean;
@@ -55,9 +140,47 @@ interface RevenueViewProps {
   removeRevenueDeductionFromHook: (agentId: string, deductionId: string) => void;
   handleRevenueSaveFromHook: (agentId: string) => Promise<void>;
   handleExportRevenueCsv: () => void;
+  // Bank Import props
+  bankImports: ExpenditureImport[];
+  bankActiveImport: ExpenditureImport | null;
+  bankTransactions: ExpenditureTransaction[];
+  bankSummary: ReconciliationSummary | null;
+  bankLoading: boolean;
+  bankUploading: boolean;
+  bankApplying: boolean;
+  bankError: string | null;
+  bankPendingChanges: Map<string, PendingChange>;
+  bankHasUnsavedChanges: boolean;
+  onBankUploadCsv: (file: File) => Promise<{ success: boolean; error?: string; warnings?: string[] }>;
+  onBankLoadImport: (importId: string) => Promise<void>;
+  onBankAssignTransaction: (transactionId: string, agentId: string, entryDate?: string, comment?: string) => void;
+  onBankAssignStripeCredit: (transactionId: string, agentId: string, entryDate?: string) => void;
+  onBankIgnoreTransaction: (transactionId: string, notes?: string) => void;
+  onBankUnignoreTransaction: (transactionId: string) => void;
+  onBankUndoChange: (transactionId: string) => void;
+  onBankApplyChanges: () => Promise<boolean | void>;
+  onBankCompleteImport: (notes?: string) => Promise<any>;
+  onBankCancelImport: (notes?: string) => Promise<any>;
+  onBankDeleteImport: (importId: string) => Promise<void>;
+  onBankClearActiveImport: () => void;
 }
 
 export const RevenueView: React.FC<RevenueViewProps> = (props) => {
+  // Track which agent sections are expanded (default all collapsed)
+  const [expandedAgents, setExpandedAgents] = useState<Set<string>>(new Set());
+
+  const toggleAgentExpanded = (agentId: string) => {
+    setExpandedAgents(prev => {
+      const next = new Set(prev);
+      if (next.has(agentId)) {
+        next.delete(agentId);
+      } else {
+        next.add(agentId);
+      }
+      return next;
+    });
+  };
+
   const {
     authUser,
     laundries,
@@ -94,6 +217,29 @@ export const RevenueView: React.FC<RevenueViewProps> = (props) => {
     removeRevenueDeductionFromHook,
     handleRevenueSaveFromHook,
     handleExportRevenueCsv,
+    // Bank Import props
+    bankImports,
+    bankActiveImport,
+    bankTransactions,
+    bankSummary,
+    bankLoading,
+    bankUploading,
+    bankApplying,
+    bankError,
+    bankPendingChanges,
+    bankHasUnsavedChanges,
+    onBankUploadCsv,
+    onBankLoadImport,
+    onBankAssignTransaction,
+    onBankAssignStripeCredit,
+    onBankIgnoreTransaction,
+    onBankUnignoreTransaction,
+    onBankUndoChange,
+    onBankApplyChanges,
+    onBankCompleteImport,
+    onBankCancelImport,
+    onBankDeleteImport,
+    onBankClearActiveImport,
   } = props;
 
   const renderRevenueCalendar = () => {
@@ -260,7 +406,8 @@ export const RevenueView: React.FC<RevenueViewProps> = (props) => {
         <div className="text-sm text-slate-400">Loading revenue data...</div>
       )}
 
-      {!revenueLoading && (laundries || []).map(laundry => {
+      {!revenueLoading && [...(laundries || []), GENERAL_LAUNDRY].map(laundry => {
+        const isGeneral = laundry.id === GENERAL_AGENT_ID;
         const entry = revenueEntries[laundry.id] || null;
         const draft = revenueDrafts[laundry.id] || buildRevenueDraft(entry) || { coinsTotal: '', euroCoinsCount: '', billsTotal: '', deductions: [] };
         const entryAudit = revenueAudit[laundry.id] || [];
@@ -273,6 +420,7 @@ export const RevenueView: React.FC<RevenueViewProps> = (props) => {
         const monthTotal = revenueSummary?.month.totalsByAgent?.[laundry.id] ?? 0;
         const weekProfitLoss = revenueSummary?.week.profitLossByAgent?.[laundry.id] ?? 0;
         const monthProfitLoss = revenueSummary?.month.profitLossByAgent?.[laundry.id] ?? 0;
+        const weekDeductions = entry?.deductionsTotal ?? 0;
         const saveError = revenueSaveErrors[laundry.id];
         const saving = Boolean(revenueSaving[laundry.id]);
 
@@ -282,29 +430,190 @@ export const RevenueView: React.FC<RevenueViewProps> = (props) => {
           }`
         );
 
-        return (
-          <div key={laundry.id} className="bg-slate-800 border border-slate-700 rounded-xl p-4 space-y-4">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div>
-                <div className="text-sm font-semibold text-white">{laundry.name}</div>
-                <div className="text-xs text-slate-500">Week: €{formatMoney(weekTotal)} · Month: €{formatMoney(monthTotal)}</div>
-                <div className="text-xs text-slate-500">P/L: Week €{formatMoney(weekProfitLoss)} · Month €{formatMoney(monthProfitLoss)}</div>
-              </div>
-              <div className="flex items-center gap-2">
-                {entry?.hasEdits && (
-                  <span className="text-xs px-2 py-1 rounded-full border border-amber-400 text-amber-200 bg-amber-500/10">
-                    Edited
+        // General cost center - only shows deductions
+        if (isGeneral) {
+          return (
+            <div key={laundry.id} className="bg-slate-800 border border-purple-500/30 rounded-xl p-4 space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <Building2 className="w-5 h-5 text-purple-400" />
+                  <div>
+                    <div className="text-sm font-semibold text-white">{laundry.name}</div>
+                    <div className="text-xs text-slate-500">General business costs (deducted from total P&L)</div>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  {entry?.hasEdits && (
+                    <span className="text-xs px-2 py-1 rounded-full border border-amber-400 text-amber-200 bg-amber-500/10">
+                      Edited
+                    </span>
+                  )}
+                  <span className="text-xs px-2 py-1 rounded-full border border-purple-500/50 text-purple-300 bg-purple-500/10">
+                    Costs only
                   </span>
-                )}
-                <span className="text-xs px-2 py-1 rounded-full border border-slate-600 text-slate-300 bg-slate-900/40">
-                  {entry ? 'Entry loaded' : 'No entry yet'}
-                </span>
+                </div>
               </div>
-            </div>
 
-            <div className="grid gap-4 md:grid-cols-3">
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="text-sm text-slate-300">Costs (comment required)</div>
+                  <button
+                    onClick={() => addRevenueDeductionFromHook(laundry.id)}
+                    className="text-xs px-2 py-1 rounded-md border border-purple-500/50 text-purple-300 hover:border-purple-400 hover:text-purple-200 transition-colors"
+                  >
+                    Add cost
+                  </button>
+                </div>
+                {deductionsAudit && prevDeductionSummary && (
+                  <div className="text-[11px] text-amber-300">
+                    Prev: €{formatMoney(prevDeductionSummary.total)} across {prevDeductionSummary.count} items · {deductionsAudit.user} · {formatTimestamp(deductionsAudit.createdAt)}
+                  </div>
+                )}
+                {draft.deductions.length === 0 && (
+                  <div className="text-xs text-slate-500">No costs added yet.</div>
+                )}
+                {draft.deductions.map(item => (
+                  <div key={item.id} className="flex flex-wrap gap-2 items-center">
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      value={item.amount}
+                      onChange={(e) => {
+                        const nextValue = e.target.value;
+                        if (!isRevenueNumericInput(nextValue)) return;
+                        updateRevenueDraftFromHook(laundry.id, d => ({
+                          ...d,
+                          deductions: d.deductions.map(row => row.id === item.id ? { ...row, amount: nextValue } : row),
+                        }));
+                      }}
+                      className="flex-1 min-w-0 w-full sm:w-auto sm:min-w-[120px] bg-slate-900/60 border border-slate-700 rounded-md px-3 py-2 text-sm text-slate-100 focus:outline-none focus:ring-1 focus:ring-purple-500"
+                      placeholder="0.00"
+                    />
+                    <input
+                      type="text"
+                      value={item.comment}
+                      onChange={(e) => updateRevenueDraftFromHook(laundry.id, d => ({
+                        ...d,
+                        deductions: d.deductions.map(row => row.id === item.id ? { ...row, comment: e.target.value } : row),
+                      }))}
+                      className="flex-[2] min-w-0 w-full sm:w-auto sm:min-w-[200px] bg-slate-900/60 border border-slate-700 rounded-md px-3 py-2 text-sm text-slate-100 focus:outline-none focus:ring-1 focus:ring-purple-500"
+                      placeholder="Reason"
+                    />
+                    <button
+                      onClick={() => removeRevenueDeductionFromHook(laundry.id, item.id)}
+                      className="text-xs px-3 py-2 w-full sm:w-auto rounded-md border border-red-500/40 text-red-300 hover:text-red-200 hover:border-red-400 transition-colors"
+                    >
+                      Remove
+                    </button>
+                  </div>
+                ))}
+              </div>
+
+              {saveError && (
+                <div className="text-sm text-red-300 bg-red-500/10 border border-red-500/30 rounded-md px-3 py-2">
+                  {saveError}
+                </div>
+              )}
+
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="text-xs text-slate-500">
+                  {entry
+                    ? `Updated ${formatTimestamp(entry.updatedAt)} by ${entry.updatedBy || 'unknown'}`
+                    : 'No entry recorded for this date.'}
+                </div>
+                <button
+                  onClick={() => handleRevenueSaveFromHook(laundry.id)}
+                  disabled={saving}
+                  className="px-4 py-2 rounded-md text-xs font-semibold border border-purple-500 text-purple-200 bg-purple-500/10 hover:bg-purple-500/20 disabled:opacity-50"
+                >
+                  {saving ? 'Saving...' : 'Save costs'}
+                </button>
+              </div>
+
+              {entryAudit.length > 0 && (
+                <div className="text-xs text-slate-500 border-t border-slate-700 pt-3 space-y-1">
+                  <div className="text-[11px] uppercase tracking-wide text-slate-500">Audit log</div>
+                  {entryAudit.filter(item => item.oldValue !== null).slice(0, 6).map(item => (
+                    <div key={`${item.id}-${item.createdAt}`} className="flex flex-wrap justify-between gap-2">
+                      <span>{getFieldLabel(item.field)}: {item.oldValue} → {item.newValue}</span>
+                      <span>{item.user} · {formatTimestamp(item.createdAt)}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        }
+
+        // Regular laundry box - collapsible
+        const isExpanded = expandedAgents.has(laundry.id);
+        const weekCosts = (revenueSummary?.week.totalsByAgent?.[laundry.id] ?? 0) - (revenueSummary?.week.profitLossByAgent?.[laundry.id] ?? 0);
+        const monthCosts = (revenueSummary?.month.totalsByAgent?.[laundry.id] ?? 0) - (revenueSummary?.month.profitLossByAgent?.[laundry.id] ?? 0);
+
+        return (
+          <div key={laundry.id} className="bg-slate-800 border border-slate-700 rounded-xl overflow-hidden">
+            {/* Collapsible header */}
+            <button
+              onClick={() => toggleAgentExpanded(laundry.id)}
+              className="w-full p-4 flex items-center justify-between gap-4 hover:bg-slate-700/30 transition-colors"
+            >
+              <div className="flex items-center gap-3">
+                {isExpanded ? (
+                  <ChevronUp className="w-5 h-5 text-slate-400" />
+                ) : (
+                  <ChevronDown className="w-5 h-5 text-slate-400" />
+                )}
+                <div className="text-left">
+                  <div className="text-sm font-semibold text-white">{laundry.name}</div>
+                  {!isExpanded && (
+                    <div className="text-xs text-slate-500">Click to expand</div>
+                  )}
+                </div>
+              </div>
+
+              {/* Pie charts - always visible, centered with fixed width */}
+              <div className="flex items-center gap-2">
+                <div className="flex items-center gap-4">
+                  <div className="w-[140px]">
+                    <DonutChart
+                      revenue={weekTotal}
+                      costs={weekCosts}
+                      size={50}
+                      label="Week"
+                      profitLoss={weekProfitLoss}
+                      formatMoney={formatMoney}
+                    />
+                  </div>
+                  <div className="w-[140px]">
+                    <DonutChart
+                      revenue={monthTotal}
+                      costs={monthCosts}
+                      size={50}
+                      label="Month"
+                      profitLoss={monthProfitLoss}
+                      formatMoney={formatMoney}
+                    />
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 w-[180px] justify-end">
+                  {entry?.hasEdits && (
+                    <span className="text-xs px-2 py-1 rounded-full border border-amber-400 text-amber-200 bg-amber-500/10">
+                      Edited
+                    </span>
+                  )}
+                  <span className="text-xs px-2 py-1 rounded-full border border-slate-600 text-slate-300 bg-slate-900/40">
+                    {entry ? 'Entry loaded' : 'No entry yet'}
+                  </span>
+                </div>
+              </div>
+            </button>
+
+            {/* Expanded content */}
+            {isExpanded && (
+              <div className="p-4 pt-0 space-y-4 border-t border-slate-700">
+                <div className="grid gap-4 md:grid-cols-3">
               <div className="space-y-1">
-                <label className="text-xs text-slate-400">Coins total (€)</label>
+                <label className="text-xs text-slate-400">Revenue total (€)</label>
                 <input
                   type="text"
                   inputMode="decimal"
@@ -446,10 +755,12 @@ export const RevenueView: React.FC<RevenueViewProps> = (props) => {
                 <div className="text-[11px] uppercase tracking-wide text-slate-500">Audit log</div>
                 {entryAudit.filter(item => item.oldValue !== null).slice(0, 6).map(item => (
                   <div key={`${item.id}-${item.createdAt}`} className="flex flex-wrap justify-between gap-2">
-                    <span>{item.field}: {item.oldValue} → {item.newValue}</span>
+                    <span>{getFieldLabel(item.field)}: {item.oldValue} → {item.newValue}</span>
                     <span>{item.user} · {formatTimestamp(item.createdAt)}</span>
                   </div>
                 ))}
+              </div>
+            )}
               </div>
             )}
           </div>
@@ -500,7 +811,7 @@ export const RevenueView: React.FC<RevenueViewProps> = (props) => {
                     <div className="text-[11px] text-slate-400">{laundryNameMap.get(entry.agentId) || entry.agentId}</div>
                   </div>
                   <div className="grid grid-cols-2 gap-2 text-xs text-slate-300 mt-2">
-                    <div>Coins: €{formatMoney(entry.coinsTotal)}</div>
+                    <div>Revenue: €{formatMoney(entry.coinsTotal)}</div>
                     <div>€1 count: {entry.euroCoinsCount}</div>
                     <div>Bills: €{formatMoney(entry.billsTotal)}</div>
                     <div>Deductions: €{formatMoney(entry.deductionsTotal)}</div>
@@ -517,7 +828,7 @@ export const RevenueView: React.FC<RevenueViewProps> = (props) => {
                   <tr>
                     <th className="px-3 py-2 text-left">Date</th>
                     <th className="px-3 py-2 text-left">Laundry</th>
-                    <th className="px-3 py-2 text-right">Coins (€)</th>
+                    <th className="px-3 py-2 text-right">Revenue (€)</th>
                     <th className="px-3 py-2 text-right">€1 count</th>
                     <th className="px-3 py-2 text-right">Bills (€)</th>
                     <th className="px-3 py-2 text-right">Deductions (€)</th>
@@ -551,7 +862,7 @@ export const RevenueView: React.FC<RevenueViewProps> = (props) => {
     if (authUser?.role !== 'admin') {
       return (
         <div className="text-center py-16 text-slate-500">
-          Revenue tracking is available to admin users only.
+          Finance management is available to admin users only.
         </div>
       );
     }
@@ -561,7 +872,7 @@ export const RevenueView: React.FC<RevenueViewProps> = (props) => {
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <h2 className="text-xl font-bold text-white flex items-center gap-2">
             <Coins className="w-5 h-5 text-amber-400" />
-            Revenue
+            Finance
           </h2>
           <div className="flex items-center gap-2 w-full sm:w-auto">
             <div className="inline-flex items-center gap-1 rounded-lg border border-slate-700 bg-slate-900/60 p-1 w-full sm:w-auto justify-between">
@@ -581,10 +892,47 @@ export const RevenueView: React.FC<RevenueViewProps> = (props) => {
               >
                 All entries
               </button>
+              <button
+                onClick={() => setRevenueView('bankImport')}
+                className={`px-3 py-1.5 text-xs font-semibold rounded-md flex-1 sm:flex-none flex items-center gap-1 ${
+                  revenueView === 'bankImport' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <Upload className="w-3 h-3" />
+                Bank Import
+              </button>
             </div>
           </div>
         </div>
-        {revenueView === 'daily' ? renderRevenueDaily() : renderRevenueAll()}
+        {revenueView === 'daily' && renderRevenueDaily()}
+        {revenueView === 'all' && renderRevenueAll()}
+        {revenueView === 'bankImport' && (
+          <BankImportView
+            laundries={laundries}
+            imports={bankImports}
+            activeImport={bankActiveImport}
+            transactions={bankTransactions}
+            summary={bankSummary}
+            loading={bankLoading}
+            uploading={bankUploading}
+            applying={bankApplying}
+            error={bankError}
+            pendingChanges={bankPendingChanges}
+            hasUnsavedChanges={bankHasUnsavedChanges}
+            onUploadCsv={onBankUploadCsv}
+            onLoadImport={onBankLoadImport}
+            onAssignTransaction={onBankAssignTransaction}
+            onAssignStripeCredit={onBankAssignStripeCredit}
+            onIgnoreTransaction={onBankIgnoreTransaction}
+            onUnignoreTransaction={onBankUnignoreTransaction}
+            onUndoChange={onBankUndoChange}
+            onApplyChanges={onBankApplyChanges}
+            onCompleteImport={onBankCompleteImport}
+            onCancelImport={onBankCancelImport}
+            onDeleteImport={onBankDeleteImport}
+            onClearActiveImport={onBankClearActiveImport}
+          />
+        )}
       </div>
     );
   };

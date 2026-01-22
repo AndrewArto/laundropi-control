@@ -20,7 +20,7 @@ export interface UseRevenueReturn {
   revenueError: string | null;
   revenueSaving: Record<string, boolean>;
   revenueSaveErrors: Record<string, string | null>;
-  revenueView: 'daily' | 'all';
+  revenueView: 'daily' | 'all' | 'bankImport';
   revenueEntryDates: string[];
   revenueAllEntries: RevenueEntry[];
   revenueAllLoading: boolean;
@@ -35,7 +35,7 @@ export interface UseRevenueReturn {
   setRevenueError: React.Dispatch<React.SetStateAction<string | null>>;
   setRevenueSaving: React.Dispatch<React.SetStateAction<Record<string, boolean>>>;
   setRevenueSaveErrors: React.Dispatch<React.SetStateAction<Record<string, string | null>>>;
-  setRevenueView: React.Dispatch<React.SetStateAction<'daily' | 'all'>>;
+  setRevenueView: React.Dispatch<React.SetStateAction<'daily' | 'all' | 'bankImport'>>;
   setRevenueEntryDates: React.Dispatch<React.SetStateAction<string[]>>;
   setRevenueAllEntries: React.Dispatch<React.SetStateAction<RevenueEntry[]>>;
   setRevenueAllLoading: React.Dispatch<React.SetStateAction<boolean>>;
@@ -118,7 +118,7 @@ export function useRevenue(): UseRevenueReturn {
   const [revenueError, setRevenueError] = useState<string | null>(null);
   const [revenueSaving, setRevenueSaving] = useState<Record<string, boolean>>({});
   const [revenueSaveErrors, setRevenueSaveErrors] = useState<Record<string, string | null>>({});
-  const [revenueView, setRevenueView] = useState<'daily' | 'all'>('daily');
+  const [revenueView, setRevenueView] = useState<'daily' | 'all' | 'bankImport'>('daily');
   const [revenueEntryDates, setRevenueEntryDates] = useState<string[]>([]);
   const [revenueAllEntries, setRevenueAllEntries] = useState<RevenueEntry[]>([]);
   const [revenueAllLoading, setRevenueAllLoading] = useState(false);

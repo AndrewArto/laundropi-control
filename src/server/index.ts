@@ -6,6 +6,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import * as crypto from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
 import { listAgents, updateHeartbeat, saveMeta, getAgent, updateRelayMeta, listSchedules, upsertSchedule, deleteSchedule, listGroups, listGroupsForMembership, upsertGroup, deleteGroup, GroupRow, deleteAgent, upsertAgent, upsertCommand, listPendingCommands, deleteCommand, updateCommandsForRelay, expireOldCommands, insertLead, getLastLeadTimestampForIp, listLeads, getRevenueEntry, listRevenueEntriesBetween, listRevenueEntries, listRevenueEntryDatesBetween, upsertRevenueEntry, insertRevenueAudit, listRevenueAudit, RevenueEntryRow, listUiUsers, getUiUser, createUiUser, updateUiUserRole, updateUiUserPassword, updateUiUserLastLogin, countUiUsers, listCameras, getCamera, upsertCamera, deleteCamera, upsertIntegrationSecret, getIntegrationSecret, deleteIntegrationSecret, CameraRow, listInventory, getInventory, updateInventory, getInventoryAudit, getLastInventoryChange, DetergentType } from './db';
+import expenditureRoutes from './routes/expenditure';
 
 
 const asBool = (val: string | undefined, fallback = false) => {
@@ -169,7 +170,7 @@ const PRIMARY_CAMERAS_DEFAULT_ENABLED = asBool(process.env.PRIMARY_CAMERAS_DEFAU
 const PRIMARY_CAMERA_FRONT_RTSP_URL = (process.env.PRIMARY_CAMERA_FRONT_RTSP_URL || '').trim();
 const PRIMARY_CAMERA_BACK_RTSP_URL = (process.env.PRIMARY_CAMERA_BACK_RTSP_URL || '').trim();
 
-const isKnownLaundry = (agentId: string) => KNOWN_LAUNDRY_SET.size === 0 || KNOWN_LAUNDRY_SET.has(agentId);
+const isKnownLaundry = (agentId: string) => KNOWN_LAUNDRY_SET.size === 0 || KNOWN_LAUNDRY_SET.has(agentId) || agentId === 'General';
 const isPrimaryLaundry = (agentId: string) => Boolean(PRIMARY_LAUNDRY_ID) && agentId === PRIMARY_LAUNDRY_ID;
 
 if (REQUIRE_UI_AUTH && !SESSION_SECRET) {
@@ -644,19 +645,24 @@ const buildRevenueSummary = (entries: RevenueEntryRow[]) => {
   const totalsByAgent: Record<string, number> = {};
   const profitLossByAgent: Record<string, number> = {};
   entries.forEach(entry => {
-    const coinsTotal = entry.coinsTotal > 0 ? roundMoney(entry.coinsTotal) : 0;
+    // coinsTotal is the main revenue field (includes cash + Stripe)
+    const revenue = entry.coinsTotal > 0 ? roundMoney(entry.coinsTotal) : 0;
     const deductionsTotal = roundMoney(entry.deductionsTotal || 0);
-    totalsByAgent[entry.agentId] = roundMoney((totalsByAgent[entry.agentId] || 0) + coinsTotal);
-    profitLossByAgent[entry.agentId] = roundMoney((profitLossByAgent[entry.agentId] || 0) + roundMoney(coinsTotal - deductionsTotal));
+    totalsByAgent[entry.agentId] = roundMoney((totalsByAgent[entry.agentId] || 0) + revenue);
+    profitLossByAgent[entry.agentId] = roundMoney((profitLossByAgent[entry.agentId] || 0) + roundMoney(revenue - deductionsTotal));
   });
   const overall = roundMoney(Object.values(totalsByAgent).reduce((sum, val) => sum + val, 0));
   const profitLossOverall = roundMoney(Object.values(profitLossByAgent).reduce((sum, val) => sum + val, 0));
   return { totalsByAgent, overall, profitLossByAgent, profitLossOverall };
 };
 
+// General agent ID for business-wide costs (not tied to specific laundromat)
+const GENERAL_AGENT_ID = 'General';
+
 const filterEntriesByKnownAgents = (entries: RevenueEntryRow[]) => {
   if (!KNOWN_LAUNDRY_SET.size) return entries;
-  return entries.filter(entry => KNOWN_LAUNDRY_SET.has(entry.agentId));
+  // Always include General agent for business-wide costs
+  return entries.filter(entry => KNOWN_LAUNDRY_SET.has(entry.agentId) || entry.agentId === GENERAL_AGENT_ID);
 };
 
 const desiredStateKey = (agentId: string, relayId: number) => `${agentId}::${relayId}`;
@@ -1131,6 +1137,7 @@ app.use(express.static(path.join(__dirname, '../../public')));
 
 app.use('/api', requireUiAuth);
 app.use('/api/revenue', requireAdmin);
+app.use('/api/expenditure', requireAdmin, expenditureRoutes);
 
 app.get('/api/revenue/summary', (req, res) => {
   const dateStr = resolveEntryDate(req.query?.date as string | undefined);

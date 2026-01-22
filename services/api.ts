@@ -1,5 +1,5 @@
 
-import { Relay, Schedule, RelayType, RelayGroup, RevenueEntry, RevenueAuditEntry, RevenueSummary, RevenueDeduction, UiUser, CameraConfig } from '../types';
+import { Relay, Schedule, RelayType, RelayGroup, RevenueEntry, RevenueAuditEntry, RevenueSummary, RevenueDeduction, UiUser, CameraConfig, ExpenditureImport, ExpenditureTransaction, ExpenditureAudit } from '../types';
 
 type LocationLike = { hostname: string; port: string; protocol: string };
 
@@ -8,11 +8,7 @@ export const resolveBaseUrl = (options?: { envBase?: string; location?: Location
   if (envBase.trim()) {
     return envBase.trim().replace(/\/$/, '');
   }
-  const location = options?.location ?? (typeof window === 'undefined' ? null : window.location);
-  if (!location) return '';
-  if (location.port === '3000') {
-    return `${location.protocol}//${location.hostname}:4000`;
-  }
+  // When no VITE_CENTRAL_URL is set, use relative URLs (go through Vite proxy in dev)
   return '';
 };
 
@@ -23,16 +19,52 @@ const AUTH_BASE = BASE_URL ? `${BASE_URL}/auth` : '/auth';
 
 const AGENT_ID = (import.meta as any).env?.VITE_AGENT_ID || 'dev-agent';
 const AGENT_SECRET = (import.meta as any).env?.VITE_AGENT_SECRET || 'secret';
-const request = async (input: RequestInfo | URL, init?: RequestInit) => {
+const request = async (input: RequestInfo | URL, init?: RequestInit & { timeout?: number }) => {
   const headers = new Headers(init?.headers || {});
-  const res = await fetch(input, { ...init, headers, credentials: 'include' });
-  if (!res.ok) {
-    const text = await res.text();
-    const err = new Error(`API ${res.status}: ${text}`);
-    (err as any).status = res.status;
-    throw err;
+  const { timeout, ...fetchInit } = init || {};
+
+  // Create abort controller for timeout
+  const controller = new AbortController();
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
+  if (timeout) {
+    timeoutId = setTimeout(() => controller.abort(), timeout);
   }
-  return res;
+
+  try {
+    const res = await fetch(input, {
+      ...fetchInit,
+      headers,
+      credentials: 'include',
+      signal: controller.signal,
+    });
+
+    if (!res.ok) {
+      const text = await res.text();
+      let errorData: any = null;
+      try {
+        errorData = JSON.parse(text);
+      } catch {
+        // Not JSON, use text as message
+      }
+      const message = errorData?.message || text;
+      const err = new Error(`API ${res.status}: ${message}`);
+      (err as any).status = res.status;
+      // Preserve parsed error data (e.g., existingImport for duplicate files)
+      if (errorData) {
+        Object.assign(err, errorData);
+      }
+      throw err;
+    }
+    return res;
+  } catch (err: any) {
+    if (err.name === 'AbortError') {
+      throw new Error('Request timed out. Please try again.');
+    }
+    throw err;
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
+  }
 };
 
 const normalizeTime = (val?: string | null) => {
@@ -335,5 +367,109 @@ export const ApiService = {
     const res = await request(`${API_BASE}/revenue/dates?${query.toString()}`);
     const payload = await res.json();
     return payload.dates || [];
+  },
+
+  // ========== Expenditure / Bank Import ==========
+
+  async uploadBankCsv(csvContent: string, fileName: string): Promise<{
+    import: ExpenditureImport;
+    transactions: ExpenditureTransaction[];
+    parseWarnings: string[];
+    autoIgnoredCount: number;
+  }> {
+    const res = await request(`${API_BASE}/expenditure/imports`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'text/csv',
+        'X-Filename': fileName,
+      },
+      body: csvContent,
+      timeout: 10000, // 10 second timeout
+    });
+    return await res.json();
+  },
+
+  async listExpenditureImports(): Promise<{ imports: ExpenditureImport[] }> {
+    const res = await request(`${API_BASE}/expenditure/imports`);
+    return await res.json();
+  },
+
+  async getExpenditureImport(importId: string): Promise<{
+    import: ExpenditureImport;
+    transactions: ExpenditureTransaction[];
+    summary: { total: number; new: number; existing: number; discrepancy: number; ignored: number };
+    audit: ExpenditureAudit[];
+  }> {
+    const res = await request(`${API_BASE}/expenditure/imports/${encodeURIComponent(importId)}`);
+    return await res.json();
+  },
+
+  async updateExpenditureImport(importId: string, status: 'reconciling' | 'completed' | 'cancelled', notes?: string): Promise<{ import: ExpenditureImport }> {
+    const res = await request(`${API_BASE}/expenditure/imports/${encodeURIComponent(importId)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status, notes }),
+    });
+    return await res.json();
+  },
+
+  async deleteExpenditureImport(importId: string): Promise<void> {
+    await request(`${API_BASE}/expenditure/imports/${encodeURIComponent(importId)}`, {
+      method: 'DELETE',
+    });
+  },
+
+  async updateExpenditureTransaction(transactionId: string, updates: {
+    reconciliationStatus?: 'new' | 'existing' | 'discrepancy' | 'ignored';
+    assignedAgentId?: string | null;
+    matchedDeductionKey?: string | null;
+    reconciliationNotes?: string | null;
+  }): Promise<{ transaction: ExpenditureTransaction }> {
+    const res = await request(`${API_BASE}/expenditure/transactions/${encodeURIComponent(transactionId)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updates),
+    });
+    return await res.json();
+  },
+
+  async assignExpenditureTransaction(transactionId: string, agentId: string, entryDate?: string, comment?: string): Promise<{
+    transaction: ExpenditureTransaction;
+    revenueEntry: RevenueEntry;
+    deductionKey: string;
+  }> {
+    const res = await request(`${API_BASE}/expenditure/transactions/${encodeURIComponent(transactionId)}/assign`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agentId, entryDate, comment }),
+    });
+    return await res.json();
+  },
+
+  async assignStripeCredit(transactionId: string, agentId: string, entryDate?: string): Promise<{
+    transaction: ExpenditureTransaction;
+    revenueEntry: RevenueEntry;
+  }> {
+    const res = await request(`${API_BASE}/expenditure/transactions/${encodeURIComponent(transactionId)}/assign-stripe`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agentId, entryDate }),
+    });
+    return await res.json();
+  },
+
+  async listExpenditureDeductions(startDate: string, endDate: string): Promise<{
+    deductions: Array<{
+      key: string;
+      agentId: string;
+      entryDate: string;
+      amount: number;
+      comment: string;
+      index: number;
+    }>;
+  }> {
+    const query = new URLSearchParams({ startDate, endDate });
+    const res = await request(`${API_BASE}/expenditure/deductions?${query.toString()}`);
+    return await res.json();
   },
 };
