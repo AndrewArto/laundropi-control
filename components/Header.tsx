@@ -1,6 +1,6 @@
 import React from 'react';
-import { Lock } from 'lucide-react';
-import type { Laundry, UiUser } from '../types';
+import { Lock, AlertTriangle } from 'lucide-react';
+import type { Laundry, UiUser, DetergentType, InventoryItem } from '../types';
 
 interface HeaderProps {
   brandLogoUrl: string;
@@ -9,7 +9,10 @@ interface HeaderProps {
   authUser: UiUser | null;
   currentTime: Date;
   handleLogout: () => void;
+  inventory?: Map<string, Map<DetergentType, InventoryItem>>;
 }
+
+const LOW_STOCK_THRESHOLD = 5;
 
 export const Header: React.FC<HeaderProps> = ({
   brandLogoUrl,
@@ -18,7 +21,19 @@ export const Header: React.FC<HeaderProps> = ({
   authUser,
   currentTime,
   handleLogout,
+  inventory,
 }) => {
+  const hasLowStock = (laundryId: string): boolean => {
+    if (!inventory) return false;
+    const agentInventory = inventory.get(laundryId);
+    if (!agentInventory) return false;
+
+    const detergentTypes: DetergentType[] = ['blue', 'green', 'brown'];
+    return detergentTypes.some(type => {
+      const item = agentInventory.get(type);
+      return item && item.quantity < LOW_STOCK_THRESHOLD;
+    });
+  };
   return (
     <header className="bg-slate-900/80 backdrop-blur-md sticky top-0 z-50 border-b border-slate-800 overflow-hidden">
       <div className="max-w-full sm:max-w-3xl mx-auto px-3 sm:px-4">
@@ -38,6 +53,7 @@ export const Header: React.FC<HeaderProps> = ({
               <div className="flex items-center gap-2 sm:gap-3 overflow-x-auto min-w-0">
                 {laundries.map(laundry => {
                   const online = isLaundryOnline(laundry);
+                  const lowStock = hasLowStock(laundry.id);
                   return (
                     <span
                       key={`header-status-${laundry.id}`}
@@ -64,6 +80,11 @@ export const Header: React.FC<HeaderProps> = ({
                         >
                           {laundry.isMock ? 'Mock' : 'Pi'}
                         </span>
+                        {lowStock && (
+                          <span className="flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] sm:text-[10px] border border-amber-400/60 text-amber-200 bg-amber-500/10">
+                            <AlertTriangle className="w-2.5 h-2.5" />
+                          </span>
+                        )}
                       </span>
                     </span>
                   );

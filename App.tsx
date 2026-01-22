@@ -1294,6 +1294,7 @@ const App: React.FC = () => {
         authUser={authUser}
         currentTime={currentTime}
         handleLogout={handleLogout}
+        inventory={inventory}
       />
 
       <main className="max-w-full sm:max-w-3xl w-full mx-auto px-3 sm:px-4 py-6 overflow-hidden box-border">
@@ -1306,8 +1307,22 @@ const App: React.FC = () => {
             laundries={laundries}
             inventory={inventory}
             lastChanges={lastChanges}
-            onUpdateQuantity={updateQuantity}
-            onViewAudit={viewAudit}
+            onUpdateQuantity={async (agentId, detergentType, newQuantity) => {
+              try {
+                await updateQuantity(agentId, detergentType, newQuantity);
+              } catch (err) {
+                if (handleAuthFailure(err)) return;
+                throw err;
+              }
+            }}
+            onViewAudit={async (agentId, detergentType) => {
+              try {
+                await viewAudit(agentId, detergentType);
+              } catch (err) {
+                if (handleAuthFailure(err)) return;
+                throw err;
+              }
+            }}
             auditLog={auditLog}
             showingAuditFor={showingAuditFor}
             onCloseAudit={closeAudit}

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Minus, Plus, Edit2, History, AlertTriangle } from 'lucide-react';
+import { Minus, Edit2, History, AlertTriangle } from 'lucide-react';
 import type { DetergentType, InventoryItem, InventoryAudit, Laundry } from '../../types';
 import { formatTimestamp } from '../../utils/formatting';
 
@@ -54,19 +54,9 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
     }
   };
 
-  const handleIncrease = async (agentId: string, detergentType: DetergentType, currentQuantity: number) => {
-    const key = `${agentId}-${detergentType}`;
-    setLoading(key);
-    try {
-      await onUpdateQuantity(agentId, detergentType, currentQuantity + 1);
-    } finally {
-      setLoading(null);
-    }
-  };
-
   const handleStartEdit = (agentId: string, detergentType: DetergentType, currentQuantity: number) => {
     setEditingItem({ agentId, detergentType });
-    setEditValue(String(currentQuantity));
+    setEditValue(currentQuantity === 0 ? '' : String(currentQuantity));
   };
 
   const handleSaveEdit = async () => {
@@ -145,14 +135,27 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
         </div>
       )}
 
-      {laundries.map((laundry) => (
-        <div key={laundry.id} className="mb-8">
-          <div className="flex items-center gap-3 mb-4">
-            <h2 className="text-xl font-semibold text-slate-200">{laundry.name}</h2>
-            {!laundry.isOnline && (
-              <span className="text-xs px-2 py-1 rounded bg-red-500/20 text-red-400">Offline</span>
-            )}
-          </div>
+      {laundries.map((laundry) => {
+        // Check if any detergent is low in stock for this laundry
+        const hasLowStock = (['blue', 'green', 'brown'] as DetergentType[]).some(type => {
+          const item = getInventoryItem(laundry.id, type);
+          return item.quantity < LOW_STOCK_THRESHOLD;
+        });
+
+        return (
+          <div key={laundry.id} className="mb-8">
+            <div className="flex items-center gap-3 mb-4">
+              <h2 className="text-xl font-semibold text-slate-200">{laundry.name}</h2>
+              {!laundry.isOnline && (
+                <span className="text-xs px-2 py-1 rounded bg-red-500/20 text-red-400">Offline</span>
+              )}
+              {hasLowStock && (
+                <span className="flex items-center gap-1.5 text-xs px-2 py-1 rounded bg-amber-500/20 text-amber-400">
+                  <AlertTriangle className="w-3.5 h-3.5" />
+                  Low stock
+                </span>
+              )}
+            </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             {(['blue', 'green', 'brown'] as DetergentType[]).map((detergentType) => {
@@ -218,21 +221,14 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                         {item.quantity} <span className="text-lg text-slate-400">cans</span>
                       </div>
 
-                      <div className="flex gap-2 mb-3">
+                      <div className="mb-3">
                         <button
                           onClick={() => handleDecrease(laundry.id, detergentType, item.quantity)}
                           disabled={item.quantity === 0 || isLoading}
-                          className="flex-1 px-4 py-3 bg-red-600 hover:bg-red-500 disabled:bg-slate-700 disabled:text-slate-500 text-white rounded-lg font-semibold flex items-center justify-center gap-2 transition-colors"
+                          className="w-full px-4 py-3 bg-red-600 hover:bg-red-500 disabled:bg-slate-700 disabled:text-slate-500 text-white rounded-lg font-semibold flex items-center justify-center gap-2 transition-colors"
                         >
                           <Minus className="w-5 h-5" />
                           Use 1
-                        </button>
-                        <button
-                          onClick={() => handleIncrease(laundry.id, detergentType, item.quantity)}
-                          disabled={isLoading}
-                          className="px-4 py-3 bg-green-600 hover:bg-green-500 disabled:bg-slate-700 text-white rounded-lg flex items-center justify-center transition-colors"
-                        >
-                          <Plus className="w-5 h-5" />
                         </button>
                       </div>
 
@@ -271,7 +267,8 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
             })}
           </div>
         </div>
-      ))}
+        );
+      })}
 
       {/* Audit Log Modal */}
       {showingAuditFor && (

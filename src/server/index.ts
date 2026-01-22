@@ -1314,10 +1314,11 @@ app.get('/api/inventory', (req, res) => {
 });
 
 app.post('/api/inventory/:agentId/:detergentType', (req, res) => {
-  const username = (req as any).session?.username;
-  if (!username) {
+  const session = getSession(req);
+  if (REQUIRE_UI_AUTH && !session) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
+  const username = session?.username || 'admin';
 
   const { agentId, detergentType } = req.params;
   const { quantity } = req.body;
