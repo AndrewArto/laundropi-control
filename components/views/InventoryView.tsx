@@ -15,9 +15,9 @@ interface InventoryViewProps {
 }
 
 const DETERGENT_LABELS: Record<DetergentType, string> = {
-  blue: 'Blue Detergent',
-  green: 'Green Detergent',
-  brown: 'Brown Detergent',
+  blue: 'Determousse Blue',
+  green: 'FORTAX 555',
+  brown: 'Fresh Teddy',
 };
 
 const DETERGENT_COLORS: Record<DetergentType, string> = {
