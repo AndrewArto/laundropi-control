@@ -3,6 +3,7 @@ import express = require('express');
 import cors = require('cors');
 import { WebSocketServer, WebSocket } from 'ws';
 import * as crypto from 'crypto';
+import { v4 as uuidv4 } from 'uuid';
 import { listAgents, updateHeartbeat, saveMeta, getAgent, updateRelayMeta, listSchedules, upsertSchedule, deleteSchedule, listGroups, listGroupsForMembership, upsertGroup, deleteGroup, GroupRow, deleteAgent, upsertAgent, upsertCommand, listPendingCommands, deleteCommand, updateCommandsForRelay, expireOldCommands, insertLead, getLastLeadTimestampForIp, getRevenueEntry, listRevenueEntriesBetween, listRevenueEntries, listRevenueEntryDatesBetween, upsertRevenueEntry, insertRevenueAudit, listRevenueAudit, RevenueEntryRow, listUiUsers, getUiUser, createUiUser, updateUiUserRole, updateUiUserPassword, updateUiUserLastLogin, countUiUsers, listCameras, getCamera, upsertCamera, deleteCamera, upsertIntegrationSecret, getIntegrationSecret, deleteIntegrationSecret, CameraRow } from './db';
 
 
@@ -15,6 +16,13 @@ const parseCsv = (val?: string) => (val || '')
   .split(',')
   .map((entry) => entry.trim())
   .filter(Boolean);
+
+const parseDurationMs = (val: string | undefined, fallback: number) => {
+  const trimmed = val?.trim();
+  if (!trimmed) return fallback;
+  const num = Number(trimmed);
+  return Number.isFinite(num) && num >= 0 ? num : fallback;
+};
 
 const parseAgentSecrets = (val?: string) => {
   const map = new Map<string, string>();
@@ -91,6 +99,16 @@ const decryptSecret = (ciphertext: string) => {
   return decrypted.toString('utf8');
 };
 
+// Escape XML/SVG special characters to prevent XSS
+const escapeXml = (unsafe: string): string => {
+  return unsafe
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+};
+
 const parseCookies = (header?: string) => {
   const out: Record<string, string> = {};
   if (!header) return out;
@@ -145,8 +163,13 @@ const KNOWN_LAUNDRY_IDS = (() => {
   return [];
 })();
 const KNOWN_LAUNDRY_SET = new Set(KNOWN_LAUNDRY_IDS);
+const PRIMARY_LAUNDRY_ID = (process.env.PRIMARY_LAUNDRY_ID || KNOWN_LAUNDRY_IDS[0] || '').trim();
+const PRIMARY_CAMERAS_DEFAULT_ENABLED = asBool(process.env.PRIMARY_CAMERAS_DEFAULT_ENABLED, false);
+const PRIMARY_CAMERA_FRONT_RTSP_URL = (process.env.PRIMARY_CAMERA_FRONT_RTSP_URL || '').trim();
+const PRIMARY_CAMERA_BACK_RTSP_URL = (process.env.PRIMARY_CAMERA_BACK_RTSP_URL || '').trim();
 
 const isKnownLaundry = (agentId: string) => KNOWN_LAUNDRY_SET.size === 0 || KNOWN_LAUNDRY_SET.has(agentId);
+const isPrimaryLaundry = (agentId: string) => Boolean(PRIMARY_LAUNDRY_ID) && agentId === PRIMARY_LAUNDRY_ID;
 
 if (REQUIRE_UI_AUTH && !SESSION_SECRET) {
   console.error('[central] SESSION_SECRET is required when REQUIRE_UI_AUTH is enabled.');
@@ -163,21 +186,51 @@ if (!ALLOW_INSECURE && AGENT_SECRET_MAP.size === 0) {
 }
 
 const DEFAULT_ADMIN_USERNAME = 'admin';
-const DEFAULT_ADMIN_PASSWORD = 'admin';
+
+// Generate a secure random password for the default admin
+const generateSecurePassword = (): string => {
+  // Generate a 16-character alphanumeric password
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  const bytes = crypto.randomBytes(16);
+  let password = '';
+  for (let i = 0; i < 16; i++) {
+    password += chars[bytes[i] % chars.length];
+  }
+  return password;
+};
 
 const ensureDefaultAdmin = () => {
   if (countUiUsers() > 0) return;
   const now = Date.now();
+
+  // Use environment variable for initial password, or generate a secure random one
+  const initialPassword = process.env.INITIAL_ADMIN_PASSWORD?.trim() || generateSecurePassword();
+  const passwordWasGenerated = !process.env.INITIAL_ADMIN_PASSWORD;
+
   const created = createUiUser({
     username: DEFAULT_ADMIN_USERNAME,
     role: 'admin',
-    passwordHash: hashPassword(DEFAULT_ADMIN_PASSWORD),
+    passwordHash: hashPassword(initialPassword),
     createdAt: now,
     updatedAt: now,
     lastLoginAt: null,
   });
+
   if (created) {
-    console.warn('[central] default admin user created (admin/admin). Change the password in System > User Management.');
+    if (passwordWasGenerated) {
+      console.warn('━'.repeat(80));
+      console.warn('[central] ⚠️  DEFAULT ADMIN CREDENTIALS CREATED');
+      console.warn('[central]');
+      console.warn(`[central] Username: ${DEFAULT_ADMIN_USERNAME}`);
+      console.warn(`[central] Password: ${initialPassword}`);
+      console.warn('[central]');
+      console.warn('[central] ⚠️  SAVE THIS PASSWORD - IT WILL NOT BE SHOWN AGAIN');
+      console.warn('[central] Change the password immediately in Settings > User Management');
+      console.warn('━'.repeat(80));
+    } else {
+      console.warn('[central] Default admin user created with password from INITIAL_ADMIN_PASSWORD env var.');
+      console.warn('[central] Change the password in Settings > User Management for security.');
+    }
   }
 };
 
@@ -207,11 +260,29 @@ const ensureKnownAgents = () => {
 
 const PORT = Number(process.env.CENTRAL_PORT || 4000);
 const HEARTBEAT_STALE_MS = 30_000;
-const CAMERA_FRAME_TIMEOUT_MS = Number(process.env.CAMERA_FRAME_TIMEOUT_MS || 4000);
-const cameraFrameCacheMs = Number(process.env.CAMERA_FRAME_CACHE_MS || 5000);
-const CAMERA_FRAME_CACHE_MS = Number.isFinite(cameraFrameCacheMs) ? cameraFrameCacheMs : 5000;
-const cameraFrameMinIntervalMs = Number(process.env.CAMERA_FRAME_MIN_INTERVAL_MS || CAMERA_FRAME_CACHE_MS);
-const CAMERA_FRAME_MIN_INTERVAL_MS = Number.isFinite(cameraFrameMinIntervalMs) ? cameraFrameMinIntervalMs : CAMERA_FRAME_CACHE_MS;
+const CAMERA_FRAME_TIMEOUT_MS = parseDurationMs(process.env.CAMERA_FRAME_TIMEOUT_MS, 4000);
+const CAMERA_FRAME_CACHE_MS = parseDurationMs(process.env.CAMERA_FRAME_CACHE_MS, 5000);
+const CAMERA_FRAME_MIN_INTERVAL_MS = parseDurationMs(process.env.CAMERA_FRAME_MIN_INTERVAL_MS, CAMERA_FRAME_CACHE_MS);
+const PRIMARY_CAMERA_FRAME_CACHE_MS = parseDurationMs(process.env.PRIMARY_CAMERA_FRAME_CACHE_MS, CAMERA_FRAME_CACHE_MS);
+const PRIMARY_CAMERA_FRAME_MIN_INTERVAL_MS = parseDurationMs(
+  process.env.PRIMARY_CAMERA_FRAME_MIN_INTERVAL_MS,
+  PRIMARY_CAMERA_FRAME_CACHE_MS
+);
+
+console.log('[central] Camera cache settings:', {
+  CAMERA_FRAME_CACHE_MS,
+  CAMERA_FRAME_MIN_INTERVAL_MS,
+  PRIMARY_CAMERA_FRAME_CACHE_MS,
+  PRIMARY_CAMERA_FRAME_MIN_INTERVAL_MS
+});
+
+const getCameraFrameCacheMs = (agentId: string) => (
+  isPrimaryLaundry(agentId) ? PRIMARY_CAMERA_FRAME_CACHE_MS : CAMERA_FRAME_CACHE_MS
+);
+
+const getCameraFrameMinIntervalMs = (agentId: string) => (
+  isPrimaryLaundry(agentId) ? PRIMARY_CAMERA_FRAME_MIN_INTERVAL_MS : CAMERA_FRAME_MIN_INTERVAL_MS
+);
 
 type AgentSocketRecord = { socket: WebSocket; lastHeartbeat: number };
 const agents: Map<string, AgentSocketRecord> = new Map();
@@ -326,6 +397,49 @@ const normalizeRtspUrl = (value?: string | null): string | null => {
   }
 };
 
+type PrimaryCameraDefaults = {
+  enabled?: boolean;
+  sourceType?: 'rtsp';
+  rtspUrl?: string;
+};
+
+const parseFfmpegDevice = (raw: string | null) => {
+  if (!raw) return null;
+  try {
+    const parsed = new URL(raw);
+    if (parsed.protocol !== 'ffmpeg:' || parsed.pathname !== 'device') return null;
+    const video = parsed.searchParams.get('video');
+    if (!video) return null;
+    return { video };
+  } catch {
+    return null;
+  }
+};
+
+const isSameFfmpegDevice = (a: string | null, b: string | null) => {
+  const left = parseFfmpegDevice(a);
+  const right = parseFfmpegDevice(b);
+  if (!left || !right) return false;
+  return left.video === right.video;
+};
+
+const getPrimaryCameraDefaults = (agentId: string, position: string): PrimaryCameraDefaults | null => {
+  if (!isPrimaryLaundry(agentId)) return null;
+  const raw = position === 'front'
+    ? PRIMARY_CAMERA_FRONT_RTSP_URL
+    : position === 'back'
+      ? PRIMARY_CAMERA_BACK_RTSP_URL
+      : '';
+  const rtspUrl = raw ? normalizeRtspUrl(raw) : null;
+  if (rtspUrl) {
+    return { sourceType: 'rtsp', rtspUrl, enabled: true };
+  }
+  if (PRIMARY_CAMERAS_DEFAULT_ENABLED) {
+    return { enabled: true };
+  }
+  return null;
+};
+
 const buildCameraId = (agentId: string, position: string) => `${agentId}:${position}`;
 
 const buildStreamKey = (camera: CameraRow) => {
@@ -337,11 +451,18 @@ const buildStreamKey = (camera: CameraRow) => {
 const attachRtspCredentials = (rtspUrl: string, username?: string | null, password?: string | null) => {
   try {
     const parsed = new URL(rtspUrl);
-    if (parsed.protocol !== 'rtsp:') return rtspUrl;
-    if (username) parsed.username = username;
-    if (password) parsed.password = password;
+
+    // Only attach credentials to RTSP URLs, pass through other protocols (ffmpeg:, etc.)
+    if (parsed.protocol !== 'rtsp:') {
+      return rtspUrl;
+    }
+
+    // URL constructor automatically encodes credentials to prevent injection
+    if (username) parsed.username = encodeURIComponent(username);
+    if (password) parsed.password = encodeURIComponent(password);
     return parsed.toString();
-  } catch {
+  } catch (err) {
+    console.error('[central] Failed to parse RTSP URL:', err instanceof Error ? err.message : err);
     return rtspUrl;
   }
 };
@@ -377,7 +498,42 @@ function ensureDefaultCameras(agentId: string) {
   const now = Date.now();
   CAMERA_POSITIONS.forEach(position => {
     const current = existingByPosition.get(position);
+    const defaults = getPrimaryCameraDefaults(agentId, position);
+    const isUntouched = current ? current.createdAt === current.updatedAt : false;
+    const isUnconfigured = current ? current.sourceType === 'pattern' && !current.rtspUrl : false;
     if (current) {
+      if (defaults) {
+        let next = current;
+        let changed = false;
+        const shouldUpdateRtsp = Boolean(
+          defaults.sourceType === 'rtsp'
+            && defaults.rtspUrl
+            && (
+              (current.sourceType === 'pattern' && !current.rtspUrl)
+              || (current.sourceType === 'rtsp'
+                && current.rtspUrl
+                && isSameFfmpegDevice(current.rtspUrl, defaults.rtspUrl)
+                && current.rtspUrl !== defaults.rtspUrl)
+            )
+        );
+        if (shouldUpdateRtsp) {
+          next = { ...next, sourceType: 'rtsp', rtspUrl: defaults.rtspUrl };
+          if (defaults.enabled && isUntouched) {
+            next = { ...next, enabled: true };
+          }
+          changed = true;
+        } else if (defaults.enabled && isUntouched && isUnconfigured && !current.enabled) {
+          next = { ...next, enabled: true };
+          changed = true;
+        }
+        if (changed) {
+          upsertCamera({ ...next, updatedAt: now });
+        }
+        return;
+      }
+      if (isUntouched && isUnconfigured && current.enabled) {
+        upsertCamera({ ...current, enabled: false, updatedAt: now });
+      }
       return;
     }
     const id = buildCameraId(agentId, position);
@@ -386,11 +542,11 @@ function ensureDefaultCameras(agentId: string) {
       agentId,
       name: DEFAULT_CAMERA_NAMES[position],
       position,
-      sourceType: 'pattern',
-      rtspUrl: null,
+      sourceType: defaults?.sourceType ?? 'pattern',
+      rtspUrl: defaults?.rtspUrl ?? null,
       usernameSecretId: null,
       passwordSecretId: null,
-      enabled: false,
+      enabled: defaults?.enabled ?? false,
       createdAt: now,
       updatedAt: now,
     });
@@ -573,7 +729,7 @@ const reconcileOnHeartbeat = (agentId: string, reportedRelays: any[]) => {
     } else if (socketReady) {
       // resend
       target!.socket.send(JSON.stringify({ type: 'set_relay', relayId: rid, state: desired }));
-      const cmdId = `${Date.now()}-${agentId}-${rid}`;
+      const cmdId = uuidv4(); // Use UUID to prevent collision
       upsertCommand({ id: cmdId, agentId, relayId: rid, desiredState: desired, status: 'sent', createdAt: Date.now(), expiresAt: Date.now() + 30_000 });
     }
   });
@@ -636,6 +792,7 @@ const pushCameraConfigToAgent = (agentId: string) => {
   if (!target || target.socket.readyState !== WebSocket.OPEN) return;
   ensureDefaultCameras(agentId);
   const cameras = listCameras(agentId).map(buildCameraAgentPayload);
+  console.log('[central] pushCameraConfigToAgent', agentId, JSON.stringify(cameras, null, 2));
   target.socket.send(JSON.stringify({ type: 'update_cameras', cameras }));
 };
 
@@ -643,19 +800,25 @@ const requestCameraFrame = (agentId: string, cameraId: string): Promise<CameraFr
   const cacheKey = `${agentId}::${cameraId}`;
   const now = Date.now();
   const cached = cameraFrameCache.get(cacheKey);
-  if (CAMERA_FRAME_CACHE_MS > 0) {
-    if (cached && now - cached.ts <= CAMERA_FRAME_CACHE_MS) {
-      return Promise.resolve({ contentType: cached.contentType, data: cached.data });
-    }
+  const cacheMs = getCameraFrameCacheMs(agentId);
+
+  // Check cache freshness
+  if (cacheMs > 0 && cached && now - cached.ts <= cacheMs) {
+    return Promise.resolve({ contentType: cached.contentType, data: cached.data });
   }
+
+  // Check in-flight request
   const inflight = cameraFrameInFlight.get(cacheKey);
   if (inflight) return inflight;
-  if (CAMERA_FRAME_MIN_INTERVAL_MS > 0) {
-    const lastFetch = cameraFrameLastFetch.get(cacheKey);
-    if (cached && lastFetch && (now - lastFetch) < CAMERA_FRAME_MIN_INTERVAL_MS) {
-      return Promise.resolve({ contentType: cached.contentType, data: cached.data });
-    }
+
+  // Check minimum interval
+  const minIntervalMs = getCameraFrameMinIntervalMs(agentId);
+  const lastFetch = cameraFrameLastFetch.get(cacheKey);
+  if (minIntervalMs > 0 && cached && lastFetch && (now - lastFetch) < minIntervalMs) {
+    return Promise.resolve({ contentType: cached.contentType, data: cached.data });
   }
+
+  cameraFrameLastFetch.set(cacheKey, now);
 
   const target = agents.get(agentId);
   if (!target || target.socket.readyState !== WebSocket.OPEN) {
@@ -678,8 +841,9 @@ const requestCameraFrame = (agentId: string, cameraId: string): Promise<CameraFr
 const buildCameraPatternSvg = (camera: CameraRow) => {
   const width = 640;
   const height = 360;
-  const title = `${camera.agentId} · ${camera.name}`;
-  const subtitle = camera.position.toUpperCase();
+  // Escape user-controlled values to prevent XSS
+  const title = escapeXml(`${camera.agentId} · ${camera.name}`);
+  const subtitle = escapeXml(camera.position.toUpperCase());
   return `
 <svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
   <defs>
@@ -925,11 +1089,14 @@ app.post('/lead', (req, res) => {
   }
   const ip = getClientIp(req);
   const now = Date.now();
-  if (ip) {
-    const last = getLastLeadTimestampForIp(ip);
-    if (last && now - last < LEAD_RATE_LIMIT_MS) {
-      return res.status(429).json({ error: 'rate_limited' });
-    }
+  // Enforce strict rate limiting - if IP cannot be determined, reject the request
+  if (!ip) {
+    console.warn('[central] Lead form submission blocked: Unable to determine client IP');
+    return res.status(429).json({ error: 'rate_limited' });
+  }
+  const last = getLastLeadTimestampForIp(ip);
+  if (last && now - last < LEAD_RATE_LIMIT_MS) {
+    return res.status(429).json({ error: 'rate_limited' });
   }
   insertLead({
     email: email.slice(0, 320),
@@ -1350,7 +1517,7 @@ app.post('/api/agents/:id/relays/:relayId/state', (req, res) => {
   const state = req.body?.state === 'on' ? 'on' : 'off';
   target.socket.send(JSON.stringify({ type: 'set_relay', relayId: Number(relayId), state }));
   updateDesiredState(id, Number(relayId), state);
-  const cmdId = `${Date.now()}-${id}-${relayId}`;
+  const cmdId = uuidv4(); // Use UUID to prevent collision
   upsertCommand({ id: cmdId, agentId: id, relayId: Number(relayId), desiredState: state, status: 'sent', createdAt: Date.now(), expiresAt: Date.now() + 30_000 });
   res.json({ ok: true, sent: { relayId: Number(relayId), state } });
 });
@@ -1548,7 +1715,7 @@ app.post('/api/agents/:id/groups/:gid/action', (req, res) => {
         results[entry.agentId] = 'offline';
       }
       updateDesiredState(entry.agentId, rid, action);
-      const cmdId = `${Date.now()}-${entry.agentId}-${rid}`;
+      const cmdId = uuidv4(); // Use UUID to prevent collision
       upsertCommand({ id: cmdId, agentId: entry.agentId, relayId: rid, desiredState: action as 'on' | 'off', status: target ? 'sent' : 'pending', createdAt: Date.now(), expiresAt: Date.now() + 30_000 });
     });
   });

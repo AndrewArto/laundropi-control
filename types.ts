@@ -107,3 +107,14 @@ export interface CameraConfig {
   hasCredentials?: boolean;
   previewUrl?: string;
 }
+
+export interface Laundry {
+  id: string;
+  name: string;
+  relays: Relay[];
+  isOnline: boolean;
+  isMock: boolean;
+  lastHeartbeat: number | null;
+}
+
+export type RelaySelection = { agentId: string; relayId: number };
