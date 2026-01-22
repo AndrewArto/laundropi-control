@@ -41,6 +41,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   const [editingItem, setEditingItem] = useState<{ agentId: string; detergentType: DetergentType } | null>(null);
   const [editValue, setEditValue] = useState('');
   const [loading, setLoading] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   const handleDecrease = async (agentId: string, detergentType: DetergentType, currentQuantity: number) => {
     if (currentQuantity <= 0) return;
@@ -69,22 +70,37 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   };
 
   const handleSaveEdit = async () => {
-    if (!editingItem) return;
+    if (!editingItem) {
+      console.log('No editing item');
+      return;
+    }
+
+    setError(null);
     const newQuantity = parseInt(editValue, 10);
+    console.log('Saving quantity:', { editValue, newQuantity, isValid: !isNaN(newQuantity) && newQuantity >= 0 });
+
     if (isNaN(newQuantity) || newQuantity < 0) {
       console.error('Invalid quantity:', editValue, newQuantity);
+      setError('Please enter a valid number (0 or greater)');
       return;
     }
 
     const key = `${editingItem.agentId}-${editingItem.detergentType}`;
+    console.log('Starting save for:', key);
     setLoading(key);
+
     try {
+      console.log('Calling onUpdateQuantity...');
       await onUpdateQuantity(editingItem.agentId, editingItem.detergentType, newQuantity);
+      console.log('Update successful, clearing edit state');
       setEditingItem(null);
       setEditValue('');
+      setError(null);
     } catch (err) {
       console.error('Failed to save:', err);
+      setError(err instanceof Error ? err.message : 'Failed to save. Please try again.');
     } finally {
+      console.log('Clearing loading state');
       setLoading(null);
     }
   };
@@ -113,6 +129,15 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   return (
     <div className="pb-24 px-4 py-6 max-w-6xl mx-auto">
       <h1 className="text-2xl font-bold text-slate-100 mb-6">Detergent Inventory</h1>
+
+      {error && (
+        <div className="mb-4 p-4 bg-red-500/10 border border-red-500/50 rounded-lg text-red-400 flex items-center justify-between">
+          <span>{error}</span>
+          <button onClick={() => setError(null)} className="text-red-400 hover:text-red-300">
+            ✕
+          </button>
+        </div>
+      )}
 
       {laundries.length === 0 && (
         <div className="text-center py-12 text-slate-400">
@@ -174,9 +199,9 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                         <button
                           onClick={handleSaveEdit}
                           disabled={isLoading}
-                          className="flex-1 px-3 py-1.5 bg-purple-600 hover:bg-purple-500 text-white rounded text-sm font-medium disabled:opacity-50"
+                          className="flex-1 px-3 py-1.5 bg-purple-600 hover:bg-purple-500 text-white rounded text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
                         >
-                          Save
+                          {isLoading ? 'Saving...' : 'Save'}
                         </button>
                         <button
                           onClick={handleCancelEdit}
