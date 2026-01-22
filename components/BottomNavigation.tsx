@@ -1,11 +1,12 @@
 import React from 'react';
-import { LayoutDashboard, CalendarClock, Settings, Coins } from 'lucide-react';
+import { LayoutDashboard, CalendarClock, Settings, Coins, Package } from 'lucide-react';
 import type { UiUser } from '../types';
 
 enum Tab {
   DASHBOARD = 'DASHBOARD',
   SCHEDULE = 'SCHEDULE',
   REVENUE = 'REVENUE',
+  INVENTORY = 'INVENTORY',
   SETTINGS = 'SETTINGS'
 }
 
@@ -47,6 +48,14 @@ export const BottomNavigation: React.FC<BottomNavigationProps> = ({
         >
           <CalendarClock className="w-6 h-6" />
           <span className="text-[10px] font-medium">Groups</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab(Tab.INVENTORY)}
+          className={`flex flex-col items-center gap-1 ${activeTab === Tab.INVENTORY ? 'text-purple-400' : 'text-slate-500 hover:text-slate-300'}`}
+        >
+          <Package className="w-6 h-6" />
+          <span className="text-[10px] font-medium">Inventory</span>
         </button>
 
         <button

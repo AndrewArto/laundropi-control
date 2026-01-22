@@ -117,6 +117,27 @@ export type CameraRow = {
   updatedAt: number;
 };
 
+export type DetergentType = 'blue' | 'green' | 'brown';
+
+export type InventoryRow = {
+  agentId: string;
+  detergentType: DetergentType;
+  quantity: number;
+  updatedAt: number;
+  updatedBy: string;
+};
+
+export type InventoryAuditRow = {
+  id?: number;
+  agentId: string;
+  detergentType: DetergentType;
+  oldQuantity: number;
+  newQuantity: number;
+  changeAmount: number;
+  user: string;
+  createdAt: number;
+};
+
 const dbPath = process.env.CENTRAL_DB_PATH || './central.db';
 if (process.env.NODE_ENV !== 'test') {
   console.log(`[central] DB path ${dbPath}`);
@@ -245,6 +266,28 @@ CREATE TABLE IF NOT EXISTS cameras (
 );
 
 CREATE INDEX IF NOT EXISTS cameras_agent_idx ON cameras(agentId);
+
+CREATE TABLE IF NOT EXISTS inventory (
+  agentId TEXT NOT NULL,
+  detergentType TEXT NOT NULL,
+  quantity INTEGER NOT NULL DEFAULT 0,
+  updatedAt INTEGER NOT NULL,
+  updatedBy TEXT NOT NULL,
+  PRIMARY KEY (agentId, detergentType)
+);
+
+CREATE TABLE IF NOT EXISTS inventory_audit (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  agentId TEXT NOT NULL,
+  detergentType TEXT NOT NULL,
+  oldQuantity INTEGER NOT NULL,
+  newQuantity INTEGER NOT NULL,
+  changeAmount INTEGER NOT NULL,
+  user TEXT NOT NULL,
+  createdAt INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS inventory_audit_agent_type_idx ON inventory_audit(agentId, detergentType, createdAt);
 `);
 
 // Best-effort migration: add entries column if missing (ignore errors)
@@ -902,4 +945,105 @@ export function listCameras(agentId?: string): CameraRow[] {
 
 export function deleteCamera(id: string) {
   db.prepare('DELETE FROM cameras WHERE id = ?').run(id);
+}
+
+// ========== Inventory ==========
+
+export function getInventory(agentId: string, detergentType: DetergentType): InventoryRow | null {
+  const row = db.prepare('SELECT * FROM inventory WHERE agentId = ? AND detergentType = ?').get(agentId, detergentType) as any;
+  if (!row) return null;
+  return {
+    agentId: row.agentId,
+    detergentType: row.detergentType as DetergentType,
+    quantity: row.quantity,
+    updatedAt: row.updatedAt,
+    updatedBy: row.updatedBy,
+  };
+}
+
+export function listInventory(agentId: string): InventoryRow[] {
+  const rows = db.prepare('SELECT * FROM inventory WHERE agentId = ? ORDER BY detergentType').all(agentId) as any[];
+  return rows.map(row => ({
+    agentId: row.agentId,
+    detergentType: row.detergentType as DetergentType,
+    quantity: row.quantity,
+    updatedAt: row.updatedAt,
+    updatedBy: row.updatedBy,
+  }));
+}
+
+export function listAllInventory(): InventoryRow[] {
+  const rows = db.prepare('SELECT * FROM inventory ORDER BY agentId, detergentType').all() as any[];
+  return rows.map(row => ({
+    agentId: row.agentId,
+    detergentType: row.detergentType as DetergentType,
+    quantity: row.quantity,
+    updatedAt: row.updatedAt,
+    updatedBy: row.updatedBy,
+  }));
+}
+
+export function updateInventory(agentId: string, detergentType: DetergentType, newQuantity: number, user: string) {
+  const existing = getInventory(agentId, detergentType);
+  const oldQuantity = existing?.quantity ?? 0;
+  const changeAmount = newQuantity - oldQuantity;
+  const now = Date.now();
+
+  // Update inventory
+  db.prepare(`
+    INSERT INTO inventory (agentId, detergentType, quantity, updatedAt, updatedBy)
+    VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT(agentId, detergentType) DO UPDATE SET
+      quantity = excluded.quantity,
+      updatedAt = excluded.updatedAt,
+      updatedBy = excluded.updatedBy
+  `).run(agentId, detergentType, newQuantity, now, user);
+
+  // Add audit entry
+  db.prepare(`
+    INSERT INTO inventory_audit (agentId, detergentType, oldQuantity, newQuantity, changeAmount, user, createdAt)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `).run(agentId, detergentType, oldQuantity, newQuantity, changeAmount, user, now);
+}
+
+export function getInventoryAudit(agentId: string, detergentType: DetergentType, limit: number = 100): InventoryAuditRow[] {
+  const rows = db.prepare(`
+    SELECT * FROM inventory_audit
+    WHERE agentId = ? AND detergentType = ?
+    ORDER BY createdAt DESC
+    LIMIT ?
+  `).all(agentId, detergentType, limit) as any[];
+
+  return rows.map(row => ({
+    id: row.id,
+    agentId: row.agentId,
+    detergentType: row.detergentType as DetergentType,
+    oldQuantity: row.oldQuantity,
+    newQuantity: row.newQuantity,
+    changeAmount: row.changeAmount,
+    user: row.user,
+    createdAt: row.createdAt,
+  }));
+}
+
+export function getLastInventoryChange(agentId: string, detergentType: DetergentType): InventoryAuditRow | null {
+  const row = db.prepare(`
+    SELECT * FROM inventory_audit
+    WHERE agentId = ? AND detergentType = ?
+    ORDER BY createdAt DESC
+    LIMIT 1
+  `).get(agentId, detergentType) as any;
+
+  if (!row) return null;
+
+  return {
+    id: row.id,
+    agentId: row.agentId,
+    detergentType: row.detergentType as DetergentType,
+    oldQuantity: row.oldQuantity,
+    newQuantity: row.newQuantity,
+    changeAmount: row.changeAmount,
+    user: row.user,
+    createdAt: row.createdAt,
+  };
 }

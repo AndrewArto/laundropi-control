@@ -9,10 +9,12 @@ import { useRevenue } from './hooks/useRevenue';
 import { useSchedules } from './hooks/useSchedules';
 import { useUsers } from './hooks/useUsers';
 import { useGroups } from './hooks/useGroups';
+import { useInventory } from './hooks/useInventory';
 import { DashboardView } from './components/views/DashboardView';
 import { SchedulesView } from './components/views/SchedulesView';
 import { RevenueView } from './components/views/RevenueView';
 import { SettingsView } from './components/views/SettingsView';
+import { InventoryView } from './components/views/InventoryView';
 import { LoginForm } from './components/LoginForm';
 import { LoadingScreen } from './components/LoadingScreen';
 import { Header } from './components/Header';
@@ -185,6 +187,18 @@ const App: React.FC = () => {
     dedupeSelections,
     resetGroupsState,
   } = useGroups();
+
+  const {
+    inventory,
+    lastChanges,
+    auditLog,
+    showingAuditFor,
+    inventoryError,
+    fetchInventory,
+    updateQuantity,
+    viewAudit,
+    closeAudit,
+  } = useInventory();
 
   // State reset callback for useAuth
   const resetUiStateCallback = React.useCallback(() => {
@@ -603,6 +617,13 @@ const App: React.FC = () => {
     }, CAMERA_FRAME_REFRESH_MS);
     return () => clearInterval(timer);
   }, [isAuthenticated, activeTab, isPageVisible]);
+
+  // Fetch inventory when inventory tab is active
+  useEffect(() => {
+    if (!isAuthenticated || activeTab !== Tab.INVENTORY) return;
+    fetchInventory();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAuthenticated, activeTab]);
 
   useEffect(() => {
     if (!Object.keys(cameraWarmup).length) return;
@@ -1280,6 +1301,18 @@ const App: React.FC = () => {
         {activeTab === Tab.DASHBOARD && renderDashboard()}
         {activeTab === Tab.SCHEDULE && renderScheduler()}
         {activeTab === Tab.REVENUE && renderRevenue()}
+        {activeTab === Tab.INVENTORY && (
+          <InventoryView
+            laundries={laundries}
+            inventory={inventory}
+            lastChanges={lastChanges}
+            onUpdateQuantity={updateQuantity}
+            onViewAudit={viewAudit}
+            auditLog={auditLog}
+            showingAuditFor={showingAuditFor}
+            onCloseAudit={closeAudit}
+          />
+        )}
         {activeTab === Tab.SETTINGS && renderSystem()}
       </main>
 

@@ -1,0 +1,30 @@
+# LaundroPi Control - Production Hosts Configuration
+# Saved: 2026-01-22
+
+## AWS Central Server (Central + UI)
+Host: 3.249.38.131
+User: ubuntu
+SSH Key: ~/.ssh/laundropi_aws
+Role: Central server + Web UI
+Services: laundropi-central, caddy
+
+## Laundromat 1 - Brandoa (Agent)
+Host: LdBrandoa1
+IP: 100.107.170.119
+User: artamonov
+SSH Key: ~/.ssh/id_ed25519
+Role: Device agent (Raspberry Pi)
+Services: laundropi-agent
+
+## Laundromat 2 - Brandoa (Agent)
+Host: LdBrandoa2
+IP: 100.126.119.4
+User: artamonov
+SSH Key: ~/.ssh/id_ed25519_ldbrandoa2
+Role: Device agent (Raspberry Pi)
+Services: laundropi-agent
+
+## Deployment Order
+1. AWS Central Server (deploy central + UI first)
+2. LdBrandoa1 (agent)
+3. LdBrandoa2 (agent)

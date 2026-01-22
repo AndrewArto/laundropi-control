@@ -4,7 +4,7 @@ import cors = require('cors');
 import { WebSocketServer, WebSocket } from 'ws';
 import * as crypto from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
-import { listAgents, updateHeartbeat, saveMeta, getAgent, updateRelayMeta, listSchedules, upsertSchedule, deleteSchedule, listGroups, listGroupsForMembership, upsertGroup, deleteGroup, GroupRow, deleteAgent, upsertAgent, upsertCommand, listPendingCommands, deleteCommand, updateCommandsForRelay, expireOldCommands, insertLead, getLastLeadTimestampForIp, getRevenueEntry, listRevenueEntriesBetween, listRevenueEntries, listRevenueEntryDatesBetween, upsertRevenueEntry, insertRevenueAudit, listRevenueAudit, RevenueEntryRow, listUiUsers, getUiUser, createUiUser, updateUiUserRole, updateUiUserPassword, updateUiUserLastLogin, countUiUsers, listCameras, getCamera, upsertCamera, deleteCamera, upsertIntegrationSecret, getIntegrationSecret, deleteIntegrationSecret, CameraRow } from './db';
+import { listAgents, updateHeartbeat, saveMeta, getAgent, updateRelayMeta, listSchedules, upsertSchedule, deleteSchedule, listGroups, listGroupsForMembership, upsertGroup, deleteGroup, GroupRow, deleteAgent, upsertAgent, upsertCommand, listPendingCommands, deleteCommand, updateCommandsForRelay, expireOldCommands, insertLead, getLastLeadTimestampForIp, getRevenueEntry, listRevenueEntriesBetween, listRevenueEntries, listRevenueEntryDatesBetween, upsertRevenueEntry, insertRevenueAudit, listRevenueAudit, RevenueEntryRow, listUiUsers, getUiUser, createUiUser, updateUiUserRole, updateUiUserPassword, updateUiUserLastLogin, countUiUsers, listCameras, getCamera, upsertCamera, deleteCamera, upsertIntegrationSecret, getIntegrationSecret, deleteIntegrationSecret, CameraRow, listInventory, getInventory, updateInventory, getInventoryAudit, getLastInventoryChange, DetergentType } from './db';
 
 
 const asBool = (val: string | undefined, fallback = false) => {
@@ -1276,6 +1276,77 @@ app.put('/api/revenue/:agentId', (req, res) => {
     createdAt: now,
   })));
   return res.json({ entry: updated, audit: listRevenueAudit(agentId, entryDate) });
+});
+
+// ========== Inventory endpoints ==========
+
+app.get('/api/inventory', (req, res) => {
+  const allAgents = listAgents();
+  const selectedAgents = KNOWN_LAUNDRY_SET.size
+    ? KNOWN_LAUNDRY_IDS
+        .map(id => allAgents.find(a => a.agentId === id))
+        .filter((item): item is (typeof allAgents)[number] => Boolean(item))
+    : allAgents;
+
+  const inventory = selectedAgents.map(agent => {
+    const items = listInventory(agent.agentId);
+    const detergentTypes: DetergentType[] = ['blue', 'green', 'brown'];
+
+    // Ensure all three detergent types exist
+    const completeInventory = detergentTypes.map(type => {
+      const existing = items.find(item => item.detergentType === type);
+      return existing || {
+        agentId: agent.agentId,
+        detergentType: type,
+        quantity: 0,
+        updatedAt: Date.now(),
+        updatedBy: 'system',
+      };
+    });
+
+    return {
+      agentId: agent.agentId,
+      items: completeInventory,
+    };
+  });
+
+  res.json({ inventory });
+});
+
+app.post('/api/inventory/:agentId/:detergentType', (req, res) => {
+  const username = (req as any).session?.username;
+  if (!username) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+
+  const { agentId, detergentType } = req.params;
+  const { quantity } = req.body;
+
+  if (!['blue', 'green', 'brown'].includes(detergentType)) {
+    return res.status(400).json({ error: 'Invalid detergent type' });
+  }
+
+  if (typeof quantity !== 'number' || quantity < 0) {
+    return res.status(400).json({ error: 'Invalid quantity' });
+  }
+
+  updateInventory(agentId, detergentType as DetergentType, quantity, username);
+  const updated = getInventory(agentId, detergentType as DetergentType);
+  const lastChange = getLastInventoryChange(agentId, detergentType as DetergentType);
+
+  res.json({ inventory: updated, lastChange });
+});
+
+app.get('/api/inventory/:agentId/:detergentType/audit', (req, res) => {
+  const { agentId, detergentType } = req.params;
+  const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 100;
+
+  if (!['blue', 'green', 'brown'].includes(detergentType)) {
+    return res.status(400).json({ error: 'Invalid detergent type' });
+  }
+
+  const audit = getInventoryAudit(agentId, detergentType as DetergentType, limit);
+  res.json({ audit });
 });
 
 app.get('/api/agents', (_req, res) => {

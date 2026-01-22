@@ -82,6 +82,22 @@ type RevenueEntryListParams = {
 };
 
 export const ApiService = {
+  async get<T = any>(path: string): Promise<T> {
+    const url = path.startsWith('/api') || path.startsWith('/auth') ? `${BASE_URL}${path}` : path;
+    const res = await request(url);
+    return await res.json();
+  },
+
+  async post<T = any>(path: string, body?: any): Promise<T> {
+    const url = path.startsWith('/api') || path.startsWith('/auth') ? `${BASE_URL}${path}` : path;
+    const res = await request(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    return await res.json();
+  },
+
   async getSession(): Promise<{ user: { username: string; role: string } | null }> {
     const res = await request(`${AUTH_BASE}/session`);
     return await res.json();

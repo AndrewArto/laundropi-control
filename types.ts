@@ -118,3 +118,29 @@ export interface Laundry {
 }
 
 export type RelaySelection = { agentId: string; relayId: number };
+
+export type DetergentType = 'blue' | 'green' | 'brown';
+
+export interface InventoryItem {
+  agentId: string;
+  detergentType: DetergentType;
+  quantity: number;
+  updatedAt: number;
+  updatedBy: string;
+}
+
+export interface InventoryAudit {
+  id?: number;
+  agentId: string;
+  detergentType: DetergentType;
+  oldQuantity: number;
+  newQuantity: number;
+  changeAmount: number;
+  user: string;
+  createdAt: number;
+}
+
+export interface LaundryInventory {
+  agentId: string;
+  items: InventoryItem[];
+}
