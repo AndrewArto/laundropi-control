@@ -160,27 +160,29 @@ export const BankImportView: React.FC<BankImportViewProps> = ({
 
     return (
       <div className="pb-24 px-4 py-6 max-w-full sm:max-w-4xl mx-auto">
-        {/* Header */}
-        <div className="flex items-center gap-4 mb-6">
-          <button
-            onClick={onClearActiveImport}
-            className="p-2 text-slate-400 hover:text-slate-200 rounded-lg hover:bg-slate-800"
-          >
-            <ArrowLeft className="w-5 h-5" />
-          </button>
-          <div>
-            <h1 className="text-2xl font-bold text-slate-100">{activeImport.fileName}</h1>
-            <p className="text-sm text-slate-400">
-              Imported {formatTimestamp(activeImport.importedAt)} by {activeImport.importedBy}
-            </p>
+        {/* Header - stacked on mobile */}
+        <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4 mb-6">
+          <div className="flex items-center gap-3">
+            <button
+              onClick={onClearActiveImport}
+              className="p-2 text-slate-400 hover:text-slate-200 rounded-lg hover:bg-slate-800"
+            >
+              <ArrowLeft className="w-5 h-5" />
+            </button>
+            <div className="flex-1 min-w-0">
+              <h1 className="text-lg sm:text-2xl font-bold text-slate-100 truncate">{activeImport.fileName}</h1>
+              <p className="text-xs sm:text-sm text-slate-400">
+                {formatTimestamp(activeImport.importedAt)} · {activeImport.importedBy}
+              </p>
+            </div>
           </div>
-          <div className="ml-auto flex items-center gap-3">
+          <div className="flex items-center gap-2 sm:gap-3 sm:ml-auto">
             {hasUnsavedChanges && (
               <span className="px-2 py-1 rounded text-xs font-medium bg-amber-500/20 text-amber-400">
                 {pendingChanges.size} unsaved
               </span>
             )}
-            <span className={`px-3 py-1 rounded-full text-sm font-medium ${
+            <span className={`px-2 sm:px-3 py-1 rounded-full text-xs sm:text-sm font-medium ${
               isCompleted ? 'bg-green-500/20 text-green-400' :
               isCancelled ? 'bg-red-500/20 text-red-400' :
               'bg-amber-500/20 text-amber-400'
@@ -227,15 +229,15 @@ export const BankImportView: React.FC<BankImportViewProps> = ({
         {/* Stripe Credits - assign to laundry revenue */}
         {newStripeCredits.length > 0 && !isCompleted && !isCancelled && (
           <div className="mb-6">
-            <div className="flex items-center gap-2 mb-3">
+            <div className="flex flex-col sm:flex-row sm:items-center gap-2 mb-3">
               <button
                 onClick={() => setShowStripe(!showStripe)}
-                className="flex-1 text-left text-lg font-semibold text-slate-100 flex items-center gap-2 hover:text-slate-200"
+                className="flex-1 text-left text-base sm:text-lg font-semibold text-slate-100 flex items-center gap-2 hover:text-slate-200"
               >
-                {showStripe ? <ChevronDown className="w-5 h-5" /> : <ChevronRight className="w-5 h-5" />}
-                <span className="w-2 h-2 rounded-full bg-blue-400"></span>
-                Stripe Payments ({newStripeCredits.length})
-                <span className="text-xs text-slate-400 font-normal ml-2">Assign to laundry revenue</span>
+                {showStripe ? <ChevronDown className="w-5 h-5 flex-shrink-0" /> : <ChevronRight className="w-5 h-5 flex-shrink-0" />}
+                <span className="w-2 h-2 rounded-full bg-blue-400 flex-shrink-0"></span>
+                <span>Stripe Payments ({newStripeCredits.length})</span>
+                <span className="text-xs text-slate-400 font-normal ml-2 hidden sm:inline">Assign to laundry revenue</span>
               </button>
               <button
                 onClick={() => {
@@ -250,7 +252,7 @@ export const BankImportView: React.FC<BankImportViewProps> = ({
                     });
                   }
                 }}
-                className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded text-sm font-medium whitespace-nowrap"
+                className="w-full sm:w-auto px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded text-sm font-medium whitespace-nowrap"
               >
                 Process All → {allLaundries[allLaundries.length > 2 ? 1 : 0]?.name || 'Default'}
               </button>
@@ -266,7 +268,7 @@ export const BankImportView: React.FC<BankImportViewProps> = ({
                   return (
                     <div
                       key={tx.id}
-                      className={`bg-blue-900/20 rounded-lg p-4 border transition-all duration-400 ease-out ${
+                      className={`bg-blue-900/20 rounded-lg p-3 sm:p-4 border transition-all duration-400 ease-out ${
                         isFlyingOut
                           ? 'opacity-0 translate-y-8 scale-95 max-h-0 py-0 my-0 overflow-hidden border-transparent'
                           : isAnimating
@@ -279,7 +281,8 @@ export const BankImportView: React.FC<BankImportViewProps> = ({
                           : 'all 300ms ease-out'
                       }}
                     >
-                      <div className="flex items-start justify-between gap-4">
+                      {/* Desktop layout */}
+                      <div className="hidden sm:flex items-start justify-between gap-4">
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-3 mb-1">
                             <span className="text-slate-400 text-sm">{formatDateShort(tx.transactionDate)}</span>
@@ -339,6 +342,62 @@ export const BankImportView: React.FC<BankImportViewProps> = ({
                           )}
                         </div>
                       </div>
+
+                      {/* Mobile layout */}
+                      <div className="sm:hidden space-y-2">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-2">
+                            <span className="text-slate-400 text-xs">{formatDateShort(tx.transactionDate)}</span>
+                            <span className="text-xs px-1.5 py-0.5 bg-blue-500/20 text-blue-400 rounded">STRIPE</span>
+                          </div>
+                          <span className="font-semibold text-green-400">+{formatMoney(tx.amount)}</span>
+                        </div>
+                        <p className="text-slate-300 text-sm line-clamp-2">{tx.description}</p>
+                        {isAnimating ? (
+                          <div className="flex items-center gap-2 text-green-400 justify-center py-1">
+                            <Check className="w-5 h-5" />
+                            <span className="text-sm font-medium">→ {assignedLaundry}</span>
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-2 pt-1">
+                            {(() => {
+                              const selectedByClick = assigning?.phase === 'selected' ? assigning.agentId : null;
+                              const pending = pendingChanges.get(tx.id);
+                              const selectedAgentId = selectedByClick || pending?.agentId;
+                              const defaultIdx = allLaundries.length > 2 ? 1 : 0;
+
+                              return allLaundries.map((l, idx) => {
+                                const isSelected = selectedAgentId
+                                  ? l.id === selectedAgentId
+                                  : idx === defaultIdx;
+
+                                return (
+                                  <button
+                                    key={l.id}
+                                    onClick={() => handleAssignStripe(tx.id, l.id)}
+                                    disabled={!!assigning}
+                                    className={`flex-1 px-2 py-2 rounded text-xs font-medium transition-colors ${
+                                      isSelected
+                                        ? 'bg-blue-600 text-white'
+                                        : 'bg-slate-700 text-slate-200'
+                                    } ${assigning ? 'cursor-not-allowed' : ''}`}
+                                  >
+                                    {l.name}
+                                  </button>
+                                );
+                              });
+                            })()}
+                            <button
+                              onClick={() => onIgnoreTransaction(tx.id)}
+                              disabled={!!assigning}
+                              className="p-2 text-slate-400 hover:text-slate-200 hover:bg-slate-700 rounded disabled:cursor-not-allowed"
+                              title="Ignore"
+                            >
+                              <Ban className="w-4 h-4" />
+                            </button>
+                          </div>
+                        )}
+                      </div>
                     </div>
                   );
                 })}
@@ -350,14 +409,14 @@ export const BankImportView: React.FC<BankImportViewProps> = ({
         {/* New Expenses - needs action */}
         {newExpenses.length > 0 && !isCompleted && !isCancelled && (
           <div className="mb-6">
-            <div className="flex items-center gap-2 mb-3">
+            <div className="flex flex-col sm:flex-row sm:items-center gap-2 mb-3">
               <button
                 onClick={() => setShowExpenses(!showExpenses)}
-                className="flex-1 text-left text-lg font-semibold text-slate-100 flex items-center gap-2 hover:text-slate-200"
+                className="flex-1 text-left text-base sm:text-lg font-semibold text-slate-100 flex items-center gap-2 hover:text-slate-200"
               >
-                {showExpenses ? <ChevronDown className="w-5 h-5" /> : <ChevronRight className="w-5 h-5" />}
-                <span className="w-2 h-2 rounded-full bg-amber-400"></span>
-                New Expenses ({newExpenses.length})
+                {showExpenses ? <ChevronDown className="w-5 h-5 flex-shrink-0" /> : <ChevronRight className="w-5 h-5 flex-shrink-0" />}
+                <span className="w-2 h-2 rounded-full bg-amber-400 flex-shrink-0"></span>
+                <span>New Expenses ({newExpenses.length})</span>
               </button>
               <button
                 onClick={() => {
@@ -371,7 +430,7 @@ export const BankImportView: React.FC<BankImportViewProps> = ({
                     });
                   }
                 }}
-                className="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 text-white rounded text-sm font-medium whitespace-nowrap"
+                className="w-full sm:w-auto px-3 py-1.5 bg-purple-600 hover:bg-purple-500 text-white rounded text-sm font-medium whitespace-nowrap"
               >
                 Process All → {allLaundries[0]?.name || 'Default'}
               </button>
@@ -387,7 +446,7 @@ export const BankImportView: React.FC<BankImportViewProps> = ({
                   return (
                     <div
                       key={tx.id}
-                      className={`bg-slate-800 rounded-lg p-4 border transition-all duration-400 ease-out ${
+                      className={`bg-slate-800 rounded-lg p-3 sm:p-4 border transition-all duration-400 ease-out ${
                         isFlyingOut
                           ? 'opacity-0 translate-y-8 scale-95 max-h-0 py-0 my-0 overflow-hidden border-transparent'
                           : isAnimating
@@ -400,7 +459,8 @@ export const BankImportView: React.FC<BankImportViewProps> = ({
                           : 'all 300ms ease-out'
                       }}
                     >
-                      <div className="flex items-start justify-between gap-4">
+                      {/* Desktop layout */}
+                      <div className="hidden sm:flex items-start justify-between gap-4">
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-3 mb-1">
                             <span className="text-slate-400 text-sm">{formatDateShort(tx.transactionDate)}</span>
@@ -458,6 +518,58 @@ export const BankImportView: React.FC<BankImportViewProps> = ({
                           )}
                         </div>
                       </div>
+
+                      {/* Mobile layout */}
+                      <div className="sm:hidden space-y-2">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-slate-400 text-xs">{formatDateShort(tx.transactionDate)}</span>
+                          <span className="font-semibold text-red-400">-{formatMoney(tx.amount)}</span>
+                        </div>
+                        <p className="text-slate-300 text-sm line-clamp-2">{tx.description}</p>
+                        {isAnimating ? (
+                          <div className="flex items-center gap-2 text-green-400 justify-center py-1">
+                            <Check className="w-5 h-5" />
+                            <span className="text-sm font-medium">→ {assignedLaundry}</span>
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-2 pt-1">
+                            {(() => {
+                              const selectedByClick = assigning?.phase === 'selected' ? assigning.agentId : null;
+                              const pending = pendingChanges.get(tx.id);
+                              const selectedAgentId = selectedByClick || pending?.agentId;
+
+                              return allLaundries.map((l, idx) => {
+                                const isSelected = selectedAgentId
+                                  ? l.id === selectedAgentId
+                                  : idx === 0;
+
+                                return (
+                                  <button
+                                    key={l.id}
+                                    onClick={() => handleAssignExpense(tx.id, l.id)}
+                                    disabled={!!assigning}
+                                    className={`flex-1 px-2 py-2 rounded text-xs font-medium transition-colors ${
+                                      isSelected
+                                        ? 'bg-purple-600 text-white'
+                                        : 'bg-slate-700 text-slate-200'
+                                    } ${assigning ? 'cursor-not-allowed' : ''}`}
+                                  >
+                                    {l.name}
+                                  </button>
+                                );
+                              });
+                            })()}
+                            <button
+                              onClick={() => onIgnoreTransaction(tx.id)}
+                              disabled={!!assigning}
+                              className="p-2 text-slate-400 hover:text-slate-200 hover:bg-slate-700 rounded disabled:cursor-not-allowed"
+                              title="Ignore"
+                            >
+                              <Ban className="w-4 h-4" />
+                            </button>
+                          </div>
+                        )}
+                      </div>
                     </div>
                   );
                 })}
@@ -471,11 +583,11 @@ export const BankImportView: React.FC<BankImportViewProps> = ({
           <div className="mb-6">
             <button
               onClick={() => setShowAssigned(!showAssigned)}
-              className="w-full text-left text-lg font-semibold text-slate-100 mb-3 flex items-center gap-2 hover:text-slate-200"
+              className="w-full text-left text-base sm:text-lg font-semibold text-slate-100 mb-3 flex items-center gap-2 hover:text-slate-200"
             >
-              {showAssigned ? <ChevronDown className="w-5 h-5" /> : <ChevronRight className="w-5 h-5" />}
-              <span className="w-2 h-2 rounded-full bg-green-400"></span>
-              Assigned ({assignedTransactions.length})
+              {showAssigned ? <ChevronDown className="w-5 h-5 flex-shrink-0" /> : <ChevronRight className="w-5 h-5 flex-shrink-0" />}
+              <span className="w-2 h-2 rounded-full bg-green-400 flex-shrink-0"></span>
+              <span>Assigned ({assignedTransactions.length})</span>
             </button>
             {showAssigned && (
               <div className="space-y-2">
@@ -489,7 +601,8 @@ export const BankImportView: React.FC<BankImportViewProps> = ({
                       key={tx.id}
                       className={`rounded-lg p-3 border ${isStripe ? 'bg-blue-900/20 border-blue-500/30' : 'bg-slate-800/50 border-slate-700/50'} ${hasPending ? 'ring-1 ring-amber-500/50' : ''}`}
                     >
-                      <div className="flex items-center gap-3">
+                      {/* Desktop layout */}
+                      <div className="hidden sm:flex items-center gap-3">
                         <Check className={`w-4 h-4 flex-shrink-0 ${isStripe ? 'text-blue-400' : 'text-green-400'}`} />
                         <span className="text-slate-400 text-sm">{formatDateShort(tx.transactionDate)}</span>
                         <span className={isStripe ? 'text-green-400' : 'text-red-400'}>
@@ -509,6 +622,35 @@ export const BankImportView: React.FC<BankImportViewProps> = ({
                           </button>
                         )}
                       </div>
+                      {/* Mobile layout */}
+                      <div className="sm:hidden space-y-1">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-2">
+                            <Check className={`w-4 h-4 flex-shrink-0 ${isStripe ? 'text-blue-400' : 'text-green-400'}`} />
+                            <span className="text-slate-400 text-xs">{formatDateShort(tx.transactionDate)}</span>
+                            {isStripe && <span className="text-xs px-1 py-0.5 bg-blue-500/20 text-blue-400 rounded">STRIPE</span>}
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className={`text-sm ${isStripe ? 'text-green-400' : 'text-red-400'}`}>
+                              {isStripe ? '+' : '-'}{formatMoney(tx.amount)}
+                            </span>
+                            {hasPending && !isCompleted && !isCancelled && (
+                              <button
+                                onClick={() => onUndoChange(tx.id)}
+                                className="p-1 text-amber-400 hover:text-amber-300"
+                                title="Undo"
+                              >
+                                <Undo2 className="w-4 h-4" />
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-1 text-xs">
+                          <span className="text-slate-500">→</span>
+                          <span className="text-slate-300">{laundryName}</span>
+                        </div>
+                        <p className="text-slate-500 text-xs line-clamp-1">{tx.description}</p>
+                      </div>
                     </div>
                   );
                 })}
@@ -522,11 +664,11 @@ export const BankImportView: React.FC<BankImportViewProps> = ({
           <div className="mb-6">
             <button
               onClick={() => setShowIgnored(!showIgnored)}
-              className="w-full text-left text-lg font-semibold text-slate-100 mb-3 flex items-center gap-2 hover:text-slate-200"
+              className="w-full text-left text-base sm:text-lg font-semibold text-slate-100 mb-3 flex items-center gap-2 hover:text-slate-200"
             >
-              {showIgnored ? <ChevronDown className="w-5 h-5" /> : <ChevronRight className="w-5 h-5" />}
-              <span className="w-2 h-2 rounded-full bg-slate-500"></span>
-              Ignored ({ignoredTransactions.length})
+              {showIgnored ? <ChevronDown className="w-5 h-5 flex-shrink-0" /> : <ChevronRight className="w-5 h-5 flex-shrink-0" />}
+              <span className="w-2 h-2 rounded-full bg-slate-500 flex-shrink-0"></span>
+              <span>Ignored ({ignoredTransactions.length})</span>
             </button>
             {showIgnored && (
               <div className="space-y-2">
@@ -539,7 +681,8 @@ export const BankImportView: React.FC<BankImportViewProps> = ({
                       key={tx.id}
                       className={`bg-slate-800/30 rounded-lg p-3 border border-slate-700/30 ${hasPending ? 'ring-1 ring-amber-500/50' : ''}`}
                     >
-                      <div className="flex items-center gap-3">
+                      {/* Desktop layout */}
+                      <div className="hidden sm:flex items-center gap-3">
                         <Ban className="w-4 h-4 text-slate-500 flex-shrink-0" />
                         <span className="text-slate-500 text-sm">{formatDateShort(tx.transactionDate)}</span>
                         <span className={isOtherCredit ? 'text-green-400/50' : 'text-slate-400'}>
@@ -569,6 +712,43 @@ export const BankImportView: React.FC<BankImportViewProps> = ({
                           )
                         )}
                       </div>
+                      {/* Mobile layout */}
+                      <div className="sm:hidden space-y-1">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-2">
+                            <Ban className="w-4 h-4 text-slate-500 flex-shrink-0" />
+                            <span className="text-slate-500 text-xs">{formatDateShort(tx.transactionDate)}</span>
+                            {isOtherCredit && <span className="text-xs px-1 py-0.5 bg-slate-700 text-slate-400 rounded">CREDIT</span>}
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className={`text-sm ${isOtherCredit ? 'text-green-400/50' : 'text-slate-400'}`}>
+                              {isOtherCredit ? '+' : '-'}{formatMoney(tx.amount)}
+                            </span>
+                            {!isCompleted && !isCancelled && (
+                              hasPending ? (
+                                <button
+                                  onClick={() => onUndoChange(tx.id)}
+                                  className="p-1 text-amber-400 hover:text-amber-300"
+                                  title="Undo"
+                                >
+                                  <Undo2 className="w-4 h-4" />
+                                </button>
+                              ) : (
+                                <button
+                                  onClick={() => onUnignoreTransaction(tx.id)}
+                                  className="text-xs text-slate-400 hover:text-slate-200 underline"
+                                >
+                                  Restore
+                                </button>
+                              )
+                            )}
+                          </div>
+                        </div>
+                        <p className="text-slate-500 text-xs line-clamp-1">{tx.description}</p>
+                        {tx.reconciliationNotes && (
+                          <p className="text-xs text-slate-500 italic line-clamp-1">{tx.reconciliationNotes}</p>
+                        )}
+                      </div>
                     </div>
                   );
                 })}
@@ -579,12 +759,12 @@ export const BankImportView: React.FC<BankImportViewProps> = ({
 
         {/* Action Buttons */}
         {!isCompleted && !isCancelled && (
-          <div className="flex gap-4 mt-8">
+          <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 mt-8">
             {hasUnsavedChanges && (
               <button
                 onClick={onApplyChanges}
                 disabled={applying}
-                className="flex-1 px-4 py-3 bg-amber-600 hover:bg-amber-500 disabled:bg-slate-700 text-white rounded-lg font-semibold flex items-center justify-center gap-2"
+                className="w-full sm:flex-1 px-4 py-3 bg-amber-600 hover:bg-amber-500 disabled:bg-slate-700 text-white rounded-lg font-semibold flex items-center justify-center gap-2"
               >
                 {applying ? (
                   <>
@@ -599,14 +779,14 @@ export const BankImportView: React.FC<BankImportViewProps> = ({
             <button
               onClick={() => onCompleteImport()}
               disabled={!canComplete || loading || hasUnsavedChanges}
-              className="flex-1 px-4 py-3 bg-green-600 hover:bg-green-500 disabled:bg-slate-700 disabled:text-slate-500 text-white rounded-lg font-semibold disabled:cursor-not-allowed"
+              className="w-full sm:flex-1 px-4 py-3 bg-green-600 hover:bg-green-500 disabled:bg-slate-700 disabled:text-slate-500 text-white rounded-lg font-semibold disabled:cursor-not-allowed"
             >
-              {canComplete && !hasUnsavedChanges ? 'Complete Import' : `${newTransactions.length} transactions remaining`}
+              {canComplete && !hasUnsavedChanges ? 'Complete Import' : `${newTransactions.length} remaining`}
             </button>
             <button
               onClick={() => onCancelImport()}
               disabled={loading}
-              className="px-4 py-3 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded-lg font-medium"
+              className="w-full sm:w-auto px-4 py-3 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded-lg font-medium"
             >
               Cancel
             </button>
@@ -730,41 +910,85 @@ export const BankImportView: React.FC<BankImportViewProps> = ({
               imports.map(imp => (
                 <div
                   key={imp.id}
-                  className="bg-slate-800 rounded-lg p-4 border border-slate-700 flex items-center gap-4"
+                  className="bg-slate-800 rounded-lg p-3 sm:p-4 border border-slate-700"
                 >
-                  <FileText className="w-8 h-8 text-slate-400 flex-shrink-0" />
-                  <div className="flex-1 min-w-0">
-                    <div className="font-medium text-slate-200 truncate">{imp.fileName}</div>
-                    <div className="text-sm text-slate-400">
-                      {imp.totalTransactions} transactions • {formatMoney(imp.totalAmount)}
+                  {/* Desktop layout */}
+                  <div className="hidden sm:flex items-center gap-4">
+                    <FileText className="w-8 h-8 text-slate-400 flex-shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <div className="font-medium text-slate-200 truncate">{imp.fileName}</div>
+                      <div className="text-sm text-slate-400">
+                        {imp.totalTransactions} transactions • {formatMoney(imp.totalAmount)}
+                      </div>
+                      <div className="text-xs text-slate-500">
+                        {formatTimestamp(imp.importedAt)}
+                      </div>
                     </div>
-                    <div className="text-xs text-slate-500">
-                      {formatTimestamp(imp.importedAt)}
+                    <div className="flex items-center gap-2">
+                      <span className={`px-2 py-1 rounded text-xs font-medium ${
+                        imp.status === 'completed' ? 'bg-green-500/20 text-green-400' :
+                        imp.status === 'cancelled' ? 'bg-red-500/20 text-red-400' :
+                        'bg-amber-500/20 text-amber-400'
+                      }`}>
+                        {imp.status}
+                      </span>
+                      <button
+                        onClick={() => onLoadImport(imp.id)}
+                        className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded text-sm"
+                      >
+                        View
+                      </button>
+                      {imp.status !== 'completed' && (
+                        <button
+                          onClick={() => onDeleteImport(imp.id)}
+                          className="p-1.5 text-slate-400 hover:text-red-400 rounded"
+                          title="Delete import"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      )}
                     </div>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <span className={`px-2 py-1 rounded text-xs font-medium ${
-                      imp.status === 'completed' ? 'bg-green-500/20 text-green-400' :
-                      imp.status === 'cancelled' ? 'bg-red-500/20 text-red-400' :
-                      'bg-amber-500/20 text-amber-400'
-                    }`}>
-                      {imp.status}
-                    </span>
-                    <button
-                      onClick={() => onLoadImport(imp.id)}
-                      className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded text-sm"
-                    >
-                      View
-                    </button>
-                    {imp.status !== 'completed' && (
-                      <button
-                        onClick={() => onDeleteImport(imp.id)}
-                        className="p-1.5 text-slate-400 hover:text-red-400 rounded"
-                        title="Delete import"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    )}
+                  {/* Mobile layout */}
+                  <div className="sm:hidden space-y-2">
+                    <div className="flex items-start gap-3">
+                      <FileText className="w-6 h-6 text-slate-400 flex-shrink-0 mt-0.5" />
+                      <div className="flex-1 min-w-0">
+                        <div className="font-medium text-slate-200 text-sm truncate">{imp.fileName}</div>
+                        <div className="text-xs text-slate-400">
+                          {imp.totalTransactions} txns • {formatMoney(imp.totalAmount)}
+                        </div>
+                      </div>
+                      <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+                        imp.status === 'completed' ? 'bg-green-500/20 text-green-400' :
+                        imp.status === 'cancelled' ? 'bg-red-500/20 text-red-400' :
+                        'bg-amber-500/20 text-amber-400'
+                      }`}>
+                        {imp.status}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between pl-9">
+                      <div className="text-xs text-slate-500">
+                        {formatTimestamp(imp.importedAt)}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => onLoadImport(imp.id)}
+                          className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded text-xs"
+                        >
+                          View
+                        </button>
+                        {imp.status !== 'completed' && (
+                          <button
+                            onClick={() => onDeleteImport(imp.id)}
+                            className="p-1.5 text-slate-400 hover:text-red-400 rounded"
+                            title="Delete import"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        )}
+                      </div>
+                    </div>
                   </div>
                 </div>
               ))
