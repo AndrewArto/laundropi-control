@@ -1,10 +1,11 @@
 import * as http from 'http';
+import * as path from 'path';
 import express = require('express');
 import cors = require('cors');
 import { WebSocketServer, WebSocket } from 'ws';
 import * as crypto from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
-import { listAgents, updateHeartbeat, saveMeta, getAgent, updateRelayMeta, listSchedules, upsertSchedule, deleteSchedule, listGroups, listGroupsForMembership, upsertGroup, deleteGroup, GroupRow, deleteAgent, upsertAgent, upsertCommand, listPendingCommands, deleteCommand, updateCommandsForRelay, expireOldCommands, insertLead, getLastLeadTimestampForIp, getRevenueEntry, listRevenueEntriesBetween, listRevenueEntries, listRevenueEntryDatesBetween, upsertRevenueEntry, insertRevenueAudit, listRevenueAudit, RevenueEntryRow, listUiUsers, getUiUser, createUiUser, updateUiUserRole, updateUiUserPassword, updateUiUserLastLogin, countUiUsers, listCameras, getCamera, upsertCamera, deleteCamera, upsertIntegrationSecret, getIntegrationSecret, deleteIntegrationSecret, CameraRow, listInventory, getInventory, updateInventory, getInventoryAudit, getLastInventoryChange, DetergentType } from './db';
+import { listAgents, updateHeartbeat, saveMeta, getAgent, updateRelayMeta, listSchedules, upsertSchedule, deleteSchedule, listGroups, listGroupsForMembership, upsertGroup, deleteGroup, GroupRow, deleteAgent, upsertAgent, upsertCommand, listPendingCommands, deleteCommand, updateCommandsForRelay, expireOldCommands, insertLead, getLastLeadTimestampForIp, listLeads, getRevenueEntry, listRevenueEntriesBetween, listRevenueEntries, listRevenueEntryDatesBetween, upsertRevenueEntry, insertRevenueAudit, listRevenueAudit, RevenueEntryRow, listUiUsers, getUiUser, createUiUser, updateUiUserRole, updateUiUserPassword, updateUiUserLastLogin, countUiUsers, listCameras, getCamera, upsertCamera, deleteCamera, upsertIntegrationSecret, getIntegrationSecret, deleteIntegrationSecret, CameraRow, listInventory, getInventory, updateInventory, getInventoryAudit, getLastInventoryChange, DetergentType } from './db';
 
 
 const asBool = (val: string | undefined, fallback = false) => {
@@ -1108,6 +1109,25 @@ app.post('/lead', (req, res) => {
   });
   return res.json({ ok: true });
 });
+
+app.get('/api/leads', (_req, res) => {
+  try {
+    const leads = listLeads();
+    res.json(leads);
+  } catch (err) {
+    console.error('[central] Failed to list leads:', err);
+    res.status(500).json({ error: 'internal_error' });
+  }
+});
+
+// Serve leads viewer HTML page
+app.get('/leads', (_req, res) => {
+  const filePath = path.join(__dirname, '../../public/leads.html');
+  res.sendFile(filePath);
+});
+
+// Serve static assets from public directory (logo, etc.)
+app.use(express.static(path.join(__dirname, '../../public')));
 
 app.use('/api', requireUiAuth);
 app.use('/api/revenue', requireAdmin);

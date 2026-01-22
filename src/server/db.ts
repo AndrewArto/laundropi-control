@@ -288,6 +288,43 @@ CREATE TABLE IF NOT EXISTS inventory_audit (
 );
 
 CREATE INDEX IF NOT EXISTS inventory_audit_agent_type_idx ON inventory_audit(agentId, detergentType, createdAt);
+
+CREATE TABLE IF NOT EXISTS expenditure_imports (
+  id TEXT PRIMARY KEY,
+  fileName TEXT NOT NULL,
+  dateRangeStart TEXT,
+  dateRangeEnd TEXT,
+  totalTransactions INTEGER NOT NULL,
+  totalAmount REAL NOT NULL,
+  status TEXT NOT NULL,
+  importedAt INTEGER NOT NULL,
+  importedBy TEXT NOT NULL,
+  completedAt INTEGER,
+  notes TEXT
+);
+
+CREATE INDEX IF NOT EXISTS expenditure_imports_status_idx ON expenditure_imports(status, importedAt);
+
+CREATE TABLE IF NOT EXISTS expenditure_transactions (
+  id TEXT PRIMARY KEY,
+  importId TEXT NOT NULL,
+  transactionDate TEXT NOT NULL,
+  description TEXT NOT NULL,
+  amount REAL NOT NULL,
+  bankReference TEXT,
+  category TEXT,
+  reconciliationStatus TEXT NOT NULL,
+  matchedDeductionKey TEXT,
+  assignedAgentId TEXT,
+  reconciliationNotes TEXT,
+  createdAt INTEGER NOT NULL,
+  FOREIGN KEY (importId) REFERENCES expenditure_imports(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS expenditure_transactions_import_idx ON expenditure_transactions(importId);
+CREATE INDEX IF NOT EXISTS expenditure_transactions_date_idx ON expenditure_transactions(transactionDate);
+CREATE INDEX IF NOT EXISTS expenditure_transactions_status_idx ON expenditure_transactions(reconciliationStatus);
+CREATE INDEX IF NOT EXISTS expenditure_transactions_agent_idx ON expenditure_transactions(assignedAgentId, transactionDate);
 `);
 
 // Best-effort migration: add entries column if missing (ignore errors)
@@ -660,6 +697,31 @@ export function insertLead(row: LeadRow) {
 export function getLastLeadTimestampForIp(ip: string): number | null {
   const row = lastLeadByIpStmt.get(ip) as { createdAt?: number } | undefined;
   return row?.createdAt ?? null;
+}
+
+export function listLeads(): LeadRow[] {
+  const rows = db.prepare(`
+    SELECT id, email, createdAt, source, ip, userAgent, referrer
+    FROM leads
+    ORDER BY createdAt DESC
+  `).all() as Array<{
+    id: number;
+    email: string;
+    createdAt: number;
+    source: string | null;
+    ip: string | null;
+    userAgent: string | null;
+    referrer: string | null;
+  }>;
+
+  return rows.map(row => ({
+    email: row.email,
+    createdAt: row.createdAt,
+    source: row.source,
+    ip: row.ip,
+    userAgent: row.userAgent,
+    referrer: row.referrer,
+  }));
 }
 
 // --- AGENTS ---
@@ -1046,4 +1108,225 @@ export function getLastInventoryChange(agentId: string, detergentType: Detergent
     user: row.user,
     createdAt: row.createdAt,
   };
+}
+
+// --- EXPENDITURE IMPORTS ---
+
+export interface ExpenditureImportRow {
+  id: string;
+  fileName: string;
+  dateRangeStart: string | null;
+  dateRangeEnd: string | null;
+  totalTransactions: number;
+  totalAmount: number;
+  status: 'uploaded' | 'reconciling' | 'completed' | 'cancelled';
+  importedAt: number;
+  importedBy: string;
+  completedAt: number | null;
+  notes: string | null;
+}
+
+export interface ExpenditureTransactionRow {
+  id: string;
+  importId: string;
+  transactionDate: string;
+  description: string;
+  amount: number;
+  bankReference: string | null;
+  category: string | null;
+  reconciliationStatus: 'new' | 'existing' | 'discrepancy' | 'ignored';
+  matchedDeductionKey: string | null;
+  assignedAgentId: string | null;
+  reconciliationNotes: string | null;
+  createdAt: number;
+}
+
+const insertExpenditureImportStmt = db.prepare(`
+  INSERT INTO expenditure_imports(
+    id, fileName, dateRangeStart, dateRangeEnd, totalTransactions, totalAmount,
+    status, importedAt, importedBy, completedAt, notes
+  )
+  VALUES (
+    @id, @fileName, @dateRangeStart, @dateRangeEnd, @totalTransactions, @totalAmount,
+    @status, @importedAt, @importedBy, @completedAt, @notes
+  )
+`);
+
+const updateExpenditureImportStmt = db.prepare(`
+  UPDATE expenditure_imports
+  SET status = @status, completedAt = @completedAt, notes = @notes
+  WHERE id = @id
+`);
+
+export function createExpenditureImport(row: ExpenditureImportRow) {
+  insertExpenditureImportStmt.run({
+    id: row.id,
+    fileName: row.fileName,
+    dateRangeStart: row.dateRangeStart,
+    dateRangeEnd: row.dateRangeEnd,
+    totalTransactions: row.totalTransactions,
+    totalAmount: row.totalAmount,
+    status: row.status,
+    importedAt: row.importedAt,
+    importedBy: row.importedBy,
+    completedAt: row.completedAt,
+    notes: row.notes,
+  });
+}
+
+export function updateExpenditureImport(id: string, status: string, completedAt: number | null, notes: string | null) {
+  updateExpenditureImportStmt.run({ id, status, completedAt, notes });
+}
+
+export function getExpenditureImport(id: string): ExpenditureImportRow | null {
+  const row = db.prepare('SELECT * FROM expenditure_imports WHERE id = ?').get(id) as any;
+  if (!row) return null;
+  return {
+    id: row.id,
+    fileName: row.fileName,
+    dateRangeStart: row.dateRangeStart,
+    dateRangeEnd: row.dateRangeEnd,
+    totalTransactions: row.totalTransactions,
+    totalAmount: row.totalAmount,
+    status: row.status,
+    importedAt: row.importedAt,
+    importedBy: row.importedBy,
+    completedAt: row.completedAt,
+    notes: row.notes,
+  };
+}
+
+export function listExpenditureImports(): ExpenditureImportRow[] {
+  const rows = db.prepare('SELECT * FROM expenditure_imports ORDER BY importedAt DESC').all() as any[];
+  return rows.map(row => ({
+    id: row.id,
+    fileName: row.fileName,
+    dateRangeStart: row.dateRangeStart,
+    dateRangeEnd: row.dateRangeEnd,
+    totalTransactions: row.totalTransactions,
+    totalAmount: row.totalAmount,
+    status: row.status,
+    importedAt: row.importedAt,
+    importedBy: row.importedBy,
+    completedAt: row.completedAt,
+    notes: row.notes,
+  }));
+}
+
+const insertExpenditureTransactionStmt = db.prepare(`
+  INSERT INTO expenditure_transactions(
+    id, importId, transactionDate, description, amount, bankReference, category,
+    reconciliationStatus, matchedDeductionKey, assignedAgentId, reconciliationNotes, createdAt
+  )
+  VALUES (
+    @id, @importId, @transactionDate, @description, @amount, @bankReference, @category,
+    @reconciliationStatus, @matchedDeductionKey, @assignedAgentId, @reconciliationNotes, @createdAt
+  )
+`);
+
+const updateExpenditureTransactionStmt = db.prepare(`
+  UPDATE expenditure_transactions
+  SET reconciliationStatus = @reconciliationStatus,
+      matchedDeductionKey = @matchedDeductionKey,
+      assignedAgentId = @assignedAgentId,
+      reconciliationNotes = @reconciliationNotes
+  WHERE id = @id
+`);
+
+export function createExpenditureTransaction(row: ExpenditureTransactionRow) {
+  insertExpenditureTransactionStmt.run({
+    id: row.id,
+    importId: row.importId,
+    transactionDate: row.transactionDate,
+    description: row.description,
+    amount: row.amount,
+    bankReference: row.bankReference,
+    category: row.category,
+    reconciliationStatus: row.reconciliationStatus,
+    matchedDeductionKey: row.matchedDeductionKey,
+    assignedAgentId: row.assignedAgentId,
+    reconciliationNotes: row.reconciliationNotes,
+    createdAt: row.createdAt,
+  });
+}
+
+export function updateExpenditureTransaction(
+  id: string,
+  reconciliationStatus: string,
+  matchedDeductionKey: string | null,
+  assignedAgentId: string | null,
+  reconciliationNotes: string | null
+) {
+  updateExpenditureTransactionStmt.run({
+    id,
+    reconciliationStatus,
+    matchedDeductionKey,
+    assignedAgentId,
+    reconciliationNotes,
+  });
+}
+
+export function getExpenditureTransaction(id: string): ExpenditureTransactionRow | null {
+  const row = db.prepare('SELECT * FROM expenditure_transactions WHERE id = ?').get(id) as any;
+  if (!row) return null;
+  return {
+    id: row.id,
+    importId: row.importId,
+    transactionDate: row.transactionDate,
+    description: row.description,
+    amount: row.amount,
+    bankReference: row.bankReference,
+    category: row.category,
+    reconciliationStatus: row.reconciliationStatus,
+    matchedDeductionKey: row.matchedDeductionKey,
+    assignedAgentId: row.assignedAgentId,
+    reconciliationNotes: row.reconciliationNotes,
+    createdAt: row.createdAt,
+  };
+}
+
+export function listExpenditureTransactionsByImport(importId: string): ExpenditureTransactionRow[] {
+  const rows = db.prepare('SELECT * FROM expenditure_transactions WHERE importId = ? ORDER BY transactionDate').all(importId) as any[];
+  return rows.map(row => ({
+    id: row.id,
+    importId: row.importId,
+    transactionDate: row.transactionDate,
+    description: row.description,
+    amount: row.amount,
+    bankReference: row.bankReference,
+    category: row.category,
+    reconciliationStatus: row.reconciliationStatus,
+    matchedDeductionKey: row.matchedDeductionKey,
+    assignedAgentId: row.assignedAgentId,
+    reconciliationNotes: row.reconciliationNotes,
+    createdAt: row.createdAt,
+  }));
+}
+
+export function listExpenditureTransactionsByDateRange(startDate: string, endDate: string, agentId?: string): ExpenditureTransactionRow[] {
+  let query = 'SELECT * FROM expenditure_transactions WHERE transactionDate >= ? AND transactionDate <= ?';
+  const params: any[] = [startDate, endDate];
+
+  if (agentId) {
+    query += ' AND assignedAgentId = ?';
+    params.push(agentId);
+  }
+
+  query += ' ORDER BY transactionDate';
+
+  const rows = db.prepare(query).all(...params) as any[];
+  return rows.map(row => ({
+    id: row.id,
+    importId: row.importId,
+    transactionDate: row.transactionDate,
+    description: row.description,
+    amount: row.amount,
+    bankReference: row.bankReference,
+    category: row.category,
+    reconciliationStatus: row.reconciliationStatus,
+    matchedDeductionKey: row.matchedDeductionKey,
+    assignedAgentId: row.assignedAgentId,
+    reconciliationNotes: row.reconciliationNotes,
+    createdAt: row.createdAt,
+  }));
 }

@@ -140,6 +140,69 @@ export interface InventoryAudit {
   createdAt: number;
 }
 
+export interface ExpenditureImport {
+  id: string;
+  fileName: string;
+  dateRangeStart: string | null;
+  dateRangeEnd: string | null;
+  totalTransactions: number;
+  totalAmount: number;
+  status: 'uploaded' | 'reconciling' | 'completed' | 'cancelled';
+  importedAt: number;
+  importedBy: string;
+  completedAt: number | null;
+  notes: string | null;
+}
+
+export type ReconciliationStatus = 'new' | 'existing' | 'discrepancy' | 'ignored';
+
+export interface ExpenditureTransaction {
+  id: string;
+  importId: string;
+  transactionDate: string;
+  description: string;
+  amount: number;
+  bankReference: string | null;
+  category: string | null;
+  reconciliationStatus: ReconciliationStatus;
+  matchedDeductionKey: string | null;
+  assignedAgentId: string | null;
+  reconciliationNotes: string | null;
+  createdAt: number;
+}
+
+export interface ReconciliationMatch {
+  transactionId: string;
+  existingDeduction?: {
+    agentId: string;
+    entryDate: string;
+    amount: number;
+    comment: string;
+    index: number;
+  };
+  similarity: number;
+}
+
+export interface ProfitLossData {
+  dateRange: {
+    startDate: string;
+    endDate: string;
+  };
+  byAgent: Record<string, {
+    revenue: number;
+    expenses: number;
+    netProfitLoss: number;
+    margin: number;
+    expenseBreakdown: Array<{ description: string; amount: number; date: string }>;
+  }>;
+  combined: {
+    totalRevenue: number;
+    totalExpenses: number;
+    netProfitLoss: number;
+    overallMargin: number;
+  };
+}
+
 export interface LaundryInventory {
   agentId: string;
   items: InventoryItem[];

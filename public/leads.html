@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Leads Management - WashControl</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    body {
+      font-family: 'Inter', sans-serif;
+      background-color: #0f172a;
+      color: #e2e8f0;
+    }
+  </style>
+</head>
+<body>
+  <div id="app" class="min-h-screen">
+    <!-- Login Form -->
+    <div id="loginForm" class="flex items-center justify-center min-h-screen px-4">
+      <div class="bg-slate-800 rounded-lg p-8 max-w-md w-full border border-slate-700">
+        <div class="flex justify-center mb-6">
+          <img src="/washcontrol-logo.svg" alt="WashControl" class="h-16 w-auto">
+        </div>
+        <h1 class="text-2xl font-bold text-slate-100 mb-6 text-center">Leads Management</h1>
+
+        <div id="loginError" class="hidden mb-4 p-3 bg-red-500/10 border border-red-500/50 rounded text-red-400 text-sm"></div>
+
+        <form id="authForm" class="space-y-4">
+          <div>
+            <label for="username" class="block text-sm font-medium text-slate-300 mb-2">Username</label>
+            <input
+              type="text"
+              id="username"
+              autocomplete="username"
+              class="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded text-slate-100 focus:outline-none focus:border-purple-500"
+              required
+            />
+          </div>
+
+          <div>
+            <label for="password" class="block text-sm font-medium text-slate-300 mb-2">Password</label>
+            <input
+              type="password"
+              id="password"
+              autocomplete="current-password"
+              class="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded text-slate-100 focus:outline-none focus:border-purple-500"
+              required
+            />
+          </div>
+
+          <button
+            type="submit"
+            class="w-full px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded font-medium transition-colors"
+          >
+            Login
+          </button>
+        </form>
+      </div>
+    </div>
+
+    <!-- Leads Viewer -->
+    <div id="leadsViewer" class="hidden">
+      <header class="bg-slate-900/80 backdrop-blur-md sticky top-0 z-50 border-b border-slate-800">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 py-4 flex items-center justify-between">
+          <div class="flex items-center gap-4">
+            <img src="/washcontrol-logo.svg" alt="WashControl" class="h-12 w-auto">
+            <h1 class="text-xl font-bold text-slate-100">Leads Management</h1>
+          </div>
+          <button
+            id="logoutBtn"
+            class="px-4 py-2 text-sm font-medium border border-slate-700 rounded text-slate-300 hover:text-white hover:border-indigo-500 transition-colors"
+          >
+            Logout
+          </button>
+        </div>
+      </header>
+
+      <main class="max-w-7xl mx-auto px-4 sm:px-6 py-6">
+        <div class="bg-slate-800 rounded-lg border border-slate-700 overflow-hidden">
+          <div class="p-6 border-b border-slate-700 flex items-center justify-between">
+            <div>
+              <h2 class="text-lg font-semibold text-slate-100">Contact Form Submissions</h2>
+              <p class="text-sm text-slate-400 mt-1">Total leads: <span id="leadCount">0</span></p>
+            </div>
+            <button
+              id="refreshBtn"
+              class="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded text-sm font-medium transition-colors"
+            >
+              Refresh
+            </button>
+          </div>
+
+          <div id="leadsError" class="hidden mx-6 mt-4 p-4 bg-red-500/10 border border-red-500/50 rounded text-red-400"></div>
+
+          <div id="leadsLoading" class="p-12 text-center text-slate-400">
+            Loading leads...
+          </div>
+
+          <div id="leadsEmpty" class="hidden p-12 text-center text-slate-400">
+            No leads found
+          </div>
+
+          <div id="leadsTable" class="hidden overflow-x-auto">
+            <table class="w-full">
+              <thead class="bg-slate-900">
+                <tr>
+                  <th class="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">Date</th>
+                  <th class="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">Email</th>
+                  <th class="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">Source</th>
+                  <th class="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">IP Address</th>
+                  <th class="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">User Agent</th>
+                </tr>
+              </thead>
+              <tbody id="leadsTableBody" class="divide-y divide-slate-700">
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <script>
+    const VALID_USERNAME = 'admin';
+    const VALID_PASSWORD = 'oya5aaTh';
+    let isAuthenticated = false;
+
+    // DOM elements
+    const loginForm = document.getElementById('loginForm');
+    const leadsViewer = document.getElementById('leadsViewer');
+    const authForm = document.getElementById('authForm');
+    const loginError = document.getElementById('loginError');
+    const logoutBtn = document.getElementById('logoutBtn');
+    const refreshBtn = document.getElementById('refreshBtn');
+    const leadsLoading = document.getElementById('leadsLoading');
+    const leadsEmpty = document.getElementById('leadsEmpty');
+    const leadsTable = document.getElementById('leadsTable');
+    const leadsTableBody = document.getElementById('leadsTableBody');
+    const leadsError = document.getElementById('leadsError');
+    const leadCount = document.getElementById('leadCount');
+
+    // Check if already authenticated
+    if (sessionStorage.getItem('leadsAuth') === 'true') {
+      isAuthenticated = true;
+      showLeadsViewer();
+      loadLeads();
+    }
+
+    // Login form submission
+    authForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+
+      const username = document.getElementById('username').value;
+      const password = document.getElementById('password').value;
+
+      if (username === VALID_USERNAME && password === VALID_PASSWORD) {
+        isAuthenticated = true;
+        sessionStorage.setItem('leadsAuth', 'true');
+        showLeadsViewer();
+        loadLeads();
+      } else {
+        loginError.textContent = 'Invalid username or password';
+        loginError.classList.remove('hidden');
+      }
+    });
+
+    // Logout button
+    logoutBtn.addEventListener('click', () => {
+      isAuthenticated = false;
+      sessionStorage.removeItem('leadsAuth');
+      showLoginForm();
+    });
+
+    // Refresh button
+    refreshBtn.addEventListener('click', () => {
+      loadLeads();
+    });
+
+    function showLoginForm() {
+      loginForm.classList.remove('hidden');
+      leadsViewer.classList.add('hidden');
+      document.getElementById('username').value = '';
+      document.getElementById('password').value = '';
+      loginError.classList.add('hidden');
+    }
+
+    function showLeadsViewer() {
+      loginForm.classList.add('hidden');
+      leadsViewer.classList.remove('hidden');
+    }
+
+    async function loadLeads() {
+      leadsLoading.classList.remove('hidden');
+      leadsEmpty.classList.add('hidden');
+      leadsTable.classList.add('hidden');
+      leadsError.classList.add('hidden');
+
+      try {
+        const response = await fetch('/api/leads');
+
+        if (!response.ok) {
+          throw new Error(`Failed to load leads: ${response.statusText}`);
+        }
+
+        const leads = await response.json();
+
+        leadsLoading.classList.add('hidden');
+        leadCount.textContent = leads.length;
+
+        if (leads.length === 0) {
+          leadsEmpty.classList.remove('hidden');
+        } else {
+          leadsTable.classList.remove('hidden');
+          renderLeads(leads);
+        }
+      } catch (err) {
+        leadsLoading.classList.add('hidden');
+        leadsError.textContent = err.message || 'Failed to load leads';
+        leadsError.classList.remove('hidden');
+      }
+    }
+
+    function renderLeads(leads) {
+      leadsTableBody.innerHTML = '';
+
+      // Sort by date descending (newest first)
+      leads.sort((a, b) => b.createdAt - a.createdAt);
+
+      leads.forEach(lead => {
+        const row = document.createElement('tr');
+        row.className = 'hover:bg-slate-700/50';
+
+        const date = new Date(lead.createdAt);
+        const formattedDate = date.toLocaleString('en-US', {
+          year: 'numeric',
+          month: 'short',
+          day: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit'
+        });
+
+        row.innerHTML = `
+          <td class="px-6 py-4 whitespace-nowrap text-sm text-slate-300">${formattedDate}</td>
+          <td class="px-6 py-4 whitespace-nowrap text-sm text-slate-100 font-medium">${escapeHtml(lead.email)}</td>
+          <td class="px-6 py-4 whitespace-nowrap text-sm text-slate-400">${escapeHtml(lead.source || '-')}</td>
+          <td class="px-6 py-4 whitespace-nowrap text-sm text-slate-400 font-mono">${escapeHtml(lead.ip || '-')}</td>
+          <td class="px-6 py-4 text-sm text-slate-400 max-w-xs truncate" title="${escapeHtml(lead.userAgent || '')}">${escapeHtml(lead.userAgent || '-')}</td>
+        `;
+
+        leadsTableBody.appendChild(row);
+      });
+    }
+
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+  </script>
+</body>
+</html>
