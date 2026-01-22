@@ -58,6 +58,44 @@ interface RevenueViewProps {
 }
 
 export const RevenueView: React.FC<RevenueViewProps> = (props) => {
+  const {
+    authUser,
+    laundries,
+    revenueView,
+    setRevenueView,
+    revenueDate,
+    setRevenueDate,
+    isRevenueCalendarOpen,
+    setIsRevenueCalendarOpen,
+    revenueEntryDates,
+    revenueEntries,
+    revenueLoading,
+    revenueError,
+    revenueSummary,
+    revenueSaveErrors,
+    revenueSaving,
+    revenueDrafts,
+    revenueAudit,
+    revenueAllEntries,
+    revenueAllLoading,
+    revenueAllError,
+    DAYS_OF_WEEK,
+    getMonthRange,
+    shiftDateByDays,
+    shiftDateByMonths,
+    formatMoney,
+    formatTimestamp,
+    buildRevenueDraft,
+    updateRevenueDraftFromHook,
+    isRevenueNumericInput,
+    getLatestAudit,
+    getDeductionSummary,
+    addRevenueDeductionFromHook,
+    removeRevenueDeductionFromHook,
+    handleRevenueSaveFromHook,
+    handleExportRevenueCsv,
+  } = props;
+
   const renderRevenueCalendar = () => {
     const range = getMonthRange(revenueDate);
     if (!range) return null;
@@ -222,9 +260,9 @@ export const RevenueView: React.FC<RevenueViewProps> = (props) => {
         <div className="text-sm text-slate-400">Loading revenue data...</div>
       )}
 
-      {!revenueLoading && laundries.map(laundry => {
+      {!revenueLoading && (laundries || []).map(laundry => {
         const entry = revenueEntries[laundry.id] || null;
-        const draft = revenueDrafts[laundry.id] || buildRevenueDraft(entry);
+        const draft = revenueDrafts[laundry.id] || buildRevenueDraft(entry) || { coinsTotal: '', euroCoinsCount: '', billsTotal: '', deductions: [] };
         const entryAudit = revenueAudit[laundry.id] || [];
         const coinsAudit = getLatestAudit(laundry.id, 'coinsTotal');
         const countAudit = getLatestAudit(laundry.id, 'euroCoinsCount');
@@ -550,4 +588,6 @@ export const RevenueView: React.FC<RevenueViewProps> = (props) => {
       </div>
     );
   };
+
+  return renderRevenue();
 };

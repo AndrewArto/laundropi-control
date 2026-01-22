@@ -30,8 +30,35 @@ interface SettingsViewProps {
 }
 
 export const SettingsView: React.FC<SettingsViewProps> = (props) => {
+  const {
+    authUser,
+    users,
+    usersLoading,
+    usersError,
+    userCreateError,
+    userCreateLoading,
+    newUserName,
+    newUserPassword,
+    newUserRole,
+    userRoleDrafts,
+    userPasswordDrafts,
+    userSaving,
+    userSaveErrors,
+    setNewUserName,
+    setNewUserPassword,
+    setNewUserRole,
+    setUserRoleDrafts,
+    setUserPasswordDrafts,
+    fetchUsers,
+    handleCreateUserFromHook,
+    handleRoleSaveFromHook,
+    handlePasswordSaveFromHook,
+    handleAuthFailure,
+    formatLastLogin,
+  } = props;
+
   const renderSystem = () => {
-    if (props.authUser?.role !== 'admin') {
+    if (authUser?.role !== 'admin') {
       return (
         <div className="text-center py-20 text-slate-500">
           <Settings className="w-12 h-12 mx-auto mb-4 opacity-50" />

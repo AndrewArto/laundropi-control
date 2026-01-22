@@ -154,7 +154,7 @@ export const DashboardView: React.FC<DashboardViewProps> = (props) => (
                 )}
               </div>
               <div className="grid gap-3 sm:grid-cols-2">
-                {cameras.map(camera => {
+                {(cameras || []).map(camera => {
                   const draftKey = props.cameraDraftKey(laundry.id, camera.id);
                   const nameValue = props.cameraNameDrafts[draftKey] ?? camera.name;
                   const saving = Boolean(props.cameraSaving[draftKey]);

@@ -1,6 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { LayoutDashboard, CalendarClock, Settings, Lock, Coins } from 'lucide-react';
-import { Relay, Schedule, RelayType, RelayGroup, RevenueEntry, RevenueAuditEntry, RevenueSummary, UiUser, CameraConfig } from './types';
+import { Relay, Schedule, RelayType, RelayGroup, RevenueEntry, RevenueAuditEntry, RevenueSummary, UiUser, CameraConfig, Laundry, RelaySelection } from './types';
 import { ApiService, resolveBaseUrl } from './services/api';
 import { DAYS_OF_WEEK } from './constants';
 import { useAuth } from './hooks/useAuth';
@@ -14,115 +13,19 @@ import { DashboardView } from './components/views/DashboardView';
 import { SchedulesView } from './components/views/SchedulesView';
 import { RevenueView } from './components/views/RevenueView';
 import { SettingsView } from './components/views/SettingsView';
-
-enum Tab {
-  DASHBOARD = 'DASHBOARD',
-  SCHEDULE = 'SCHEDULE',
-  REVENUE = 'REVENUE',
-  SETTINGS = 'SETTINGS'
-}
-
-const AGENT_STALE_MS = 8_000;
-const PENDING_RELAY_TTL_MS = 5_000;
-const CAMERA_FRAME_REFRESH_MS = 1_000;
-const CAMERA_WARMUP_MS = 15_000;
-const DEFAULT_AGENT_ID = (import.meta as any).env?.VITE_AGENT_ID ?? 'dev-agent';
-const DEFAULT_AGENT_SECRET = (import.meta as any).env?.VITE_AGENT_SECRET ?? 'secret';
-const IS_TEST_ENV = (typeof process !== 'undefined' && process.env?.NODE_ENV === 'test') || false;
-const BRAND_LOGO_URL = '/washcontrol-logo.png?v=20260112';
-
-const to24h = (val?: string | null): string | null => {
-  if (!val) return null;
-  const raw = val.trim();
-  const ampm = raw.match(/^(\d{1,2}):(\d{2})(?::\d{2})?\s*(AM|PM)$/i);
-  if (ampm) {
-    let hh = parseInt(ampm[1], 10);
-    const mm = ampm[2];
-    const suffix = ampm[3].toUpperCase();
-    if (suffix === 'PM' && hh !== 12) hh += 12;
-    if (suffix === 'AM' && hh === 12) hh = 0;
-    return `${String(hh).padStart(2, '0')}:${mm}`;
-  }
-  const hhmm = raw.match(/^(\d{1,2}):(\d{2})(?::\d{2})?$/);
-  if (hhmm) {
-    const hh = Math.min(Math.max(parseInt(hhmm[1], 10), 0), 23);
-    const mm = Math.min(Math.max(parseInt(hhmm[2], 10), 0), 59);
-    return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
-  }
-  return null;
-};
-
-const normalizeTimeInput = (val: string): string => {
-  const digits = val.replace(/\D/g, '').slice(0, 4);
-  if (digits.length <= 2) return digits;
-  return `${digits.slice(0, 2)}:${digits.slice(2)}`;
-};
-
-const toDateInput = (date: Date) => {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-};
-
-const parseDateParts = (value: string) => {
-  const match = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  if (!match) return null;
-  const year = Number(match[1]);
-  const month = Number(match[2]);
-  const day = Number(match[3]);
-  if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) return null;
-  if (month < 1 || month > 12 || day < 1 || day > 31) return null;
-  return { year, month, day };
-};
-
-const getDaysInMonth = (year: number, month: number) => new Date(year, month, 0).getDate();
-
-const shiftDateByDays = (value: string, delta: number) => {
-  const parts = parseDateParts(value);
-  if (!parts) return value;
-  const date = new Date(parts.year, parts.month - 1, parts.day);
-  date.setDate(date.getDate() + delta);
-  return toDateInput(date);
-};
-
-const shiftDateByMonths = (value: string, delta: number) => {
-  const parts = parseDateParts(value);
-  if (!parts) return value;
-  const base = new Date(parts.year, parts.month - 1, 1);
-  base.setMonth(base.getMonth() + delta);
-  const nextYear = base.getFullYear();
-  const nextMonth = base.getMonth() + 1;
-  const maxDay = getDaysInMonth(nextYear, nextMonth);
-  const day = Math.min(parts.day, maxDay);
-  return toDateInput(new Date(nextYear, nextMonth - 1, day));
-};
-
-const getMonthRange = (value: string) => {
-  const parts = parseDateParts(value);
-  if (!parts) return null;
-  const daysInMonth = getDaysInMonth(parts.year, parts.month);
-  const monthStr = String(parts.month).padStart(2, '0');
-  return {
-    startDate: `${parts.year}-${monthStr}-01`,
-    endDate: `${parts.year}-${monthStr}-${String(daysInMonth).padStart(2, '0')}`,
-    year: parts.year,
-    month: parts.month,
-    daysInMonth,
-  };
-};
-
-const formatMoney = (value?: number | null) => {
-  if (value === null || value === undefined || !Number.isFinite(value)) return '0.00';
-  return value.toFixed(2);
-};
-
-const makeDeductionId = () => `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-
-const formatTimestamp = (ts: number) => new Date(ts).toLocaleString();
-const formatLastLogin = (ts: number | null) => (ts ? formatTimestamp(ts) : 'Never');
-const isRevenueNumericInput = (value: string) => /^(\d+([.,]\d*)?|[.,]\d*)?$/.test(value);
-const normalizeDecimalInput = (value: string) => value.replace(',', '.');
+import { LoginForm } from './components/LoginForm';
+import { LoadingScreen } from './components/LoadingScreen';
+import { Header } from './components/Header';
+import { OfflineMessages } from './components/OfflineMessages';
+import { BottomNavigation, Tab } from './components/BottomNavigation';
+import { to24h, normalizeTimeInput, toDateInput, shiftDateByDays, shiftDateByMonths, getMonthRange } from './utils/dateTime';
+import { formatMoney, formatTimestamp, formatLastLogin, isRevenueNumericInput } from './utils/formatting';
+import { buildRevenueDraft, getLatestAudit, getDeductionSummary, RevenueDraft } from './utils/revenue';
+import { exportRevenueToCsv } from './utils/csvExport';
+import { AGENT_STALE_MS, PENDING_RELAY_TTL_MS, CAMERA_FRAME_REFRESH_MS, CAMERA_WARMUP_MS, DEFAULT_AGENT_ID, DEFAULT_AGENT_SECRET, IS_TEST_ENV, BRAND_LOGO_URL } from './constants/app';
+import { selectionKey, relayDraftKey, relayPendingKey, markPendingRelayState as markPendingRelayStateUtil, applyPendingRelayStates as applyPendingRelayStatesUtil } from './utils/relay';
+import { isLaundryOnline as isLaundryOnlineUtil, getOfflineAgents, getOfflineMessages as getOfflineMessagesUtil, normalizeGroupPayload, applyVisibility as applyVisibilityUtil, updateLaundryRelays } from './utils/laundry';
+import { cameraDraftKey, cameraPositionOrder, buildCameraPreviewUrl as buildCameraPreviewUrlUtil, getCameraSlots as getCameraSlotsUtil } from './utils/camera';
 
 const App: React.FC = () => {
   const renderCount = React.useRef(0);
@@ -130,25 +33,6 @@ const App: React.FC = () => {
   if (renderCount.current % 10 === 0) {
     console.log(`[LaundroPi] Render #${renderCount.current}`, new Date().toISOString());
   }
-
-  type Laundry = {
-    id: string;
-    name: string;
-    relays: Relay[];
-    isOnline: boolean;
-    isMock: boolean;
-    lastHeartbeat: number | null;
-  };
-
-  type RelaySelection = { agentId: string; relayId: number };
-
-  type RevenueDraftDeduction = { id: string; amount: string; comment: string };
-  type RevenueDraft = {
-    coinsTotal: string;
-    euroCoinsCount: string;
-    billsTotal: string;
-    deductions: RevenueDraftDeduction[];
-  };
 
   // Custom hooks for state management
   const {
@@ -361,32 +245,18 @@ const App: React.FC = () => {
   const cameraObserverRef = React.useRef<IntersectionObserver | null>(null);
   const cameraCardRefs = React.useRef<Map<string, HTMLDivElement>>(new Map());
   const cameraRefCallbacks = React.useRef<Map<string, (node: HTMLDivElement | null) => void>>(new Map());
-  const isLaundryOnline = React.useCallback((laundry: Laundry) => {
-    const fresh = laundry.lastHeartbeat ? (Date.now() - laundry.lastHeartbeat) < AGENT_STALE_MS : false;
-    return serverOnline && laundry.isOnline && fresh;
-  }, [serverOnline]);
+  const isLaundryOnline = React.useCallback(
+    (laundry: Laundry) => isLaundryOnlineUtil(laundry, serverOnline, AGENT_STALE_MS),
+    [serverOnline]
+  );
   const offlineAgents = React.useMemo(
-    () => laundries.filter(laundry => !isLaundryOnline(laundry)),
+    () => getOfflineAgents(laundries, isLaundryOnline),
     [laundries, isLaundryOnline]
   );
-  const offlineMessages = React.useMemo(() => {
-    const messages: { key: string; tone: 'server' | 'agent'; text: string }[] = [];
-    if (!serverOnline) {
-      messages.push({
-        key: 'server-offline',
-        tone: 'server',
-        text: 'Server unreachable. Controls are temporarily disabled until connection is restored.',
-      });
-    }
-    offlineAgents.forEach(laundry => {
-      messages.push({
-        key: `agent-offline-${laundry.id}`,
-        tone: 'agent',
-        text: `Agent ${laundry.id} is offline. Controls are disabled until it reconnects.`,
-      });
-    });
-    return messages;
-  }, [serverOnline, offlineAgents]);
+  const offlineMessages = React.useMemo(
+    () => getOfflineMessagesUtil(serverOnline, offlineAgents),
+    [serverOnline, offlineAgents]
+  );
   const primaryAgentId = agentId || laundries[0]?.id || DEFAULT_AGENT_ID;
   const [isAddingLaundry, setIsAddingLaundry] = useState(false);
   const [newLaundryInput, setNewLaundryInput] = useState('');
@@ -394,106 +264,22 @@ const App: React.FC = () => {
   const pendingRelayStatesRef = React.useRef<Map<string, { state: boolean; updatedAt: number }>>(new Map());
   const laundryIdKey = React.useMemo(() => laundries.map(l => l.id).sort().join('|'), [laundries]);
 
-  const applyVisibility = (agentId: string, list: Relay[]) => {
-    const visMap = relayVisibilityRef.current;
-    return list.map(r => {
-      const key = relayDraftKey(agentId, r.id);
-      return visMap[key] !== undefined ? { ...r, isHidden: visMap[key] } : r;
-    });
-  };
+  const applyVisibility = (agentId: string, list: Relay[]) =>
+    applyVisibilityUtil(agentId, list, relayVisibilityRef.current, relayDraftKey);
 
-  const selectionKey = (agentId: string, relayId: number) => `${agentId}__${relayId}`;
-  const relayDraftKey = (agentId: string, relayId: number) => `${agentId}::${relayId}`;
-  const relayPendingKey = (agentId: string, relayId: number) => `${agentId}::${relayId}`;
-  const markPendingRelayState = (agentId: string, relayId: number, isOn: boolean) => {
-    pendingRelayStatesRef.current.set(relayPendingKey(agentId, relayId), { state: isOn, updatedAt: Date.now() });
-  };
-  const applyPendingRelayStates = (items: Laundry[]) => {
-    const pending = pendingRelayStatesRef.current;
-    if (!pending.size) return items;
-    const now = Date.now();
-    let mutated = false;
-    const merged = items.map(laundry => {
-      let relaysChanged = false;
-      const relays = (laundry.relays || []).map(relay => {
-        const key = relayPendingKey(laundry.id, relay.id);
-        const entry = pending.get(key);
-        if (!entry) return relay;
-        if (now - entry.updatedAt > PENDING_RELAY_TTL_MS) {
-          pending.delete(key);
-          return relay;
-        }
-        if (relay.isOn === entry.state) {
-          pending.delete(key);
-          return relay;
-        }
-        relaysChanged = true;
-        return { ...relay, isOn: entry.state };
-      });
-      if (relaysChanged) {
-        mutated = true;
-        return { ...laundry, relays };
-      }
-      return laundry;
-    });
-    return mutated ? merged : items;
-  };
+  const markPendingRelayState = (agentId: string, relayId: number, isOn: boolean) =>
+    markPendingRelayStateUtil(pendingRelayStatesRef, agentId, relayId, isOn);
 
-  const normalizeGroupPayload = (g: any, fallbackAgentId: string): RelayGroup => {
-    const entries = Array.isArray(g?.entries) && g.entries.length
-      ? g.entries.map((e: any) => ({
-          agentId: e.agentId,
-          relayIds: Array.isArray(e.relayIds) ? e.relayIds.map((rid: any) => Number(rid)) : [],
-        })).filter((e: any) => e.agentId)
-      : [{
-          agentId: g.agentId || fallbackAgentId,
-          relayIds: Array.isArray(g.relayIds) ? g.relayIds.map((rid: any) => Number(rid)) : [],
-        }];
-    return {
-      ...g,
-      entries,
-      relayIds: Array.isArray(g.relayIds) ? g.relayIds : entries.flatMap((e: any) => e.relayIds),
-    };
-  };
-
-  const cameraDraftKey = (agentId: string, cameraId: string) => `${agentId}::${cameraId}`;
-  const cameraPositionOrder = (position: string) => (position === 'front' ? 0 : position === 'back' ? 1 : 9);
+  const applyPendingRelayStates = (items: Laundry[]) =>
+    applyPendingRelayStatesUtil(items, pendingRelayStatesRef, PENDING_RELAY_TTL_MS);
 
   const cameraPreviewBase = resolveBaseUrl();
 
-  const buildCameraPreviewUrl = (camera: CameraConfig, agentId: string, options?: { cacheBust?: boolean }) => {
-    const raw = camera.previewUrl || `/api/agents/${encodeURIComponent(agentId)}/cameras/${encodeURIComponent(camera.id)}/frame`;
-    const absolute = cameraPreviewBase && !/^https?:\/\//i.test(raw)
-      ? `${cameraPreviewBase}${raw.startsWith('/') ? '' : '/'}${raw}`
-      : raw;
-    if (options?.cacheBust === false) return absolute;
-    const sep = absolute.includes('?') ? '&' : '?';
-    return `${absolute}${sep}t=${cameraRefreshTick}`;
-  };
+  const buildCameraPreviewUrl = (camera: CameraConfig, agentId: string, options?: { cacheBust?: boolean }) =>
+    buildCameraPreviewUrlUtil(camera, agentId, cameraPreviewBase, cameraRefreshTick, options);
 
-  const getCameraSlots = (agentId: string) => {
-    const existing = cameraConfigs[agentId] || [];
-    const byPosition = new Map(existing.map(cam => [cam.position, cam]));
-    const defaults = [
-      { position: 'front', name: 'Front' },
-      { position: 'back', name: 'Back' },
-    ];
-    const slots = defaults.map(def => {
-      const cam = byPosition.get(def.position);
-      if (cam) return cam;
-      const id = `${agentId}:${def.position}`;
-      return {
-        id,
-        agentId,
-        name: def.name,
-        position: def.position,
-        sourceType: 'pattern' as const,
-        enabled: false,
-        previewUrl: `/api/agents/${encodeURIComponent(agentId)}/cameras/${encodeURIComponent(id)}/frame`,
-      };
-    });
-    return slots.sort((a, b) => cameraPositionOrder(a.position) - cameraPositionOrder(b.position));
-  };
+  const getCameraSlots = (agentId: string) =>
+    getCameraSlotsUtil(agentId, cameraConfigs);
   const registerCameraCard = React.useCallback((key: string, node: HTMLDivElement | null) => {
     const observer = cameraObserverRef.current;
     const existing = cameraCardRefs.current.get(key);
@@ -521,64 +307,6 @@ const App: React.FC = () => {
   }, [registerCameraCard]);
 
 
-  const buildRevenueDraft = (entry: RevenueEntry | null): RevenueDraft => ({
-    coinsTotal: entry ? formatMoney(entry.coinsTotal) : '',
-    euroCoinsCount: entry ? String(entry.euroCoinsCount) : '',
-    billsTotal: entry ? formatMoney(entry.billsTotal) : '',
-    deductions: entry?.deductions?.map(d => ({
-      id: makeDeductionId(),
-      amount: formatMoney(d.amount),
-      comment: d.comment,
-    })) || [],
-  });
-
-  const parseMoneyInput = (value: string) => {
-    if (!value.trim()) return 0;
-    const num = Number(normalizeDecimalInput(value.trim()));
-    if (!Number.isFinite(num) || num < 0) return null;
-    return Math.round(num * 100) / 100;
-  };
-
-  const parseCountInput = (value: string) => {
-    if (!value.trim()) return 0;
-    const num = Number(normalizeDecimalInput(value.trim()));
-    if (!Number.isFinite(num) || num < 0 || !Number.isInteger(num)) return null;
-    return num;
-  };
-
-  const normalizeDeductionDrafts = (drafts: RevenueDraftDeduction[]) => {
-    const normalized: { amount: number; comment: string }[] = [];
-    for (const item of drafts) {
-      const amountText = item.amount.trim();
-      const comment = item.comment.trim();
-      if (!amountText && !comment) continue;
-      if (!comment) return { error: 'Deduction comment is required.', list: [] };
-      const amount = parseMoneyInput(amountText);
-      if (amount === null) return { error: 'Deduction amount must be a non-negative number.', list: [] };
-      normalized.push({ amount, comment });
-    }
-    return { error: null, list: normalized };
-  };
-
-  const getLatestAudit = (agentId: string, field: string) => {
-    const list = revenueAudit[agentId] || [];
-    return list.find(entry => entry.field === field && entry.oldValue !== null) || null;
-  };
-
-  const getDeductionSummary = (raw: string | null) => {
-    if (!raw) return null;
-    try {
-      const parsed = JSON.parse(raw);
-      if (!Array.isArray(parsed)) return null;
-      const sum = parsed.reduce((acc, item) => {
-        const amount = Number(item?.amount);
-        return Number.isFinite(amount) ? acc + amount : acc;
-      }, 0);
-      return { count: parsed.length, total: Math.round(sum * 100) / 100 };
-    } catch {
-      return null;
-    }
-  };
 
   const [isMockMode, setIsMockMode] = useState(true);
   const [isLoading, setIsLoading] = useState(true);
@@ -836,58 +564,9 @@ const App: React.FC = () => {
     }
   };
 
-  const csvEscape = (value: string | number | null | undefined) => {
-    const text = value === null || value === undefined ? '' : String(value);
-    if (/[",\n]/.test(text)) {
-      return `"${text.replace(/"/g, '""')}"`;
-    }
-    return text;
-  };
-
-  const formatCsvTimestamp = (ts: number | null) => (ts ? new Date(ts).toISOString() : '');
-
   const handleExportRevenueCsv = () => {
-    if (!revenueAllEntries.length) return;
     const laundryNameMap = new Map(laundries.map(l => [l.id, l.name]));
-    const header = [
-      'entryDate',
-      'laundry',
-      'coinsTotal',
-      'euroCoinsCount',
-      'billsTotal',
-      'deductionsTotal',
-      'deductions',
-      'updatedBy',
-      'updatedAt',
-      'createdBy',
-      'createdAt',
-    ];
-    const rows = revenueAllEntries.map(entry => {
-      const deductions = (entry.deductions || [])
-        .map(item => `${formatMoney(item.amount)}:${item.comment}`)
-        .join(' | ');
-      return [
-        entry.entryDate,
-        laundryNameMap.get(entry.agentId) || entry.agentId,
-        formatMoney(entry.coinsTotal),
-        entry.euroCoinsCount,
-        formatMoney(entry.billsTotal),
-        formatMoney(entry.deductionsTotal),
-        deductions,
-        entry.updatedBy || '',
-        formatCsvTimestamp(entry.updatedAt),
-        entry.createdBy || '',
-        formatCsvTimestamp(entry.createdAt),
-      ];
-    });
-    const csv = [header, ...rows].map(row => row.map(csvEscape).join(',')).join('\n');
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `revenue-entries-${new Date().toISOString().slice(0, 10)}.csv`;
-    link.click();
-    URL.revokeObjectURL(url);
+    exportRevenueToCsv(revenueAllEntries, laundryNameMap);
   };
 
   useEffect(() => {
@@ -1488,6 +1167,10 @@ const App: React.FC = () => {
     />
   );
 
+  // Wrapper function for getLatestAudit that needs revenueAudit context
+  const getLatestAuditWrapper = (agentId: string, field: string) =>
+    getLatestAudit(revenueAudit, agentId, field);
+
   const renderRevenue = () => (
     <RevenueView
       authUser={authUser}
@@ -1519,7 +1202,7 @@ const App: React.FC = () => {
       buildRevenueDraft={buildRevenueDraft}
       updateRevenueDraftFromHook={updateRevenueDraftFromHook}
       isRevenueNumericInput={isRevenueNumericInput}
-      getLatestAudit={getLatestAudit}
+      getLatestAudit={getLatestAuditWrapper}
       getDeductionSummary={getDeductionSummary}
       addRevenueDeductionFromHook={addRevenueDeductionFromHook}
       removeRevenueDeductionFromHook={removeRevenueDeductionFromHook}
@@ -1558,215 +1241,53 @@ const App: React.FC = () => {
   );
 
   if (!isAuthReady) {
-    return <div className="min-h-screen flex items-center justify-center bg-slate-900 text-slate-500">Checking session...</div>;
+    return <LoadingScreen message="Checking session..." />;
   }
 
   if (!isAuthenticated) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-900 px-4">
-        <div className="w-full max-w-sm bg-slate-800/70 border border-slate-700 rounded-2xl p-6 shadow-xl space-y-5">
-          <div className="flex flex-col items-center text-center gap-4">
-            <img
-              src={BRAND_LOGO_URL}
-              alt="WashControl"
-              className="w-full max-w-[240px] sm:max-w-[320px] lg:max-w-[360px] h-auto"
-            />
-            <div>
-              <p className="text-xs uppercase tracking-wide text-slate-400">Secure Access</p>
-              <h2 className="text-lg font-semibold text-white">LaundroPi Control</h2>
-            </div>
-          </div>
-          <form className="space-y-4" onSubmit={handleLoginSubmit}>
-            <div>
-              <label className="text-xs text-slate-400 block mb-1">Username</label>
-              <input
-                value={authLogin}
-                onChange={(e) => setAuthLogin(e.target.value)}
-                className="w-full bg-slate-900/70 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                placeholder="Enter username"
-                autoComplete="username"
-                autoFocus
-              />
-            </div>
-            <div>
-              <label className="text-xs text-slate-400 block mb-1">Password</label>
-              <input
-                type="password"
-                value={authPassword}
-                onChange={(e) => setAuthPassword(e.target.value)}
-                className="w-full bg-slate-900/70 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                placeholder="Enter password"
-                autoComplete="current-password"
-              />
-            </div>
-            {authError && (
-              <p className="text-sm text-red-400 bg-red-500/10 border border-red-500/30 rounded-md px-3 py-2">
-                {authError}
-              </p>
-            )}
-            <button
-              type="submit"
-              className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-sm font-semibold transition-colors"
-            >
-              Sign in
-            </button>
-          </form>
-        </div>
-      </div>
+      <LoginForm
+        authLogin={authLogin}
+        authPassword={authPassword}
+        authError={authError}
+        brandLogoUrl={BRAND_LOGO_URL}
+        setAuthLogin={setAuthLogin}
+        setAuthPassword={setAuthPassword}
+        handleLoginSubmit={handleLoginSubmit}
+      />
     );
   }
 
   if (isLoading && laundries.length === 0) {
     console.log('[LaundroPi] render branch: loading screen', { isLoading, relaysLen: relays.length, activeTab });
-    return <div className="min-h-screen flex items-center justify-center bg-slate-900 text-slate-500">Loading LaundroPi...</div>;
+    return <LoadingScreen message="Loading LaundroPi..." />;
   }
 
   console.log('[LaundroPi] render branch: main UI', { isLoading, relaysLen: relays.length, activeTab, schedulesLen: schedules.length });
   return (
     <div className="min-h-screen pb-24 overflow-x-hidden">
-      {/* Header */}
-      <header className="bg-slate-900/80 backdrop-blur-md sticky top-0 z-50 border-b border-slate-800 overflow-hidden">
-        <div className="max-w-full sm:max-w-3xl mx-auto px-3 sm:px-4">
-          <div className="grid grid-cols-[auto,minmax(0,1fr),auto] items-center gap-3 sm:gap-5 h-20 sm:h-24 lg:h-28">
-            <div className="flex items-center h-full">
-              <img
-                src={BRAND_LOGO_URL}
-                alt="WashControl"
-                className="h-[68%] sm:h-[72%] lg:h-[74%] w-auto shrink-0 object-contain max-w-[150px] sm:max-w-[190px] lg:max-w-[215px]"
-                width={135}
-                height={78}
-              />
-              <span className="sr-only">WashControl</span>
-            </div>
-            <div className="flex items-center justify-center min-w-0">
-              {laundries.length > 0 && (
-                <div className="flex items-center gap-2 sm:gap-3 overflow-x-auto min-w-0">
-                  {laundries.map(laundry => {
-                    const online = isLaundryOnline(laundry);
-                    return (
-                      <span
-                        key={`header-status-${laundry.id}`}
-                        className={`inline-flex flex-col gap-1 px-2.5 py-1 rounded-xl border text-[10px] sm:px-3 sm:py-1.5 sm:text-[11px] font-semibold ${
-                          online
-                            ? 'border-emerald-400/60 text-emerald-200 bg-emerald-500/10'
-                            : 'border-red-400/60 text-red-200 bg-red-500/10'
-                        }`}
-                      >
-                        <span className="flex items-center gap-2 whitespace-nowrap">
-                          <span className={`w-2 h-2 rounded-full ${online ? 'bg-emerald-400' : 'bg-red-400'}`} />
-                          <span className="max-w-[120px] sm:max-w-[140px] truncate">{laundry.name}</span>
-                        </span>
-                        <span className="flex items-center gap-2 whitespace-nowrap">
-                          <span className="text-[9px] sm:text-[10px] uppercase tracking-wide opacity-70">
-                            {online ? 'Online' : 'Offline'}
-                          </span>
-                          <span
-                            className={`px-1.5 py-0.5 rounded-full text-[9px] sm:text-[10px] uppercase tracking-wide border ${
-                              laundry.isMock
-                                ? 'border-amber-400/60 text-amber-200 bg-amber-500/10'
-                                : 'border-sky-400/60 text-sky-200 bg-sky-500/10'
-                            }`}
-                          >
-                            {laundry.isMock ? 'Mock' : 'Pi'}
-                          </span>
-                        </span>
-                      </span>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-            <div className="flex h-full flex-col items-end justify-center gap-2 sm:gap-2.5">
-              <div className="flex items-center gap-2 sm:gap-3">
-                {authUser && (
-                  <div className="text-right leading-tight">
-                    <div className="text-[11px] sm:text-xs text-slate-300">{authUser.username}</div>
-                    <div className="text-[9px] sm:text-[10px] uppercase text-slate-500">{authUser.role}</div>
-                  </div>
-                )}
-                <div className="text-right leading-tight">
-                  <div className="text-base sm:text-lg font-mono text-white font-medium">
-                    {currentTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })}
-                  </div>
-                  <div className="text-[10px] sm:text-[11px] text-slate-500">
-                    {currentTime.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })}
-                  </div>
-                </div>
-              </div>
-              <button
-                onClick={handleLogout}
-                className="shrink-0 flex items-center justify-center gap-2 px-3 py-1.5 sm:py-2 text-[11px] sm:text-xs font-semibold border border-slate-700 rounded-md text-slate-300 hover:text-white hover:border-indigo-500 transition-colors"
-              >
-                <Lock className="w-4 h-4" />
-                Log out
-              </button>
-            </div>
-          </div>
-        </div>
-      </header>
+      <Header
+        brandLogoUrl={BRAND_LOGO_URL}
+        laundries={laundries}
+        isLaundryOnline={isLaundryOnline}
+        authUser={authUser}
+        currentTime={currentTime}
+        handleLogout={handleLogout}
+      />
 
-      {/* Main Content */}
       <main className="max-w-full sm:max-w-3xl w-full mx-auto px-3 sm:px-4 py-6 overflow-hidden box-border">
-        {offlineMessages.length > 0 && (
-          <div className="mb-4 space-y-2">
-            {offlineMessages.map(message => (
-              <div
-                key={message.key}
-                className={`px-3 py-2 rounded-lg text-sm border ${
-                  message.tone === 'server'
-                    ? 'bg-amber-500/10 border-amber-500/40 text-amber-200'
-                    : 'bg-red-500/10 border-red-500/40 text-red-200'
-                }`}
-              >
-                {message.text}
-              </div>
-            ))}
-          </div>
-        )}
+        <OfflineMessages messages={offlineMessages} />
         {activeTab === Tab.DASHBOARD && renderDashboard()}
         {activeTab === Tab.SCHEDULE && renderScheduler()}
         {activeTab === Tab.REVENUE && renderRevenue()}
         {activeTab === Tab.SETTINGS && renderSystem()}
       </main>
 
-      {/* Bottom Navigation */}
-      <nav className="fixed bottom-0 left-0 right-0 bg-slate-900 border-t border-slate-800 pb-safe">
-        <div className="max-w-full sm:max-w-3xl mx-auto px-4 sm:px-6 py-3 flex justify-between items-center">
-          {authUser?.role === 'admin' && (
-            <button 
-              onClick={() => setActiveTab(Tab.REVENUE)}
-              className={`flex flex-col items-center gap-1 ${activeTab === Tab.REVENUE ? 'text-amber-400' : 'text-slate-500 hover:text-slate-300'}`}
-            >
-              <Coins className="w-6 h-6" />
-              <span className="text-[10px] font-medium">Revenue</span>
-            </button>
-          )}
-
-          <button 
-            onClick={() => setActiveTab(Tab.DASHBOARD)}
-            className={`flex flex-col items-center gap-1 ${activeTab === Tab.DASHBOARD ? 'text-indigo-400' : 'text-slate-500 hover:text-slate-300'}`}
-          >
-            <LayoutDashboard className="w-6 h-6" />
-            <span className="text-[10px] font-medium">Control</span>
-          </button>
-          
-          <button 
-            onClick={() => setActiveTab(Tab.SCHEDULE)}
-            className={`flex flex-col items-center gap-1 ${activeTab === Tab.SCHEDULE ? 'text-emerald-400' : 'text-slate-500 hover:text-slate-300'}`}
-          >
-            <CalendarClock className="w-6 h-6" />
-            <span className="text-[10px] font-medium">Groups</span>
-          </button>
-
-          <button 
-            onClick={() => setActiveTab(Tab.SETTINGS)}
-            className={`flex flex-col items-center gap-1 ${activeTab === Tab.SETTINGS ? 'text-slate-200' : 'text-slate-500 hover:text-slate-300'}`}
-          >
-            <Settings className="w-6 h-6" />
-            <span className="text-[10px] font-medium">System</span>
-          </button>
-        </div>
-      </nav>
+      <BottomNavigation
+        activeTab={activeTab}
+        authUser={authUser}
+        setActiveTab={setActiveTab}
+      />
     </div>
   );
 };

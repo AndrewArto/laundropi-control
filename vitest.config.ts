@@ -5,6 +5,7 @@ export default defineConfig({
     environment: 'node',
     environmentMatchGlobs: [
       ['**/components/__tests__/**', 'jsdom'],
+      ['**/hooks/__tests__/**', 'jsdom'],
     ],
     setupFiles: [],
     globals: true,
