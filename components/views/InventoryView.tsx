@@ -117,7 +117,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   };
 
   return (
-    <div className="pb-24 px-4 py-6 max-w-6xl mx-auto">
+    <div className="pb-24 px-4 py-6 max-w-full sm:max-w-3xl mx-auto">
       <h1 className="text-2xl font-bold text-slate-100 mb-6">Detergent Inventory</h1>
 
       {error && (
