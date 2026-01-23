@@ -23,19 +23,20 @@ interface DonutChartProps {
   label: string;
   profitLoss: number;
   formatMoney: (val: number) => string;
+  large?: boolean;
 }
 
-const DonutChart: React.FC<DonutChartProps> = ({ revenue, costs, size = 60, label, profitLoss, formatMoney }) => {
+const DonutChart: React.FC<DonutChartProps> = ({ revenue, costs, size = 60, label, profitLoss, formatMoney, large = false }) => {
   const total = revenue + costs;
   const revenuePercent = total > 0 ? (revenue / total) * 100 : (revenue > 0 ? 100 : 50);
-  const strokeWidth = 6;
+  const strokeWidth = large ? 8 : 6;
   const radius = (size - strokeWidth) / 2;
   const circumference = 2 * Math.PI * radius;
   const revenueStroke = (revenuePercent / 100) * circumference;
   const costsStroke = circumference - revenueStroke;
 
   return (
-    <div className="flex items-center gap-2">
+    <div className={`flex items-center ${large ? 'gap-4' : 'gap-2'}`}>
       <svg width={size} height={size} className="transform -rotate-90 flex-shrink-0">
         {/* Background circle */}
         <circle
@@ -77,9 +78,9 @@ const DonutChart: React.FC<DonutChartProps> = ({ revenue, costs, size = 60, labe
         )}
       </svg>
       <div className="text-left min-w-0">
-        <div className="text-[10px] text-slate-500 uppercase">{label}</div>
-        <div className="text-xs text-white">€{formatMoney(revenue)}</div>
-        <div className={`text-xs font-semibold ${profitLoss >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+        <div className={`${large ? 'text-xs' : 'text-[10px]'} text-slate-500 uppercase`}>{label}</div>
+        <div className={`${large ? 'text-2xl font-semibold' : 'text-xs'} text-white`}>€{formatMoney(revenue)}</div>
+        <div className={`${large ? 'text-lg' : 'text-xs'} font-semibold ${profitLoss >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
           P/L €{formatMoney(profitLoss)}
         </div>
       </div>
@@ -371,52 +372,30 @@ export const RevenueView: React.FC<RevenueViewProps> = (props) => {
         const weekCosts = revenueSummary.week.overall - revenueSummary.week.profitLossOverall;
         const monthCosts = revenueSummary.month.overall - revenueSummary.month.profitLossOverall;
         return (
-          <div className="space-y-4">
-            <div>
-              <div className="text-xs uppercase tracking-wide text-slate-400 mb-2">Revenue</div>
-              <div className="grid gap-4 md:grid-cols-2">
-                <div className="bg-slate-800 border border-slate-700 rounded-xl p-4">
-                  <DonutChart
-                    revenue={revenueSummary.week.overall}
-                    costs={weekCosts}
-                    size={60}
-                    label="Week (Mon–Sun)"
-                    profitLoss={revenueSummary.week.profitLossOverall}
-                    formatMoney={formatMoney}
-                  />
-                  <div className="text-xs text-slate-500 mt-2">{revenueSummary.week.startDate} → {revenueSummary.week.endDate}</div>
-                </div>
-                <div className="bg-slate-800 border border-slate-700 rounded-xl p-4">
-                  <DonutChart
-                    revenue={revenueSummary.month.overall}
-                    costs={monthCosts}
-                    size={60}
-                    label="Month"
-                    profitLoss={revenueSummary.month.profitLossOverall}
-                    formatMoney={formatMoney}
-                  />
-                  <div className="text-xs text-slate-500 mt-2">{revenueSummary.month.startDate} → {revenueSummary.month.endDate}</div>
-                </div>
-              </div>
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="bg-slate-800 border border-slate-700 rounded-xl p-4">
+              <DonutChart
+                revenue={revenueSummary.week.overall}
+                costs={weekCosts}
+                size={80}
+                label="Week (Mon–Sun)"
+                profitLoss={revenueSummary.week.profitLossOverall}
+                formatMoney={formatMoney}
+                large
+              />
+              <div className="text-xs text-slate-500 mt-2">{revenueSummary.week.startDate} → {revenueSummary.week.endDate}</div>
             </div>
-            <div>
-              <div className="text-xs uppercase tracking-wide text-slate-400 mb-2">P/L</div>
-              <div className="grid gap-4 md:grid-cols-2">
-                <div className="bg-slate-800 border border-slate-700 rounded-xl p-4">
-                  <div className="text-xs uppercase tracking-wide text-slate-400">Week (Mon–Sun)</div>
-                  <div className={`text-2xl font-semibold mt-1 ${revenueSummary.week.profitLossOverall >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                    €{formatMoney(revenueSummary.week.profitLossOverall)}
-                  </div>
-                  <div className="text-xs text-slate-500 mt-1">{revenueSummary.week.startDate} → {revenueSummary.week.endDate}</div>
-                </div>
-                <div className="bg-slate-800 border border-slate-700 rounded-xl p-4">
-                  <div className="text-xs uppercase tracking-wide text-slate-400">Month</div>
-                  <div className={`text-2xl font-semibold mt-1 ${revenueSummary.month.profitLossOverall >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                    €{formatMoney(revenueSummary.month.profitLossOverall)}
-                  </div>
-                  <div className="text-xs text-slate-500 mt-1">{revenueSummary.month.startDate} → {revenueSummary.month.endDate}</div>
-                </div>
-              </div>
+            <div className="bg-slate-800 border border-slate-700 rounded-xl p-4">
+              <DonutChart
+                revenue={revenueSummary.month.overall}
+                costs={monthCosts}
+                size={80}
+                label="Month"
+                profitLoss={revenueSummary.month.profitLossOverall}
+                formatMoney={formatMoney}
+                large
+              />
+              <div className="text-xs text-slate-500 mt-2">{revenueSummary.month.startDate} → {revenueSummary.month.endDate}</div>
             </div>
           </div>
         );

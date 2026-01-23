@@ -531,7 +531,8 @@ const App: React.FC = () => {
     }
   };
 
-  const fetchRevenueData = async () => {
+  const fetchRevenueData = async (options?: { silent?: boolean }) => {
+    const silent = options?.silent ?? false;
     if (!laundryIdKey) {
       setRevenueEntries({});
       setRevenueDrafts({});
@@ -539,8 +540,10 @@ const App: React.FC = () => {
       setRevenueSummary(null);
       return;
     }
-    setRevenueLoading(true);
-    setRevenueError(null);
+    if (!silent) {
+      setRevenueLoading(true);
+      setRevenueError(null);
+    }
     try {
       const date = revenueDate;
       const results = await Promise.all(laundries.map(async (laundry) => {
@@ -559,18 +562,23 @@ const App: React.FC = () => {
         draftMap[id] = buildRevenueDraft(entry || null);
         auditMap[id] = audit || [];
       });
-      setRevenueEntries(entryMap);
-      setRevenueDrafts(draftMap);
-      setRevenueAudit(auditMap);
+      // Only update state if data actually changed (prevents flickering during polling)
+      setRevenueEntries(prev => JSON.stringify(prev) !== JSON.stringify(entryMap) ? entryMap : prev);
+      setRevenueDrafts(prev => JSON.stringify(prev) !== JSON.stringify(draftMap) ? draftMap : prev);
+      setRevenueAudit(prev => JSON.stringify(prev) !== JSON.stringify(auditMap) ? auditMap : prev);
       setRevenueSaveErrors({});
       const summary = await ApiService.getRevenueSummary(date);
-      setRevenueSummary(summary);
+      setRevenueSummary(prev => JSON.stringify(prev) !== JSON.stringify(summary) ? summary : prev);
     } catch (err) {
       if (handleAuthFailure(err)) return;
       console.error('Revenue fetch failed', err);
-      setRevenueError('Unable to load revenue data.');
+      if (!silent) {
+        setRevenueError('Unable to load revenue data.');
+      }
     } finally {
-      setRevenueLoading(false);
+      if (!silent) {
+        setRevenueLoading(false);
+      }
     }
   };
 
@@ -590,18 +598,26 @@ const App: React.FC = () => {
     }
   };
 
-  const fetchAllRevenueEntries = async () => {
-    setRevenueAllLoading(true);
-    setRevenueAllError(null);
+  const fetchAllRevenueEntries = async (options?: { silent?: boolean }) => {
+    const silent = options?.silent ?? false;
+    if (!silent) {
+      setRevenueAllLoading(true);
+      setRevenueAllError(null);
+    }
     try {
       const entries = await ApiService.listRevenueEntries();
-      setRevenueAllEntries(entries);
+      // Only update state if data actually changed (prevents flickering during polling)
+      setRevenueAllEntries(prev => JSON.stringify(prev) !== JSON.stringify(entries) ? entries : prev);
     } catch (err) {
       if (handleAuthFailure(err)) return;
       console.error('Revenue list fetch failed', err);
-      setRevenueAllError('Unable to load revenue entries.');
+      if (!silent) {
+        setRevenueAllError('Unable to load revenue entries.');
+      }
     } finally {
-      setRevenueAllLoading(false);
+      if (!silent) {
+        setRevenueAllLoading(false);
+      }
     }
   };
 
@@ -800,7 +816,7 @@ const App: React.FC = () => {
     const timer = setInterval(() => {
       // Skip polling if any entry is currently being saved
       if (Object.values(revenueSaving).some(Boolean)) return;
-      fetchRevenueData();
+      fetchRevenueData({ silent: true });
     }, 10_000);
     return () => clearInterval(timer);
   }, [activeTab, revenueView, isAuthenticated, authUser?.role, revenueSaving]);
@@ -816,7 +832,7 @@ const App: React.FC = () => {
     if (!isAuthenticated || authUser?.role !== 'admin') return;
     if (activeTab !== Tab.REVENUE || revenueView !== 'all') return;
     const timer = setInterval(() => {
-      fetchAllRevenueEntries();
+      fetchAllRevenueEntries({ silent: true });
     }, 10_000);
     return () => clearInterval(timer);
   }, [activeTab, revenueView, isAuthenticated, authUser?.role]);
