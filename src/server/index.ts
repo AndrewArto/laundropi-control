@@ -1956,8 +1956,13 @@ wss.on('connection', (socket) => {
 
   socket.on('close', () => {
     if (agentId) {
-      agents.delete(agentId);
-      console.log('[central] agent disconnected', agentId);
+      const current = agents.get(agentId);
+      // Only delete if this socket is still the registered one
+      // (a newer connection may have already replaced it)
+      if (current && current.socket === socket) {
+        agents.delete(agentId);
+        console.log('[central] agent disconnected', agentId);
+      }
     }
   });
 });
