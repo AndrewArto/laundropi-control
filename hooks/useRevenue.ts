@@ -1,6 +1,7 @@
 import { useState, useCallback } from 'react';
 import { RevenueEntry, RevenueAuditEntry, RevenueSummary } from '../types';
 import { ApiService } from '../services/api';
+import { formatMoney } from '../utils/formatting';
 
 type RevenueDraftDeduction = { id: string; amount: string; comment: string };
 type RevenueDraft = {
@@ -55,10 +56,6 @@ const toDateInput = (date: Date): string => {
   const m = String(date.getMonth() + 1).padStart(2, '0');
   const d = String(date.getDate()).padStart(2, '0');
   return `${y}-${m}-${d}`;
-};
-
-const formatMoney = (val: number): string => {
-  return (val / 100).toFixed(2).replace('.', ',');
 };
 
 const normalizeDecimalInput = (val: string): string => {
