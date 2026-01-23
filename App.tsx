@@ -534,6 +534,8 @@ const App: React.FC = () => {
   const fetchRevenueData = async (options?: { silent?: boolean }) => {
     const silent = options?.silent ?? false;
     if (!laundryIdKey) {
+      // Don't clear data during silent polling - laundries might just be temporarily empty
+      if (silent) return;
       setRevenueEntries({});
       setRevenueDrafts({});
       setRevenueAudit({});
@@ -546,7 +548,11 @@ const App: React.FC = () => {
     }
     try {
       const date = revenueDate;
-      const results = await Promise.all(laundries.map(async (laundry) => {
+      // Capture current laundries to avoid race conditions
+      const currentLaundries = [...laundries];
+      if (currentLaundries.length === 0) return;
+
+      const results = await Promise.all(currentLaundries.map(async (laundry) => {
         const response = await ApiService.getRevenueEntry(laundry.id, date);
         return {
           agentId: laundry.id,
@@ -564,7 +570,10 @@ const App: React.FC = () => {
       });
       // Only update state if data actually changed (prevents flickering during polling)
       setRevenueEntries(prev => JSON.stringify(prev) !== JSON.stringify(entryMap) ? entryMap : prev);
-      setRevenueDrafts(prev => JSON.stringify(prev) !== JSON.stringify(draftMap) ? draftMap : prev);
+      // Don't update drafts during silent polling to preserve user edits
+      if (!silent) {
+        setRevenueDrafts(prev => JSON.stringify(prev) !== JSON.stringify(draftMap) ? draftMap : prev);
+      }
       setRevenueAudit(prev => JSON.stringify(prev) !== JSON.stringify(auditMap) ? auditMap : prev);
       setRevenueSaveErrors({});
       const summary = await ApiService.getRevenueSummary(date);
