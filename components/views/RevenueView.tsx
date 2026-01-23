@@ -367,40 +367,60 @@ export const RevenueView: React.FC<RevenueViewProps> = (props) => {
         </div>
       )}
 
-      {revenueSummary && (
-        <div className="space-y-4">
-          <div>
-            <div className="text-xs uppercase tracking-wide text-slate-400 mb-2">Revenue</div>
-            <div className="grid gap-4 md:grid-cols-2">
-              <div className="bg-slate-800 border border-slate-700 rounded-xl p-4">
-                <div className="text-xs uppercase tracking-wide text-slate-400">Week (Mon–Sun)</div>
-                <div className="text-2xl font-semibold text-white mt-1">€{formatMoney(revenueSummary.week.overall)}</div>
-                <div className="text-xs text-slate-500 mt-1">{revenueSummary.week.startDate} → {revenueSummary.week.endDate}</div>
+      {revenueSummary && (() => {
+        const weekCosts = revenueSummary.week.overall - revenueSummary.week.profitLossOverall;
+        const monthCosts = revenueSummary.month.overall - revenueSummary.month.profitLossOverall;
+        return (
+          <div className="space-y-4">
+            <div>
+              <div className="text-xs uppercase tracking-wide text-slate-400 mb-2">Revenue</div>
+              <div className="grid gap-4 md:grid-cols-2">
+                <div className="bg-slate-800 border border-slate-700 rounded-xl p-4">
+                  <DonutChart
+                    revenue={revenueSummary.week.overall}
+                    costs={weekCosts}
+                    size={60}
+                    label="Week (Mon–Sun)"
+                    profitLoss={revenueSummary.week.profitLossOverall}
+                    formatMoney={formatMoney}
+                  />
+                  <div className="text-xs text-slate-500 mt-2">{revenueSummary.week.startDate} → {revenueSummary.week.endDate}</div>
+                </div>
+                <div className="bg-slate-800 border border-slate-700 rounded-xl p-4">
+                  <DonutChart
+                    revenue={revenueSummary.month.overall}
+                    costs={monthCosts}
+                    size={60}
+                    label="Month"
+                    profitLoss={revenueSummary.month.profitLossOverall}
+                    formatMoney={formatMoney}
+                  />
+                  <div className="text-xs text-slate-500 mt-2">{revenueSummary.month.startDate} → {revenueSummary.month.endDate}</div>
+                </div>
               </div>
-              <div className="bg-slate-800 border border-slate-700 rounded-xl p-4">
-                <div className="text-xs uppercase tracking-wide text-slate-400">Month</div>
-                <div className="text-2xl font-semibold text-white mt-1">€{formatMoney(revenueSummary.month.overall)}</div>
-                <div className="text-xs text-slate-500 mt-1">{revenueSummary.month.startDate} → {revenueSummary.month.endDate}</div>
+            </div>
+            <div>
+              <div className="text-xs uppercase tracking-wide text-slate-400 mb-2">P/L</div>
+              <div className="grid gap-4 md:grid-cols-2">
+                <div className="bg-slate-800 border border-slate-700 rounded-xl p-4">
+                  <div className="text-xs uppercase tracking-wide text-slate-400">Week (Mon–Sun)</div>
+                  <div className={`text-2xl font-semibold mt-1 ${revenueSummary.week.profitLossOverall >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                    €{formatMoney(revenueSummary.week.profitLossOverall)}
+                  </div>
+                  <div className="text-xs text-slate-500 mt-1">{revenueSummary.week.startDate} → {revenueSummary.week.endDate}</div>
+                </div>
+                <div className="bg-slate-800 border border-slate-700 rounded-xl p-4">
+                  <div className="text-xs uppercase tracking-wide text-slate-400">Month</div>
+                  <div className={`text-2xl font-semibold mt-1 ${revenueSummary.month.profitLossOverall >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                    €{formatMoney(revenueSummary.month.profitLossOverall)}
+                  </div>
+                  <div className="text-xs text-slate-500 mt-1">{revenueSummary.month.startDate} → {revenueSummary.month.endDate}</div>
+                </div>
               </div>
             </div>
           </div>
-          <div>
-            <div className="text-xs uppercase tracking-wide text-slate-400 mb-2">P/L</div>
-            <div className="grid gap-4 md:grid-cols-2">
-              <div className="bg-slate-800 border border-slate-700 rounded-xl p-4">
-                <div className="text-xs uppercase tracking-wide text-slate-400">Week (Mon–Sun)</div>
-                <div className="text-2xl font-semibold text-white mt-1">€{formatMoney(revenueSummary.week.profitLossOverall)}</div>
-                <div className="text-xs text-slate-500 mt-1">{revenueSummary.week.startDate} → {revenueSummary.week.endDate}</div>
-              </div>
-              <div className="bg-slate-800 border border-slate-700 rounded-xl p-4">
-                <div className="text-xs uppercase tracking-wide text-slate-400">Month</div>
-                <div className="text-2xl font-semibold text-white mt-1">€{formatMoney(revenueSummary.month.profitLossOverall)}</div>
-                <div className="text-xs text-slate-500 mt-1">{revenueSummary.month.startDate} → {revenueSummary.month.endDate}</div>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+        );
+      })()}
 
       {revenueLoading && (
         <div className="text-sm text-slate-400">Loading revenue data...</div>
