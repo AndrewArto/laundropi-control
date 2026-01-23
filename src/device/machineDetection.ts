@@ -63,19 +63,20 @@ export const MACHINE_CONFIGS: LaundryMachineConfig[] = [
     agentId: 'Brandoa2',
     brightnessThreshold: 60,
     machines: [
-      // Front camera - washers (targeting display areas)
-      { id: 'w10', label: 'Washer 10', type: 'washer', camera: 'front', x: 0.07, y: 0.32, width: 0.06, height: 0.06 },
-      { id: 'w9', label: 'Washer 9', type: 'washer', camera: 'front', x: 0.22, y: 0.32, width: 0.06, height: 0.06 },
-      { id: 'w8', label: 'Washer 8', type: 'washer', camera: 'front', x: 0.37, y: 0.32, width: 0.06, height: 0.06 },
-      { id: 'w7', label: 'Washer 7', type: 'washer', camera: 'front', x: 0.52, y: 0.32, width: 0.06, height: 0.06 },
-      // Back camera - washers
-      { id: 'w3', label: 'Washer 3', type: 'washer', camera: 'back', x: 0.37, y: 0.38, width: 0.06, height: 0.06 },
-      { id: 'w4', label: 'Washer 4', type: 'washer', camera: 'back', x: 0.50, y: 0.38, width: 0.06, height: 0.06 },
-      // Back camera - dryers (stacked on right)
-      { id: 'd1', label: 'Dryer 1', type: 'dryer', camera: 'back', x: 0.74, y: 0.18, width: 0.05, height: 0.05 },
-      { id: 'd3', label: 'Dryer 3', type: 'dryer', camera: 'back', x: 0.87, y: 0.18, width: 0.05, height: 0.05 },
-      { id: 'd2', label: 'Dryer 2', type: 'dryer', camera: 'back', x: 0.74, y: 0.42, width: 0.05, height: 0.05 },
-      { id: 'd4', label: 'Dryer 4', type: 'dryer', camera: 'back', x: 0.87, y: 0.42, width: 0.05, height: 0.05 },
+      // Front camera - 4 washers in a row (targeting display areas)
+      { id: 'w1', label: 'Washer 1', type: 'washer', camera: 'front', x: 0.07, y: 0.32, width: 0.06, height: 0.06 },
+      { id: 'w2', label: 'Washer 2', type: 'washer', camera: 'front', x: 0.22, y: 0.32, width: 0.06, height: 0.06 },
+      { id: 'w3', label: 'Washer 3', type: 'washer', camera: 'front', x: 0.37, y: 0.32, width: 0.06, height: 0.06 },
+      { id: 'w4', label: 'Washer 4', type: 'washer', camera: 'front', x: 0.52, y: 0.32, width: 0.06, height: 0.06 },
+      // Back camera - 6 dryers stacked (3 columns x 2 rows)
+      // Top row (left to right)
+      { id: 'd1', label: 'Dryer 1', type: 'dryer', camera: 'back', x: 0.32, y: 0.18, width: 0.05, height: 0.05 },
+      { id: 'd3', label: 'Dryer 3', type: 'dryer', camera: 'back', x: 0.50, y: 0.18, width: 0.05, height: 0.05 },
+      { id: 'd5', label: 'Dryer 5', type: 'dryer', camera: 'back', x: 0.68, y: 0.18, width: 0.05, height: 0.05 },
+      // Bottom row (left to right)
+      { id: 'd2', label: 'Dryer 2', type: 'dryer', camera: 'back', x: 0.32, y: 0.48, width: 0.05, height: 0.05 },
+      { id: 'd4', label: 'Dryer 4', type: 'dryer', camera: 'back', x: 0.50, y: 0.48, width: 0.05, height: 0.05 },
+      { id: 'd6', label: 'Dryer 6', type: 'dryer', camera: 'back', x: 0.68, y: 0.48, width: 0.05, height: 0.05 },
     ],
   },
 ];
