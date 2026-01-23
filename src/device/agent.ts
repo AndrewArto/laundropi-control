@@ -2,9 +2,12 @@ import * as dotenv from 'dotenv';
 import WebSocket = require('ws');
 import * as fs from 'fs';
 import * as path from 'path';
+import * as sharp from 'sharp';
 import { gpio } from './gpio';
 import { createScheduler, ScheduleEntry } from './scheduler';
 import { RELAYS_CONFIG } from './config';
+import { analyzeFrame, getMachineConfig } from './machineDetection';
+import type { LaundryMachine } from '../../types';
 
 dotenv.config({ path: process.env.AGENT_ENV_FILE || '.env.agent' });
 
@@ -31,9 +34,13 @@ const parseDurationMs = (value: string | undefined, fallback: number) => {
 
 const CAMERA_FRAME_FETCH_TIMEOUT_MS = parseDurationMs(process.env.CAMERA_FRAME_FETCH_TIMEOUT_MS, 3000);
 const CAMERA_FRAME_CACHE_MS = parseDurationMs(process.env.CAMERA_FRAME_CACHE_MS, 5000);
+const MACHINE_DETECTION_INTERVAL_MS = parseDurationMs(process.env.MACHINE_DETECTION_INTERVAL_MS, 10000); // 10s default
+const MACHINE_DETECTION_ENABLED = process.env.MACHINE_DETECTION_ENABLED !== 'false';
 
 let ws: WebSocket | null = null;
 let heartbeatTimer: NodeJS.Timeout | null = null;
+let machineDetectionTimer: NodeJS.Timeout | null = null;
+let lastMachineStatus: LaundryMachine[] = [];
 
 const ensureScheduleDir = () => {
   const dir = path.dirname(SCHEDULE_STORAGE_PATH);
@@ -138,6 +145,7 @@ function connect() {
       relays: RELAYS_CONFIG,
     });
     startHeartbeat();
+    startMachineDetection();
   });
 
   ws.on('message', (data) => {
@@ -152,6 +160,7 @@ function connect() {
   ws.on('close', () => {
     console.warn('[agent] socket closed, retrying in 3s');
     stopHeartbeat();
+    stopMachineDetection();
     setTimeout(connect, 3000);
   });
 
@@ -324,6 +333,116 @@ function stopHeartbeat() {
   if (heartbeatTimer) {
     clearInterval(heartbeatTimer);
     heartbeatTimer = null;
+  }
+}
+
+// --- Machine Detection ---
+
+/**
+ * Decode JPEG buffer to raw RGB buffer using sharp.
+ * Returns { buffer, width, height } or null on error.
+ */
+async function decodeJpegToRgb(jpegBuffer: Buffer): Promise<{ buffer: Buffer; width: number; height: number } | null> {
+  try {
+    const image = sharp(jpegBuffer);
+    const metadata = await image.metadata();
+    if (!metadata.width || !metadata.height) return null;
+
+    const rgbBuffer = await image
+      .removeAlpha()
+      .raw()
+      .toBuffer();
+
+    return { buffer: rgbBuffer, width: metadata.width, height: metadata.height };
+  } catch (err) {
+    console.warn('[agent] failed to decode JPEG frame', err);
+    return null;
+  }
+}
+
+/**
+ * Fetch and analyze frames from cameras for machine detection.
+ */
+async function runMachineDetection() {
+  const config = getMachineConfig(AGENT_ID);
+  if (!config) {
+    console.log(`[agent] no machine config for ${AGENT_ID}, skipping detection`);
+    return;
+  }
+
+  // Find cameras by position (front/back)
+  const frontCamera = cameraConfigs.find(c => c.position === 'front' && c.enabled && c.sourceType === 'rtsp' && c.rtspUrl);
+  const backCamera = cameraConfigs.find(c => c.position === 'back' && c.enabled && c.sourceType === 'rtsp' && c.rtspUrl);
+
+  const allResults: LaundryMachine[] = [];
+
+  // Analyze front camera
+  if (frontCamera) {
+    const result = await getCameraFrame(frontCamera);
+    if (result.ok) {
+      const jpegBuffer = Buffer.from(result.data, 'base64');
+      const decoded = await decodeJpegToRgb(jpegBuffer);
+      if (decoded) {
+        const machines = analyzeFrame(AGENT_ID, 'front', decoded.buffer, decoded.width, decoded.height);
+        allResults.push(...machines);
+      }
+    }
+  }
+
+  // Analyze back camera
+  if (backCamera) {
+    const result = await getCameraFrame(backCamera);
+    if (result.ok) {
+      const jpegBuffer = Buffer.from(result.data, 'base64');
+      const decoded = await decodeJpegToRgb(jpegBuffer);
+      if (decoded) {
+        const machines = analyzeFrame(AGENT_ID, 'back', decoded.buffer, decoded.width, decoded.height);
+        allResults.push(...machines);
+      }
+    }
+  }
+
+  if (allResults.length > 0) {
+    lastMachineStatus = allResults;
+    // Send machine status update to central server
+    send({
+      type: 'machine_status',
+      agentId: AGENT_ID,
+      machines: allResults,
+    });
+    console.log(`[agent] machine detection complete: ${allResults.map(m => `${m.id}=${m.status}`).join(', ')}`);
+  }
+}
+
+function startMachineDetection() {
+  if (!MACHINE_DETECTION_ENABLED) {
+    console.log('[agent] machine detection disabled');
+    return;
+  }
+
+  const config = getMachineConfig(AGENT_ID);
+  if (!config) {
+    console.log(`[agent] no machine config for ${AGENT_ID}, machine detection not started`);
+    return;
+  }
+
+  if (machineDetectionTimer) return;
+
+  console.log(`[agent] starting machine detection (interval=${MACHINE_DETECTION_INTERVAL_MS}ms)`);
+  machineDetectionTimer = setInterval(() => {
+    void runMachineDetection();
+  }, MACHINE_DETECTION_INTERVAL_MS);
+
+  // Run initial detection after a short delay to allow cameras to be configured
+  setTimeout(() => {
+    void runMachineDetection();
+  }, 5000);
+}
+
+function stopMachineDetection() {
+  if (machineDetectionTimer) {
+    clearInterval(machineDetectionTimer);
+    machineDetectionTimer = null;
   }
 }
 

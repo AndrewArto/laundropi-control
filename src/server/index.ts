@@ -2038,6 +2038,24 @@ wss.on('connection', (socket) => {
         return;
       }
 
+      if (msg.type === 'machine_status') {
+        const machines = Array.isArray(msg.machines) ? msg.machines : [];
+        if (machines.length > 0) {
+          machineStatusCache.set(agentId, {
+            machines: machines.map((m: any) => ({
+              id: m.id || '',
+              label: m.label || m.id || '',
+              type: m.type || 'washer',
+              status: m.status || 'unknown',
+              lastUpdated: m.lastUpdated || Date.now(),
+            })),
+            lastAnalyzed: Date.now(),
+          });
+          console.log(`[central] machine_status ${agentId}: ${machines.map((m: any) => `${m.id}=${m.status}`).join(', ')}`);
+        }
+        return;
+      }
+
       if (msg.type === 'camera_frame') {
         const requestId = msg.requestId;
         if (!requestId) return;
