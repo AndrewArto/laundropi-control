@@ -6,7 +6,7 @@ import * as sharp from 'sharp';
 import { gpio } from './gpio';
 import { createScheduler, ScheduleEntry } from './scheduler';
 import { RELAYS_CONFIG } from './config';
-import { analyzeFrame, getMachineConfig } from './machineDetection';
+import { analyzeFrame, getMachineConfig, setJpegBufferForTraining } from './machineDetection';
 import type { LaundryMachine } from '../../types';
 
 dotenv.config({ path: process.env.AGENT_ENV_FILE || '.env.agent' });
@@ -383,6 +383,7 @@ async function runMachineDetection() {
       const jpegBuffer = Buffer.from(result.data, 'base64');
       const decoded = await decodeJpegToRgb(jpegBuffer);
       if (decoded) {
+        setJpegBufferForTraining(jpegBuffer); // Save for ML training
         const machines = analyzeFrame(AGENT_ID, 'front', decoded.buffer, decoded.width, decoded.height);
         allResults.push(...machines);
       }
@@ -396,6 +397,7 @@ async function runMachineDetection() {
       const jpegBuffer = Buffer.from(result.data, 'base64');
       const decoded = await decodeJpegToRgb(jpegBuffer);
       if (decoded) {
+        setJpegBufferForTraining(jpegBuffer); // Save for ML training
         const machines = analyzeFrame(AGENT_ID, 'back', decoded.buffer, decoded.width, decoded.height);
         allResults.push(...machines);
       }
