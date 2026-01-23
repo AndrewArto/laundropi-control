@@ -117,13 +117,13 @@ export interface Laundry {
   lastHeartbeat: number | null;
 }
 
-// Special agent ID for general business expenses (not tied to a specific laundromat)
-export const GENERAL_AGENT_ID = 'General';
+// Special agent ID for fixed costs (not tied to a specific laundromat)
+export const GENERAL_AGENT_ID = 'FixCost';
 
-// Create a synthetic "General" laundry for finance/cost tracking
+// Create a synthetic "Fix cost" laundry for finance/cost tracking
 export const GENERAL_LAUNDRY: Laundry = {
   id: GENERAL_AGENT_ID,
-  name: 'General',
+  name: 'Fix cost',
   relays: [],
   isOnline: true,
   isMock: false,
@@ -231,4 +231,22 @@ export interface ExpenditureAudit {
   details: string | null;
   user: string;
   createdAt: number;
+}
+
+// Machine status from camera-based detection
+export type MachineType = 'washer' | 'dryer';
+export type MachineStatus = 'idle' | 'running' | 'unknown';
+
+export interface LaundryMachine {
+  id: string;
+  label: string;
+  type: MachineType;
+  status: MachineStatus;
+  lastUpdated: number;
+}
+
+export interface LaundryMachineStatus {
+  agentId: string;
+  machines: LaundryMachine[];
+  lastAnalyzed: number;
 }

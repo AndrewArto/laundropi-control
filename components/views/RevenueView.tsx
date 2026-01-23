@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Coins, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ChevronDown, ChevronUp, Download, CalendarClock, Upload, Building2 } from 'lucide-react';
 import { RevenueEntry, RevenueAuditEntry, RevenueSummary, UiUser, ExpenditureImport, ExpenditureTransaction, GENERAL_AGENT_ID, GENERAL_LAUNDRY } from '../../types';
+import type { DateEntryInfo } from '../../hooks/useRevenue';
 import { BankImportView } from './BankImportView';
 import type { ReconciliationSummary, PendingChange } from '../../hooks/useReconciliation';
 
@@ -27,13 +28,15 @@ interface DonutChartProps {
 }
 
 const DonutChart: React.FC<DonutChartProps> = ({ revenue, costs, size = 60, label, profitLoss, formatMoney, large = false }) => {
-  const total = revenue + costs;
-  const revenuePercent = total > 0 ? (revenue / total) * 100 : (revenue > 0 ? 100 : 50);
+  // Show costs as a portion of revenue (red = cost%, green = profit%)
+  // If costs exceed revenue, cap red at 100%
+  const costsPercent = revenue > 0 ? Math.min((costs / revenue) * 100, 100) : (costs > 0 ? 100 : 0);
+  const profitPercent = 100 - costsPercent;
   const strokeWidth = large ? 8 : 6;
   const radius = (size - strokeWidth) / 2;
   const circumference = 2 * Math.PI * radius;
-  const revenueStroke = (revenuePercent / 100) * circumference;
-  const costsStroke = circumference - revenueStroke;
+  const profitStroke = (profitPercent / 100) * circumference;
+  const costsStroke = (costsPercent / 100) * circumference;
 
   return (
     <div className={`flex items-center ${large ? 'gap-4' : 'gap-2'}`}>
@@ -48,21 +51,8 @@ const DonutChart: React.FC<DonutChartProps> = ({ revenue, costs, size = 60, labe
           strokeWidth={strokeWidth}
           className="text-slate-700"
         />
-        {/* Revenue arc (green) */}
-        <circle
-          cx={size / 2}
-          cy={size / 2}
-          r={radius}
-          fill="none"
-          stroke="currentColor"
-          strokeWidth={strokeWidth}
-          strokeDasharray={`${revenueStroke} ${costsStroke}`}
-          strokeDashoffset={0}
-          className="text-emerald-500"
-          strokeLinecap="round"
-        />
-        {/* Costs arc (red) - starts where revenue ends */}
-        {costs > 0 && (
+        {/* Profit arc (green) - starts at top */}
+        {profitPercent > 0 && (
           <circle
             cx={size / 2}
             cy={size / 2}
@@ -70,8 +60,23 @@ const DonutChart: React.FC<DonutChartProps> = ({ revenue, costs, size = 60, labe
             fill="none"
             stroke="currentColor"
             strokeWidth={strokeWidth}
-            strokeDasharray={`${costsStroke} ${revenueStroke}`}
-            strokeDashoffset={-revenueStroke}
+            strokeDasharray={`${profitStroke} ${costsStroke}`}
+            strokeDashoffset={0}
+            className="text-emerald-500"
+            strokeLinecap="round"
+          />
+        )}
+        {/* Costs arc (red) - starts where profit ends */}
+        {costsPercent > 0 && (
+          <circle
+            cx={size / 2}
+            cy={size / 2}
+            r={radius}
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={strokeWidth}
+            strokeDasharray={`${costsStroke} ${profitStroke}`}
+            strokeDashoffset={-profitStroke}
             className="text-red-400"
             strokeLinecap="round"
           />
@@ -115,6 +120,7 @@ interface RevenueViewProps {
   isRevenueCalendarOpen: boolean;
   setIsRevenueCalendarOpen: React.Dispatch<React.SetStateAction<boolean>>;
   revenueEntryDates: string[];
+  revenueEntryDateInfo: DateEntryInfo[];
   revenueEntries: Record<string, RevenueEntry | null>;
   revenueLoading: boolean;
   revenueError: string | null;
@@ -192,6 +198,7 @@ export const RevenueView: React.FC<RevenueViewProps> = (props) => {
     isRevenueCalendarOpen,
     setIsRevenueCalendarOpen,
     revenueEntryDates,
+    revenueEntryDateInfo,
     revenueEntries,
     revenueLoading,
     revenueError,
@@ -251,6 +258,8 @@ export const RevenueView: React.FC<RevenueViewProps> = (props) => {
     const startOffset = (firstDay.getDay() + 6) % 7;
     const totalCells = Math.ceil((startOffset + daysInMonth) / 7) * 7;
     const entryDates = new Set(revenueEntryDates);
+    // Build a map of date -> info for quick lookup
+    const dateInfoMap = new Map(revenueEntryDateInfo.map(info => [info.date, info]));
     const monthLabel = new Date(year, month - 1, 1).toLocaleString('en-US', { month: 'long', year: 'numeric' });
 
     return (
@@ -290,6 +299,9 @@ export const RevenueView: React.FC<RevenueViewProps> = (props) => {
             const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
             const isSelected = dateStr === revenueDate;
             const hasEntry = entryDates.has(dateStr);
+            const dateInfo = dateInfoMap.get(dateStr);
+            const hasRevenue = dateInfo?.hasRevenue ?? false;
+            const hasExpenses = dateInfo?.hasExpenses ?? false;
             return (
               <button
                 key={dateStr}
@@ -303,14 +315,25 @@ export const RevenueView: React.FC<RevenueViewProps> = (props) => {
                 aria-label={`Select ${dateStr}`}
               >
                 <span>{day}</span>
-                {hasEntry && <span className="mt-0.5 w-1.5 h-1.5 rounded-full bg-amber-400" />}
+                {(hasRevenue || hasExpenses) && (
+                  <div className="mt-0.5 flex gap-0.5">
+                    {hasRevenue && <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />}
+                    {hasExpenses && <span className="w-1.5 h-1.5 rounded-full bg-red-400" />}
+                  </div>
+                )}
               </button>
             );
           })}
         </div>
-        <div className="text-[11px] text-slate-500 flex items-center gap-2">
-          <span className="w-2 h-2 rounded-full bg-amber-400" />
-          Entries recorded
+        <div className="text-[11px] text-slate-500 flex items-center gap-4">
+          <div className="flex items-center gap-1.5">
+            <span className="w-2 h-2 rounded-full bg-emerald-400" />
+            Revenue
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="w-2 h-2 rounded-full bg-red-400" />
+            Expenses
+          </div>
         </div>
       </div>
     );
@@ -429,19 +452,40 @@ export const RevenueView: React.FC<RevenueViewProps> = (props) => {
           }`
         );
 
-        // General cost center - only shows deductions
+        // Fix cost center - only shows deductions, collapsible
         if (isGeneral) {
+          const isExpanded = expandedAgents.has(laundry.id);
+          const totalCosts = entry?.deductionsTotal ?? 0;
+
           return (
-            <div key={laundry.id} className="bg-slate-800 border border-purple-500/30 rounded-xl p-4 space-y-4">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="flex items-center gap-2">
-                  <Building2 className="w-5 h-5 text-purple-400" />
-                  <div>
-                    <div className="text-sm font-semibold text-white">{laundry.name}</div>
-                    <div className="text-xs text-slate-500">General business costs (deducted from total P&L)</div>
+            <div key={laundry.id} className="bg-slate-800 border border-purple-500/30 rounded-xl overflow-hidden">
+              {/* Collapsible header */}
+              <button
+                onClick={() => toggleAgentExpanded(laundry.id)}
+                className="w-full p-4 flex items-center justify-between gap-4 hover:bg-slate-700/30 transition-colors"
+              >
+                <div className="flex items-center gap-3">
+                  {isExpanded ? (
+                    <ChevronUp className="w-5 h-5 text-purple-400" />
+                  ) : (
+                    <ChevronDown className="w-5 h-5 text-purple-400" />
+                  )}
+                  <div className="flex items-center gap-2">
+                    <Building2 className="w-5 h-5 text-purple-400" />
+                    <div className="text-left">
+                      <div className="text-sm font-semibold text-white">{laundry.name}</div>
+                      <div className="text-xs text-slate-500">
+                        {isExpanded ? 'Fixed costs (deducted from total P&L)' : 'Click to expand'}
+                      </div>
+                    </div>
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
+                  {totalCosts > 0 && (
+                    <span className="text-sm font-semibold text-red-400">
+                      €{formatMoney(totalCosts)}
+                    </span>
+                  )}
                   {entry?.hasEdits && (
                     <span className="text-xs px-2 py-1 rounded-full border border-amber-400 text-amber-200 bg-amber-500/10">
                       Edited
@@ -451,93 +495,98 @@ export const RevenueView: React.FC<RevenueViewProps> = (props) => {
                     Costs only
                   </span>
                 </div>
-              </div>
+              </button>
 
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <div className="text-sm text-slate-300">Costs (comment required)</div>
-                  <button
-                    onClick={() => addRevenueDeductionFromHook(laundry.id)}
-                    className="text-xs px-2 py-1 rounded-md border border-purple-500/50 text-purple-300 hover:border-purple-400 hover:text-purple-200 transition-colors"
-                  >
-                    Add cost
-                  </button>
-                </div>
-                {deductionsAudit && prevDeductionSummary && (
-                  <div className="text-[11px] text-amber-300">
-                    Prev: €{formatMoney(prevDeductionSummary.total)} across {prevDeductionSummary.count} items · {deductionsAudit.user} · {formatTimestamp(deductionsAudit.createdAt)}
+              {/* Collapsible content */}
+              {isExpanded && (
+                <div className="p-4 pt-0 space-y-4">
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div className="text-sm text-slate-300">Costs (comment required)</div>
+                      <button
+                        onClick={() => addRevenueDeductionFromHook(laundry.id)}
+                        className="text-xs px-2 py-1 rounded-md border border-purple-500/50 text-purple-300 hover:border-purple-400 hover:text-purple-200 transition-colors"
+                      >
+                        Add cost
+                      </button>
+                    </div>
+                    {deductionsAudit && prevDeductionSummary && (
+                      <div className="text-[11px] text-amber-300">
+                        Prev: €{formatMoney(prevDeductionSummary.total)} across {prevDeductionSummary.count} items · {deductionsAudit.user} · {formatTimestamp(deductionsAudit.createdAt)}
+                      </div>
+                    )}
+                    {draft.deductions.length === 0 && (
+                      <div className="text-xs text-slate-500">No costs added yet.</div>
+                    )}
+                    {draft.deductions.map(item => (
+                      <div key={item.id} className="flex flex-wrap gap-2 items-center">
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          value={item.amount}
+                          onChange={(e) => {
+                            const nextValue = e.target.value;
+                            if (!isRevenueNumericInput(nextValue)) return;
+                            updateRevenueDraftFromHook(laundry.id, d => ({
+                              ...d,
+                              deductions: d.deductions.map(row => row.id === item.id ? { ...row, amount: nextValue } : row),
+                            }));
+                          }}
+                          className="flex-1 min-w-0 w-full sm:w-auto sm:min-w-[120px] bg-slate-900/60 border border-slate-700 rounded-md px-3 py-2 text-sm text-slate-100 focus:outline-none focus:ring-1 focus:ring-purple-500"
+                          placeholder="0.00"
+                        />
+                        <input
+                          type="text"
+                          value={item.comment}
+                          onChange={(e) => updateRevenueDraftFromHook(laundry.id, d => ({
+                            ...d,
+                            deductions: d.deductions.map(row => row.id === item.id ? { ...row, comment: e.target.value } : row),
+                          }))}
+                          className="flex-[2] min-w-0 w-full sm:w-auto sm:min-w-[200px] bg-slate-900/60 border border-slate-700 rounded-md px-3 py-2 text-sm text-slate-100 focus:outline-none focus:ring-1 focus:ring-purple-500"
+                          placeholder="Reason"
+                        />
+                        <button
+                          onClick={() => removeRevenueDeductionFromHook(laundry.id, item.id)}
+                          className="text-xs px-3 py-2 w-full sm:w-auto rounded-md border border-red-500/40 text-red-300 hover:text-red-200 hover:border-red-400 transition-colors"
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    ))}
                   </div>
-                )}
-                {draft.deductions.length === 0 && (
-                  <div className="text-xs text-slate-500">No costs added yet.</div>
-                )}
-                {draft.deductions.map(item => (
-                  <div key={item.id} className="flex flex-wrap gap-2 items-center">
-                    <input
-                      type="text"
-                      inputMode="decimal"
-                      value={item.amount}
-                      onChange={(e) => {
-                        const nextValue = e.target.value;
-                        if (!isRevenueNumericInput(nextValue)) return;
-                        updateRevenueDraftFromHook(laundry.id, d => ({
-                          ...d,
-                          deductions: d.deductions.map(row => row.id === item.id ? { ...row, amount: nextValue } : row),
-                        }));
-                      }}
-                      className="flex-1 min-w-0 w-full sm:w-auto sm:min-w-[120px] bg-slate-900/60 border border-slate-700 rounded-md px-3 py-2 text-sm text-slate-100 focus:outline-none focus:ring-1 focus:ring-purple-500"
-                      placeholder="0.00"
-                    />
-                    <input
-                      type="text"
-                      value={item.comment}
-                      onChange={(e) => updateRevenueDraftFromHook(laundry.id, d => ({
-                        ...d,
-                        deductions: d.deductions.map(row => row.id === item.id ? { ...row, comment: e.target.value } : row),
-                      }))}
-                      className="flex-[2] min-w-0 w-full sm:w-auto sm:min-w-[200px] bg-slate-900/60 border border-slate-700 rounded-md px-3 py-2 text-sm text-slate-100 focus:outline-none focus:ring-1 focus:ring-purple-500"
-                      placeholder="Reason"
-                    />
+
+                  {saveError && (
+                    <div className="text-sm text-red-300 bg-red-500/10 border border-red-500/30 rounded-md px-3 py-2">
+                      {saveError}
+                    </div>
+                  )}
+
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div className="text-xs text-slate-500">
+                      {entry
+                        ? `Updated ${formatTimestamp(entry.updatedAt)} by ${entry.updatedBy || 'unknown'}`
+                        : 'No entry recorded for this date.'}
+                    </div>
                     <button
-                      onClick={() => removeRevenueDeductionFromHook(laundry.id, item.id)}
-                      className="text-xs px-3 py-2 w-full sm:w-auto rounded-md border border-red-500/40 text-red-300 hover:text-red-200 hover:border-red-400 transition-colors"
+                      onClick={() => handleRevenueSaveFromHook(laundry.id)}
+                      disabled={saving}
+                      className="px-4 py-2 rounded-md text-xs font-semibold border border-purple-500 text-purple-200 bg-purple-500/10 hover:bg-purple-500/20 disabled:opacity-50"
                     >
-                      Remove
+                      {saving ? 'Saving...' : 'Save costs'}
                     </button>
                   </div>
-                ))}
-              </div>
 
-              {saveError && (
-                <div className="text-sm text-red-300 bg-red-500/10 border border-red-500/30 rounded-md px-3 py-2">
-                  {saveError}
-                </div>
-              )}
-
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div className="text-xs text-slate-500">
-                  {entry
-                    ? `Updated ${formatTimestamp(entry.updatedAt)} by ${entry.updatedBy || 'unknown'}`
-                    : 'No entry recorded for this date.'}
-                </div>
-                <button
-                  onClick={() => handleRevenueSaveFromHook(laundry.id)}
-                  disabled={saving}
-                  className="px-4 py-2 rounded-md text-xs font-semibold border border-purple-500 text-purple-200 bg-purple-500/10 hover:bg-purple-500/20 disabled:opacity-50"
-                >
-                  {saving ? 'Saving...' : 'Save costs'}
-                </button>
-              </div>
-
-              {entryAudit.length > 0 && (
-                <div className="text-xs text-slate-500 border-t border-slate-700 pt-3 space-y-1">
-                  <div className="text-[11px] uppercase tracking-wide text-slate-500">Audit log</div>
-                  {entryAudit.filter(item => item.oldValue !== null).slice(0, 6).map(item => (
-                    <div key={`${item.id}-${item.createdAt}`} className="flex flex-wrap justify-between gap-2">
-                      <span>{getFieldLabel(item.field)}: {item.oldValue} → {item.newValue}</span>
-                      <span>{item.user} · {formatTimestamp(item.createdAt)}</span>
+                  {entryAudit.length > 0 && (
+                    <div className="text-xs text-slate-500 border-t border-slate-700 pt-3 space-y-1">
+                      <div className="text-[11px] uppercase tracking-wide text-slate-500">Audit log</div>
+                      {entryAudit.filter(item => item.oldValue !== null).slice(0, 6).map(item => (
+                        <div key={`${item.id}-${item.createdAt}`} className="flex flex-wrap justify-between gap-2">
+                          <span>{getFieldLabel(item.field)}: {item.oldValue} → {item.newValue}</span>
+                          <span>{item.user} · {formatTimestamp(item.createdAt)}</span>
+                        </div>
+                      ))}
                     </div>
-                  ))}
+                  )}
                 </div>
               )}
             </div>

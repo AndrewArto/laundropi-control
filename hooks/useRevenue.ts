@@ -10,6 +10,7 @@ type RevenueDraft = {
   billsTotal: string;
   deductions: RevenueDraftDeduction[];
 };
+export type DateEntryInfo = { date: string; hasRevenue: boolean; hasExpenses: boolean };
 
 export interface UseRevenueReturn {
   revenueDate: string;
@@ -23,6 +24,7 @@ export interface UseRevenueReturn {
   revenueSaveErrors: Record<string, string | null>;
   revenueView: 'daily' | 'all' | 'bankImport';
   revenueEntryDates: string[];
+  revenueEntryDateInfo: DateEntryInfo[];
   revenueAllEntries: RevenueEntry[];
   revenueAllLoading: boolean;
   revenueAllError: string | null;
@@ -38,6 +40,7 @@ export interface UseRevenueReturn {
   setRevenueSaveErrors: React.Dispatch<React.SetStateAction<Record<string, string | null>>>;
   setRevenueView: React.Dispatch<React.SetStateAction<'daily' | 'all' | 'bankImport'>>;
   setRevenueEntryDates: React.Dispatch<React.SetStateAction<string[]>>;
+  setRevenueEntryDateInfo: React.Dispatch<React.SetStateAction<DateEntryInfo[]>>;
   setRevenueAllEntries: React.Dispatch<React.SetStateAction<RevenueEntry[]>>;
   setRevenueAllLoading: React.Dispatch<React.SetStateAction<boolean>>;
   setRevenueAllError: React.Dispatch<React.SetStateAction<string | null>>;
@@ -117,6 +120,7 @@ export function useRevenue(): UseRevenueReturn {
   const [revenueSaveErrors, setRevenueSaveErrors] = useState<Record<string, string | null>>({});
   const [revenueView, setRevenueView] = useState<'daily' | 'all' | 'bankImport'>('daily');
   const [revenueEntryDates, setRevenueEntryDates] = useState<string[]>([]);
+  const [revenueEntryDateInfo, setRevenueEntryDateInfo] = useState<DateEntryInfo[]>([]);
   const [revenueAllEntries, setRevenueAllEntries] = useState<RevenueEntry[]>([]);
   const [revenueAllLoading, setRevenueAllLoading] = useState(false);
   const [revenueAllError, setRevenueAllError] = useState<string | null>(null);
@@ -229,6 +233,7 @@ export function useRevenue(): UseRevenueReturn {
     setRevenueSaveErrors({});
     setRevenueView('daily');
     setRevenueEntryDates([]);
+    setRevenueEntryDateInfo([]);
     setRevenueAllEntries([]);
     setRevenueAllLoading(false);
     setRevenueAllError(null);
@@ -248,6 +253,7 @@ export function useRevenue(): UseRevenueReturn {
     revenueSaveErrors,
     revenueView,
     revenueEntryDates,
+    revenueEntryDateInfo,
     revenueAllEntries,
     revenueAllLoading,
     revenueAllError,
@@ -263,6 +269,7 @@ export function useRevenue(): UseRevenueReturn {
     setRevenueSaveErrors,
     setRevenueView,
     setRevenueEntryDates,
+    setRevenueEntryDateInfo,
     setRevenueAllEntries,
     setRevenueAllLoading,
     setRevenueAllError,

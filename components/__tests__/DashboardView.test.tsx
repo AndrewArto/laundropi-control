@@ -60,6 +60,7 @@ describe('DashboardView', () => {
     handleCameraNameSave: vi.fn(),
     getCameraCardRef: vi.fn(() => () => {}),
     fetchLaundries: vi.fn(),
+    machineStatus: {},
   };
 
   it('should render laundry name', () => {

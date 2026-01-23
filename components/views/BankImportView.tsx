@@ -64,7 +64,7 @@ export const BankImportView: React.FC<BankImportViewProps> = ({
   onDeleteImport,
   onClearActiveImport,
 }) => {
-  // Include General cost center in the laundries list for assignment
+  // Include Fix cost center in the laundries list for assignment
   const allLaundries = useMemo(() => [...laundries, GENERAL_LAUNDRY], [laundries]);
 
   const fileInputRef = useRef<HTMLInputElement>(null);

@@ -42,6 +42,7 @@ describe('RevenueView', () => {
     isRevenueCalendarOpen: false,
     setIsRevenueCalendarOpen: vi.fn(),
     revenueEntryDates: [],
+    revenueEntryDateInfo: [],
     revenueEntries: {},
     revenueLoading: false,
     revenueError: null,
@@ -132,19 +133,19 @@ describe('RevenueView', () => {
     expect(screen.getByText('Finance')).toBeTruthy();
   });
 
-  describe('General Cost Center', () => {
-    it('should always render General cost center box', () => {
+  describe('Fix Cost Center', () => {
+    it('should always render Fix cost center box', () => {
       render(<RevenueView {...mockProps} />);
-      expect(screen.getByText('General')).toBeTruthy();
+      expect(screen.getByText('Fix cost')).toBeTruthy();
       expect(screen.getByText('Costs only')).toBeTruthy();
     });
 
-    it('should show General cost center description', () => {
+    it('should show Fix cost center description', () => {
       render(<RevenueView {...mockProps} />);
-      expect(screen.getByText(/General business costs/i)).toBeTruthy();
+      expect(screen.getByText(/Fixed costs/i)).toBeTruthy();
     });
 
-    it('should have Add cost button for General', () => {
+    it('should have Add cost button for Fix cost', () => {
       render(<RevenueView {...mockProps} />);
       expect(screen.getByText('Add cost')).toBeTruthy();
     });
@@ -156,7 +157,7 @@ describe('RevenueView', () => {
       expect(mockProps.addRevenueDeductionFromHook).toHaveBeenCalledWith(GENERAL_AGENT_ID);
     });
 
-    it('should show Save costs button for General', () => {
+    it('should show Save costs button for Fix cost', () => {
       render(<RevenueView {...mockProps} />);
       expect(screen.getByText('Save costs')).toBeTruthy();
     });
@@ -253,7 +254,7 @@ describe('RevenueView', () => {
   });
 
   describe('Multiple Laundries', () => {
-    it('should render multiple laundries plus General', () => {
+    it('should render multiple laundries plus Fix cost', () => {
       const propsWithMultiple = {
         ...mockProps,
         laundries: [mockLaundry, mockLaundry2],
@@ -261,7 +262,7 @@ describe('RevenueView', () => {
       render(<RevenueView {...propsWithMultiple} />);
       expect(screen.getByText('Test Laundry')).toBeTruthy();
       expect(screen.getByText('Test Laundry 2')).toBeTruthy();
-      expect(screen.getByText('General')).toBeTruthy();
+      expect(screen.getByText('Fix cost')).toBeTruthy();
     });
 
     it('should allow expanding multiple sections independently', () => {
@@ -275,9 +276,9 @@ describe('RevenueView', () => {
       const firstHeader = screen.getByText('Test Laundry').closest('button');
       fireEvent.click(firstHeader!);
 
-      // First should be expanded, second should still show "Click to expand"
+      // First should be expanded, second laundry and Fix cost should still show "Click to expand"
       const clickToExpands = screen.getAllByText('Click to expand');
-      expect(clickToExpands.length).toBe(1); // Only second laundry shows this
+      expect(clickToExpands.length).toBe(2); // Second laundry + Fix cost both collapsed
     });
   });
 

@@ -1,5 +1,5 @@
 
-import { Relay, Schedule, RelayType, RelayGroup, RevenueEntry, RevenueAuditEntry, RevenueSummary, RevenueDeduction, UiUser, CameraConfig, ExpenditureImport, ExpenditureTransaction, ExpenditureAudit } from '../types';
+import { Relay, Schedule, RelayType, RelayGroup, RevenueEntry, RevenueAuditEntry, RevenueSummary, RevenueDeduction, UiUser, CameraConfig, ExpenditureImport, ExpenditureTransaction, ExpenditureAudit, LaundryMachineStatus } from '../types';
 
 type LocationLike = { hostname: string; port: string; protocol: string };
 
@@ -208,6 +208,11 @@ export const ApiService = {
     return await res.json();
   },
 
+  async getMachineStatus(agentId: string): Promise<LaundryMachineStatus> {
+    const res = await request(`${API_BASE}/agents/${encodeURIComponent(agentId)}/machines`);
+    return await res.json();
+  },
+
   async updateCamera(agentId: string, cameraId: string, payload: Partial<CameraConfig> & { username?: string | null; password?: string | null }): Promise<{ camera: CameraConfig }> {
     const res = await request(`${API_BASE}/agents/${encodeURIComponent(agentId)}/cameras/${encodeURIComponent(cameraId)}`, {
       method: 'PUT',
@@ -361,12 +366,18 @@ export const ApiService = {
     return payload.entries || [];
   },
 
-  async listRevenueEntryDates(startDate: string, endDate: string, agentId?: string): Promise<string[]> {
+  async listRevenueEntryDates(startDate: string, endDate: string, agentId?: string): Promise<{
+    dates: string[];
+    dateInfo: Array<{ date: string; hasRevenue: boolean; hasExpenses: boolean }>;
+  }> {
     const query = new URLSearchParams({ startDate, endDate });
     if (agentId) query.set('agentId', agentId);
     const res = await request(`${API_BASE}/revenue/dates?${query.toString()}`);
     const payload = await res.json();
-    return payload.dates || [];
+    return {
+      dates: payload.dates || [],
+      dateInfo: payload.dateInfo || [],
+    };
   },
 
   // ========== Expenditure / Bank Import ==========

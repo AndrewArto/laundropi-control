@@ -5,7 +5,7 @@ import cors = require('cors');
 import { WebSocketServer, WebSocket } from 'ws';
 import * as crypto from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
-import { listAgents, updateHeartbeat, saveMeta, getAgent, updateRelayMeta, listSchedules, upsertSchedule, deleteSchedule, listGroups, listGroupsForMembership, upsertGroup, deleteGroup, GroupRow, deleteAgent, upsertAgent, upsertCommand, listPendingCommands, deleteCommand, updateCommandsForRelay, expireOldCommands, insertLead, getLastLeadTimestampForIp, listLeads, getRevenueEntry, listRevenueEntriesBetween, listRevenueEntries, listRevenueEntryDatesBetween, upsertRevenueEntry, insertRevenueAudit, listRevenueAudit, RevenueEntryRow, listUiUsers, getUiUser, createUiUser, updateUiUserRole, updateUiUserPassword, updateUiUserLastLogin, countUiUsers, listCameras, getCamera, upsertCamera, deleteCamera, upsertIntegrationSecret, getIntegrationSecret, deleteIntegrationSecret, CameraRow, listInventory, getInventory, updateInventory, getInventoryAudit, getLastInventoryChange, DetergentType } from './db';
+import { listAgents, updateHeartbeat, saveMeta, getAgent, updateRelayMeta, listSchedules, upsertSchedule, deleteSchedule, listGroups, listGroupsForMembership, upsertGroup, deleteGroup, GroupRow, deleteAgent, upsertAgent, upsertCommand, listPendingCommands, deleteCommand, updateCommandsForRelay, expireOldCommands, insertLead, getLastLeadTimestampForIp, listLeads, getRevenueEntry, listRevenueEntriesBetween, listRevenueEntries, listRevenueEntryDatesBetween, listRevenueEntryDatesWithInfo, upsertRevenueEntry, insertRevenueAudit, listRevenueAudit, RevenueEntryRow, listUiUsers, getUiUser, createUiUser, updateUiUserRole, updateUiUserPassword, updateUiUserLastLogin, countUiUsers, listCameras, getCamera, upsertCamera, deleteCamera, upsertIntegrationSecret, getIntegrationSecret, deleteIntegrationSecret, CameraRow, listInventory, getInventory, updateInventory, getInventoryAudit, getLastInventoryChange, DetergentType } from './db';
 import expenditureRoutes from './routes/expenditure';
 
 
@@ -170,7 +170,7 @@ const PRIMARY_CAMERAS_DEFAULT_ENABLED = asBool(process.env.PRIMARY_CAMERAS_DEFAU
 const PRIMARY_CAMERA_FRONT_RTSP_URL = (process.env.PRIMARY_CAMERA_FRONT_RTSP_URL || '').trim();
 const PRIMARY_CAMERA_BACK_RTSP_URL = (process.env.PRIMARY_CAMERA_BACK_RTSP_URL || '').trim();
 
-const isKnownLaundry = (agentId: string) => KNOWN_LAUNDRY_SET.size === 0 || KNOWN_LAUNDRY_SET.has(agentId) || agentId === 'General';
+const isKnownLaundry = (agentId: string) => KNOWN_LAUNDRY_SET.size === 0 || KNOWN_LAUNDRY_SET.has(agentId) || agentId === 'FixCost';
 const isPrimaryLaundry = (agentId: string) => Boolean(PRIMARY_LAUNDRY_ID) && agentId === PRIMARY_LAUNDRY_ID;
 
 if (REQUIRE_UI_AUTH && !SESSION_SECRET) {
@@ -656,12 +656,12 @@ const buildRevenueSummary = (entries: RevenueEntryRow[]) => {
   return { totalsByAgent, overall, profitLossByAgent, profitLossOverall };
 };
 
-// General agent ID for business-wide costs (not tied to specific laundromat)
-const GENERAL_AGENT_ID = 'General';
+// Fix cost agent ID for business-wide costs (not tied to specific laundromat)
+const GENERAL_AGENT_ID = 'FixCost';
 
 const filterEntriesByKnownAgents = (entries: RevenueEntryRow[]) => {
   if (!KNOWN_LAUNDRY_SET.size) return entries;
-  // Always include General agent for business-wide costs
+  // Always include FixCost agent for business-wide costs
   return entries.filter(entry => KNOWN_LAUNDRY_SET.has(entry.agentId) || entry.agentId === GENERAL_AGENT_ID);
 };
 
@@ -1196,17 +1196,41 @@ app.get('/api/revenue/dates', (req, res) => {
   if (agentId && !isKnownLaundry(agentId)) {
     return res.status(404).json({ error: 'agent not found' });
   }
-  const dates = new Set<string>();
+
+  // Collect date info across all relevant agents
+  const dateInfoMap = new Map<string, { hasRevenue: boolean; hasExpenses: boolean }>();
+
+  const mergeInfo = (info: { date: string; hasRevenue: boolean; hasExpenses: boolean }) => {
+    const existing = dateInfoMap.get(info.date);
+    if (existing) {
+      existing.hasRevenue = existing.hasRevenue || info.hasRevenue;
+      existing.hasExpenses = existing.hasExpenses || info.hasExpenses;
+    } else {
+      dateInfoMap.set(info.date, { hasRevenue: info.hasRevenue, hasExpenses: info.hasExpenses });
+    }
+  };
+
   if (agentId) {
-    listRevenueEntryDatesBetween(startDate, endDate, agentId).forEach(date => dates.add(date));
+    listRevenueEntryDatesWithInfo(startDate, endDate, agentId).forEach(mergeInfo);
   } else if (KNOWN_LAUNDRY_SET.size) {
+    // Include all known laundries plus FixCost for expenses
     KNOWN_LAUNDRY_IDS.forEach(id => {
-      listRevenueEntryDatesBetween(startDate, endDate, id).forEach(date => dates.add(date));
+      listRevenueEntryDatesWithInfo(startDate, endDate, id).forEach(mergeInfo);
     });
+    // Also include FixCost entries (fixed costs / expenses only)
+    listRevenueEntryDatesWithInfo(startDate, endDate, GENERAL_AGENT_ID).forEach(mergeInfo);
   } else {
-    listRevenueEntryDatesBetween(startDate, endDate).forEach(date => dates.add(date));
+    listRevenueEntryDatesWithInfo(startDate, endDate).forEach(mergeInfo);
   }
-  res.json({ dates: Array.from(dates).sort() });
+
+  // Return both the simple dates array (for backwards compatibility) and detailed info
+  const sortedDates = Array.from(dateInfoMap.keys()).sort();
+  const dateInfo = sortedDates.map(date => ({
+    date,
+    ...dateInfoMap.get(date)!,
+  }));
+
+  res.json({ dates: sortedDates, dateInfo });
 });
 
 app.get('/api/revenue/:agentId', (req, res) => {
@@ -1678,6 +1702,102 @@ app.put('/api/agents/:id/relays/:relayId/meta', (req, res) => {
   const { id, relayId } = req.params;
   const ok = updateRelayMeta(id, Number(relayId), req.body || {});
   if (!ok) return res.status(404).json({ error: 'agent or relay not found' });
+  res.json({ ok: true });
+});
+
+// --- MACHINE STATUS API ---
+// In-memory cache for machine status (will be populated by agent heartbeats)
+type MachineStatus = 'idle' | 'running' | 'unknown';
+type MachineType = 'washer' | 'dryer';
+interface LaundryMachine {
+  id: string;
+  label: string;
+  type: MachineType;
+  status: MachineStatus;
+  lastUpdated: number;
+}
+const machineStatusCache = new Map<string, { machines: LaundryMachine[]; lastAnalyzed: number }>();
+
+// Default machine configurations per laundry (can be configured via DB later)
+const DEFAULT_MACHINE_CONFIGS: Record<string, Array<{ id: string; label: string; type: MachineType }>> = {
+  Brandoa1: [
+    { id: 'w1', label: 'Washer 1', type: 'washer' },
+    { id: 'w2', label: 'Washer 2', type: 'washer' },
+    { id: 'w3', label: 'Washer 3', type: 'washer' },
+    { id: 'w4', label: 'Washer 4', type: 'washer' },
+    { id: 'd5', label: 'Dryer 5', type: 'dryer' },
+    { id: 'd6', label: 'Dryer 6', type: 'dryer' },
+    { id: 'd7', label: 'Dryer 7', type: 'dryer' },
+    { id: 'd8', label: 'Dryer 8', type: 'dryer' },
+  ],
+  Brandoa2: [
+    { id: 'w1', label: 'Washer 1', type: 'washer' },
+    { id: 'w2', label: 'Washer 2', type: 'washer' },
+    { id: 'w3', label: 'Washer 3', type: 'washer' },
+    { id: 'w4', label: 'Washer 4', type: 'washer' },
+    { id: 'd1', label: 'Dryer 1', type: 'dryer' },
+    { id: 'd2', label: 'Dryer 2', type: 'dryer' },
+    { id: 'd3', label: 'Dryer 3', type: 'dryer' },
+    { id: 'd4', label: 'Dryer 4', type: 'dryer' },
+    { id: 'd5', label: 'Dryer 5', type: 'dryer' },
+    { id: 'd6', label: 'Dryer 6', type: 'dryer' },
+  ],
+};
+
+app.get('/api/agents/:id/machines', (req, res) => {
+  const { id } = req.params;
+  if (!isKnownLaundry(id)) {
+    return res.status(404).json({ error: 'agent not found' });
+  }
+
+  const cached = machineStatusCache.get(id);
+  if (cached) {
+    return res.json({
+      agentId: id,
+      machines: cached.machines,
+      lastAnalyzed: cached.lastAnalyzed,
+    });
+  }
+
+  // Return default config with unknown status if no data yet
+  const defaultConfig = DEFAULT_MACHINE_CONFIGS[id] || [];
+  const now = Date.now();
+  const machines: LaundryMachine[] = defaultConfig.map(m => ({
+    ...m,
+    status: 'unknown' as MachineStatus,
+    lastUpdated: now,
+  }));
+
+  res.json({
+    agentId: id,
+    machines,
+    lastAnalyzed: 0,
+  });
+});
+
+// Endpoint to update machine status (called by agent after frame analysis)
+app.post('/api/agents/:id/machines', (req, res) => {
+  const { id } = req.params;
+  if (!isKnownLaundry(id)) {
+    return res.status(404).json({ error: 'agent not found' });
+  }
+
+  const { machines } = req.body || {};
+  if (!Array.isArray(machines)) {
+    return res.status(400).json({ error: 'machines array required' });
+  }
+
+  machineStatusCache.set(id, {
+    machines: machines.map((m: any) => ({
+      id: m.id || '',
+      label: m.label || m.id || '',
+      type: m.type || 'washer',
+      status: m.status || 'unknown',
+      lastUpdated: m.lastUpdated || Date.now(),
+    })),
+    lastAnalyzed: Date.now(),
+  });
+
   res.json({ ok: true });
 });
 

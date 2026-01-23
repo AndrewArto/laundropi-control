@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Relay, Schedule, RelayType, RelayGroup, RevenueEntry, RevenueAuditEntry, RevenueSummary, UiUser, CameraConfig, Laundry, RelaySelection } from './types';
+import { Relay, Schedule, RelayType, RelayGroup, RevenueEntry, RevenueAuditEntry, RevenueSummary, UiUser, CameraConfig, Laundry, RelaySelection, LaundryMachineStatus } from './types';
 import { ApiService, resolveBaseUrl } from './services/api';
 import { DAYS_OF_WEEK } from './constants';
 import { useAuth } from './hooks/useAuth';
@@ -102,6 +102,7 @@ const App: React.FC = () => {
     revenueSaveErrors,
     revenueView,
     revenueEntryDates,
+    revenueEntryDateInfo,
     revenueAllEntries,
     revenueAllLoading,
     revenueAllError,
@@ -117,6 +118,7 @@ const App: React.FC = () => {
     setRevenueSaveErrors,
     setRevenueView,
     setRevenueEntryDates,
+    setRevenueEntryDateInfo,
     setRevenueAllEntries,
     setRevenueAllLoading,
     setRevenueAllError,
@@ -283,6 +285,7 @@ const App: React.FC = () => {
     if (typeof document === 'undefined') return true;
     return document.visibilityState === 'visible';
   });
+  const [machineStatus, setMachineStatus] = useState<Record<string, LaundryMachineStatus>>({});
   const cameraObserverRef = React.useRef<IntersectionObserver | null>(null);
   const cameraCardRefs = React.useRef<Map<string, HTMLDivElement>>(new Map());
   const cameraRefCallbacks = React.useRef<Map<string, (node: HTMLDivElement | null) => void>>(new Map());
@@ -595,15 +598,18 @@ const App: React.FC = () => {
     const range = getMonthRange(revenueDate);
     if (!range) {
       setRevenueEntryDates([]);
+      setRevenueEntryDateInfo([]);
       return;
     }
     try {
-      const dates = await ApiService.listRevenueEntryDates(range.startDate, range.endDate);
-      setRevenueEntryDates(dates);
+      const result = await ApiService.listRevenueEntryDates(range.startDate, range.endDate);
+      setRevenueEntryDates(result.dates);
+      setRevenueEntryDateInfo(result.dateInfo);
     } catch (err) {
       if (handleAuthFailure(err)) return;
       console.error('Revenue calendar fetch failed', err);
       setRevenueEntryDates([]);
+      setRevenueEntryDateInfo([]);
     }
   };
 
@@ -633,6 +639,33 @@ const App: React.FC = () => {
   const handleExportRevenueCsv = () => {
     const laundryNameMap = new Map(laundries.map(l => [l.id, l.name]));
     exportRevenueToCsv(revenueAllEntries, laundryNameMap);
+  };
+
+  const fetchMachineStatus = async () => {
+    if (!laundries.length) return;
+    try {
+      const results = await Promise.all(laundries.map(async (laundry) => {
+        try {
+          const status = await ApiService.getMachineStatus(laundry.id);
+          return { agentId: laundry.id, status };
+        } catch (err) {
+          console.error(`Failed to fetch machine status for ${laundry.id}`, err);
+          return null;
+        }
+      }));
+      const statusMap: Record<string, LaundryMachineStatus> = {};
+      results.forEach(result => {
+        if (result) {
+          statusMap[result.agentId] = result.status;
+        }
+      });
+      setMachineStatus(prev => {
+        const hasChanges = JSON.stringify(prev) !== JSON.stringify(statusMap);
+        return hasChanges ? statusMap : prev;
+      });
+    } catch (err) {
+      console.error('Machine status fetch failed', err);
+    }
   };
 
   useEffect(() => {
@@ -669,6 +702,14 @@ const App: React.FC = () => {
     }, CAMERA_FRAME_REFRESH_MS);
     return () => clearInterval(timer);
   }, [isAuthenticated, activeTab, isPageVisible]);
+
+  // Fetch machine status when Dashboard tab is active
+  useEffect(() => {
+    if (!isAuthenticated || activeTab !== Tab.DASHBOARD) return;
+    fetchMachineStatus();
+    const timer = setInterval(fetchMachineStatus, 10_000);
+    return () => clearInterval(timer);
+  }, [isAuthenticated, activeTab, laundryIdKey]);
 
   // Fetch inventory on initial load and when inventory tab is active
   useEffect(() => {
@@ -1236,6 +1277,7 @@ const App: React.FC = () => {
       handleCameraNameSave={handleCameraNameSave}
       getCameraCardRef={getCameraCardRef}
       fetchLaundries={fetchLaundries}
+      machineStatus={machineStatus}
     />
   );
 
@@ -1291,6 +1333,7 @@ const App: React.FC = () => {
       isRevenueCalendarOpen={isRevenueCalendarOpen}
       setIsRevenueCalendarOpen={setIsRevenueCalendarOpen}
       revenueEntryDates={revenueEntryDates}
+      revenueEntryDateInfo={revenueEntryDateInfo}
       revenueEntries={revenueEntries}
       revenueLoading={revenueLoading}
       revenueError={revenueError}

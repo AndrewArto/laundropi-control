@@ -884,6 +884,43 @@ export function listRevenueEntryDatesBetween(startDate: string, endDate: string,
   return rows.map((row: any) => row.entryDate);
 }
 
+export interface DateEntryInfo {
+  date: string;
+  hasRevenue: boolean;
+  hasExpenses: boolean;
+}
+
+export function listRevenueEntryDatesWithInfo(startDate: string, endDate: string, agentId?: string): DateEntryInfo[] {
+  // Query to get dates with aggregated revenue and deductions info
+  // hasRevenue: true if coinsTotal > 0 OR billsTotal > 0 for non-FixCost agents
+  // hasExpenses: true if deductionsTotal > 0 for any agent
+  const query = agentId
+    ? `SELECT entryDate,
+         MAX(CASE WHEN (coinsTotal > 0 OR billsTotal > 0) AND agentId != 'FixCost' THEN 1 ELSE 0 END) as hasRevenue,
+         MAX(CASE WHEN deductionsTotal > 0 THEN 1 ELSE 0 END) as hasExpenses
+       FROM revenue_entries
+       WHERE agentId = ? AND entryDate BETWEEN ? AND ?
+       GROUP BY entryDate
+       ORDER BY entryDate`
+    : `SELECT entryDate,
+         MAX(CASE WHEN (coinsTotal > 0 OR billsTotal > 0) AND agentId != 'FixCost' THEN 1 ELSE 0 END) as hasRevenue,
+         MAX(CASE WHEN deductionsTotal > 0 THEN 1 ELSE 0 END) as hasExpenses
+       FROM revenue_entries
+       WHERE entryDate BETWEEN ? AND ?
+       GROUP BY entryDate
+       ORDER BY entryDate`;
+
+  const rows = agentId
+    ? db.prepare(query).all(agentId, startDate, endDate)
+    : db.prepare(query).all(startDate, endDate);
+
+  return (rows as any[]).map(row => ({
+    date: row.entryDate,
+    hasRevenue: row.hasRevenue === 1,
+    hasExpenses: row.hasExpenses === 1,
+  }));
+}
+
 export function upsertRevenueEntry(row: RevenueEntryRow) {
   upsertRevenueEntryStmt.run({
     ...row,

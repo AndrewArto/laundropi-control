@@ -1,7 +1,7 @@
-import React from 'react';
-import { LayoutDashboard, Server, Cpu, Pencil, Camera as CameraIcon, CameraOff as CameraOffIcon } from 'lucide-react';
+import React, { useState } from 'react';
+import { LayoutDashboard, Server, Cpu, Pencil, Camera as CameraIcon, CameraOff as CameraOffIcon, ChevronDown, ChevronRight, WashingMachine, Wind } from 'lucide-react';
 import RelayCard from '../RelayCard';
-import { Relay, CameraConfig } from '../../types';
+import { Relay, CameraConfig, LaundryMachine, LaundryMachineStatus } from '../../types';
 
 interface Laundry {
   id: string;
@@ -46,14 +46,22 @@ interface DashboardViewProps {
   handleCameraNameSave: (agentId: string, cameraId: string) => void;
   getCameraCardRef: (key: string) => (node: HTMLDivElement | null) => void;
   fetchLaundries: (skipLoading?: boolean) => void;
+  machineStatus: Record<string, LaundryMachineStatus>;
 }
 
-export const DashboardView: React.FC<DashboardViewProps> = (props) => (
+export const DashboardView: React.FC<DashboardViewProps> = (props) => {
+  const [expandedMachines, setExpandedMachines] = useState<Record<string, boolean>>({});
+
+  const toggleMachines = (agentId: string) => {
+    setExpandedMachines(prev => ({ ...prev, [agentId]: !prev[agentId] }));
+  };
+
+  return (
   <div className="space-y-6">
     <div className="flex justify-between items-center">
       <h2 className="text-xl font-bold text-white flex items-center gap-2">
         <LayoutDashboard className="w-5 h-5 text-indigo-400" />
-        Control
+        Dashboard
       </h2>
       <div className="flex gap-2 flex-wrap items-center">
         <button
@@ -261,9 +269,117 @@ export const DashboardView: React.FC<DashboardViewProps> = (props) => (
                 })}
               </div>
             </div>
+
+            {/* Machines Section */}
+            {(() => {
+              const status = props.machineStatus[laundry.id];
+              const machines = status?.machines || [];
+              const isExpanded = expandedMachines[laundry.id] ?? false;
+              const washers = machines.filter(m => m.type === 'washer');
+              const dryers = machines.filter(m => m.type === 'dryer');
+              const runningCount = machines.filter(m => m.status === 'running').length;
+
+              if (machines.length === 0) return null;
+
+              return (
+                <div className="space-y-3">
+                  <button
+                    onClick={() => toggleMachines(laundry.id)}
+                    className="flex items-center gap-2 w-full text-left"
+                  >
+                    {isExpanded ? (
+                      <ChevronDown className="w-4 h-4 text-slate-400" />
+                    ) : (
+                      <ChevronRight className="w-4 h-4 text-slate-400" />
+                    )}
+                    <span className="text-xs uppercase tracking-wide text-slate-400">
+                      Machines
+                    </span>
+                    <span className="text-xs text-slate-500">
+                      ({runningCount}/{machines.length} running)
+                    </span>
+                  </button>
+
+                  {isExpanded && (
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      {/* Washers */}
+                      {washers.length > 0 && (
+                        <div className="bg-slate-900/40 border border-slate-700 rounded-lg p-3 space-y-2">
+                          <div className="flex items-center gap-2 text-sm text-slate-300">
+                            <WashingMachine className="w-4 h-4 text-blue-400" />
+                            <span>Washers</span>
+                          </div>
+                          <div className="grid grid-cols-2 gap-2">
+                            {washers.map(machine => (
+                              <div
+                                key={machine.id}
+                                className={`flex items-center justify-between px-2 py-1.5 rounded-md border text-xs ${
+                                  machine.status === 'running'
+                                    ? 'border-emerald-500/50 bg-emerald-500/10 text-emerald-200'
+                                    : machine.status === 'idle'
+                                    ? 'border-slate-600 bg-slate-800/50 text-slate-400'
+                                    : 'border-slate-700 bg-slate-900/50 text-slate-500'
+                                }`}
+                              >
+                                <span>{machine.label}</span>
+                                <span className={`px-1.5 py-0.5 rounded text-[10px] uppercase ${
+                                  machine.status === 'running'
+                                    ? 'bg-emerald-500/20 text-emerald-300'
+                                    : machine.status === 'idle'
+                                    ? 'bg-slate-700 text-slate-400'
+                                    : 'bg-slate-800 text-slate-500'
+                                }`}>
+                                  {machine.status}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Dryers */}
+                      {dryers.length > 0 && (
+                        <div className="bg-slate-900/40 border border-slate-700 rounded-lg p-3 space-y-2">
+                          <div className="flex items-center gap-2 text-sm text-slate-300">
+                            <Wind className="w-4 h-4 text-orange-400" />
+                            <span>Dryers</span>
+                          </div>
+                          <div className="grid grid-cols-2 gap-2">
+                            {dryers.map(machine => (
+                              <div
+                                key={machine.id}
+                                className={`flex items-center justify-between px-2 py-1.5 rounded-md border text-xs ${
+                                  machine.status === 'running'
+                                    ? 'border-emerald-500/50 bg-emerald-500/10 text-emerald-200'
+                                    : machine.status === 'idle'
+                                    ? 'border-slate-600 bg-slate-800/50 text-slate-400'
+                                    : 'border-slate-700 bg-slate-900/50 text-slate-500'
+                                }`}
+                              >
+                                <span>{machine.label}</span>
+                                <span className={`px-1.5 py-0.5 rounded text-[10px] uppercase ${
+                                  machine.status === 'running'
+                                    ? 'bg-emerald-500/20 text-emerald-300'
+                                    : machine.status === 'idle'
+                                    ? 'bg-slate-700 text-slate-400'
+                                    : 'bg-slate-800 text-slate-500'
+                                }`}>
+                                  {machine.status}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
           </div>
         );
       })}
     </div>
   </div>
-);
+  );
+};
