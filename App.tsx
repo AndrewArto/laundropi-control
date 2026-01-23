@@ -793,10 +793,32 @@ const App: React.FC = () => {
     fetchRevenueEntryDates();
   }, [activeTab, revenueDate, laundryIdKey, isAuthenticated, authUser?.role, revenueView]);
 
+  // Poll for revenue updates when Finance tab is active (daily view)
+  useEffect(() => {
+    if (!isAuthenticated || authUser?.role !== 'admin') return;
+    if (activeTab !== Tab.REVENUE || revenueView !== 'daily') return;
+    const timer = setInterval(() => {
+      // Skip polling if any entry is currently being saved
+      if (Object.values(revenueSaving).some(Boolean)) return;
+      fetchRevenueData();
+    }, 10_000);
+    return () => clearInterval(timer);
+  }, [activeTab, revenueView, isAuthenticated, authUser?.role, revenueSaving]);
+
   useEffect(() => {
     if (!isAuthenticated || authUser?.role !== 'admin') return;
     if (activeTab !== Tab.REVENUE || revenueView !== 'all') return;
     fetchAllRevenueEntries();
+  }, [activeTab, revenueView, isAuthenticated, authUser?.role]);
+
+  // Poll for all revenue entries when Finance tab is in "all" view
+  useEffect(() => {
+    if (!isAuthenticated || authUser?.role !== 'admin') return;
+    if (activeTab !== Tab.REVENUE || revenueView !== 'all') return;
+    const timer = setInterval(() => {
+      fetchAllRevenueEntries();
+    }, 10_000);
+    return () => clearInterval(timer);
   }, [activeTab, revenueView, isAuthenticated, authUser?.role]);
 
   // Fetch bank imports when Bank Import tab is active
