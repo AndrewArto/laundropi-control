@@ -1,136 +1,174 @@
 /**
  * Machine status detection via camera frame analysis.
  *
- * This module analyzes camera frames to determine if laundry machines are
- * idle or running. For Speed Queen machines with digital screens, we detect
- * if the screen is illuminated (running) vs dark (idle).
+ * Multi-criteria detection approach:
+ * 1. Display: Dark = always OFF, Lit = could be either state
+ * 2. Lid: Open = always OFF, Closed = could be either state
+ * 3. Clothes inside drum: Yes = always ON, No = always OFF
  *
- * Detection approach:
- * - Check the screen area for brightness
- * - Running machines have lit screens showing time/status
- * - Idle machines have dark/off screens
- * - Uses high brightness threshold to avoid false positives from ambient light
+ * Decision logic: Machine is ON only if display is lit AND lid is closed AND clothes visible.
+ * Speed Queen front-load machines have digital screens and glass drum doors.
  */
 
 import type { LaundryMachine, MachineStatus, MachineType } from '../../types';
 
-// Machine region configuration for each laundry
-// These define bounding boxes (as percentages) where machine SCREENS appear
+// Machine region configuration with separate areas for screen, lid, and drum
 export interface MachineRegion {
   id: string;
   label: string;
   type: MachineType;
   camera: 'front' | 'back';
-  // Screen bounding box as percentage of frame (0-1)
-  x: number;
-  y: number;
-  width: number;
-  height: number;
+  // Screen region (for display detection)
+  screen: { x: number; y: number; width: number; height: number };
+  // Drum/window region (for clothes detection)
+  drum: { x: number; y: number; width: number; height: number };
+  // Lid region - optional, for detecting open lid (bright area where door is open)
+  lid?: { x: number; y: number; width: number; height: number };
 }
 
-// Configuration per laundry
 export interface LaundryMachineConfig {
   agentId: string;
   machines: MachineRegion[];
-  // Brightness threshold (0-255) - screens must be brighter than this
-  brightnessThreshold?: number;
+  // Brightness threshold for screen "lit" detection
+  screenBrightnessThreshold?: number;
+  // Threshold for detecting clothes (color variance in drum area)
+  clothesVarianceThreshold?: number;
+  // Threshold for detecting open lid (high brightness in lid area)
+  lidOpenBrightnessThreshold?: number;
 }
 
-// Default configurations - targeting the SCREEN areas
-// Speed Queen machines have small digital screens at the control panel
+// Machine configurations for each laundry
+// Coordinates are percentages of frame (0-1)
 export const MACHINE_CONFIGS: LaundryMachineConfig[] = [
   {
     agentId: 'Brandoa1',
-    brightnessThreshold: 180, // High threshold - only truly lit screens pass
+    screenBrightnessThreshold: 150,
+    clothesVarianceThreshold: 25,
+    lidOpenBrightnessThreshold: 200,
     machines: [
-      // Front camera - 4 washers (left side) - targeting screens at top of control panel
-      { id: 'w1', label: 'Washer 1', type: 'washer', camera: 'front', x: 0.04, y: 0.30, width: 0.05, height: 0.04 },
-      { id: 'w2', label: 'Washer 2', type: 'washer', camera: 'front', x: 0.15, y: 0.30, width: 0.05, height: 0.04 },
-      { id: 'w3', label: 'Washer 3', type: 'washer', camera: 'front', x: 0.26, y: 0.30, width: 0.05, height: 0.04 },
-      { id: 'w4', label: 'Washer 4', type: 'washer', camera: 'front', x: 0.37, y: 0.30, width: 0.05, height: 0.04 },
-      // Front camera - 4 dryers (right side, stacked 2x2) - targeting screens
-      // Top row
-      { id: 'd5', label: 'Dryer 5', type: 'dryer', camera: 'front', x: 0.72, y: 0.15, width: 0.04, height: 0.04 },
-      { id: 'd7', label: 'Dryer 7', type: 'dryer', camera: 'front', x: 0.86, y: 0.15, width: 0.04, height: 0.04 },
-      // Bottom row
-      { id: 'd6', label: 'Dryer 6', type: 'dryer', camera: 'front', x: 0.72, y: 0.45, width: 0.04, height: 0.04 },
-      { id: 'd8', label: 'Dryer 8', type: 'dryer', camera: 'front', x: 0.86, y: 0.45, width: 0.04, height: 0.04 },
+      // Front camera - 4 washers
+      {
+        id: 'w1', label: 'Washer 1', type: 'washer', camera: 'front',
+        screen: { x: 0.04, y: 0.28, width: 0.05, height: 0.04 },
+        drum: { x: 0.02, y: 0.35, width: 0.09, height: 0.15 },
+      },
+      {
+        id: 'w2', label: 'Washer 2', type: 'washer', camera: 'front',
+        screen: { x: 0.15, y: 0.28, width: 0.05, height: 0.04 },
+        drum: { x: 0.13, y: 0.35, width: 0.09, height: 0.15 },
+      },
+      {
+        id: 'w3', label: 'Washer 3', type: 'washer', camera: 'front',
+        screen: { x: 0.26, y: 0.28, width: 0.05, height: 0.04 },
+        drum: { x: 0.24, y: 0.35, width: 0.09, height: 0.15 },
+      },
+      {
+        id: 'w4', label: 'Washer 4', type: 'washer', camera: 'front',
+        screen: { x: 0.37, y: 0.28, width: 0.05, height: 0.04 },
+        drum: { x: 0.35, y: 0.35, width: 0.09, height: 0.15 },
+      },
+      // Front camera - 4 dryers (2x2 stack)
+      {
+        id: 'd5', label: 'Dryer 5', type: 'dryer', camera: 'front',
+        screen: { x: 0.72, y: 0.15, width: 0.04, height: 0.03 },
+        drum: { x: 0.70, y: 0.20, width: 0.10, height: 0.15 },
+      },
+      {
+        id: 'd7', label: 'Dryer 7', type: 'dryer', camera: 'front',
+        screen: { x: 0.86, y: 0.15, width: 0.04, height: 0.03 },
+        drum: { x: 0.84, y: 0.20, width: 0.10, height: 0.15 },
+      },
+      {
+        id: 'd6', label: 'Dryer 6', type: 'dryer', camera: 'front',
+        screen: { x: 0.72, y: 0.45, width: 0.04, height: 0.03 },
+        drum: { x: 0.70, y: 0.50, width: 0.10, height: 0.15 },
+      },
+      {
+        id: 'd8', label: 'Dryer 8', type: 'dryer', camera: 'front',
+        screen: { x: 0.86, y: 0.45, width: 0.04, height: 0.03 },
+        drum: { x: 0.84, y: 0.50, width: 0.10, height: 0.15 },
+      },
     ],
   },
   {
     agentId: 'Brandoa2',
-    brightnessThreshold: 180, // High threshold - only truly lit screens pass
+    screenBrightnessThreshold: 150,
+    clothesVarianceThreshold: 25,
+    lidOpenBrightnessThreshold: 200,
     machines: [
-      // Front camera - 4 washers in a row (targeting screens)
-      { id: 'w1', label: 'Washer 1', type: 'washer', camera: 'front', x: 0.08, y: 0.30, width: 0.05, height: 0.04 },
-      { id: 'w2', label: 'Washer 2', type: 'washer', camera: 'front', x: 0.23, y: 0.30, width: 0.05, height: 0.04 },
-      { id: 'w3', label: 'Washer 3', type: 'washer', camera: 'front', x: 0.38, y: 0.30, width: 0.05, height: 0.04 },
-      { id: 'w4', label: 'Washer 4', type: 'washer', camera: 'front', x: 0.53, y: 0.30, width: 0.05, height: 0.04 },
-      // Back camera - 6 dryers stacked (3 columns x 2 rows) - targeting screens
-      // Top row (left to right)
-      { id: 'd1', label: 'Dryer 1', type: 'dryer', camera: 'back', x: 0.32, y: 0.15, width: 0.04, height: 0.04 },
-      { id: 'd3', label: 'Dryer 3', type: 'dryer', camera: 'back', x: 0.50, y: 0.15, width: 0.04, height: 0.04 },
-      { id: 'd5', label: 'Dryer 5', type: 'dryer', camera: 'back', x: 0.68, y: 0.15, width: 0.04, height: 0.04 },
-      // Bottom row (left to right)
-      { id: 'd2', label: 'Dryer 2', type: 'dryer', camera: 'back', x: 0.32, y: 0.45, width: 0.04, height: 0.04 },
-      { id: 'd4', label: 'Dryer 4', type: 'dryer', camera: 'back', x: 0.50, y: 0.45, width: 0.04, height: 0.04 },
-      { id: 'd6', label: 'Dryer 6', type: 'dryer', camera: 'back', x: 0.68, y: 0.45, width: 0.04, height: 0.04 },
+      // Front camera - 4 washers
+      {
+        id: 'w1', label: 'Washer 1', type: 'washer', camera: 'front',
+        screen: { x: 0.08, y: 0.28, width: 0.05, height: 0.04 },
+        drum: { x: 0.06, y: 0.35, width: 0.09, height: 0.15 },
+      },
+      {
+        id: 'w2', label: 'Washer 2', type: 'washer', camera: 'front',
+        screen: { x: 0.23, y: 0.28, width: 0.05, height: 0.04 },
+        drum: { x: 0.21, y: 0.35, width: 0.09, height: 0.15 },
+      },
+      {
+        id: 'w3', label: 'Washer 3', type: 'washer', camera: 'front',
+        screen: { x: 0.38, y: 0.28, width: 0.05, height: 0.04 },
+        drum: { x: 0.36, y: 0.35, width: 0.09, height: 0.15 },
+      },
+      {
+        id: 'w4', label: 'Washer 4', type: 'washer', camera: 'front',
+        screen: { x: 0.53, y: 0.28, width: 0.05, height: 0.04 },
+        drum: { x: 0.51, y: 0.35, width: 0.09, height: 0.15 },
+      },
+      // Back camera - 6 dryers (2 rows of 3)
+      // Top row
+      {
+        id: 'd1', label: 'Dryer 1', type: 'dryer', camera: 'back',
+        screen: { x: 0.30, y: 0.15, width: 0.04, height: 0.03 },
+        drum: { x: 0.28, y: 0.20, width: 0.10, height: 0.15 },
+      },
+      {
+        id: 'd3', label: 'Dryer 3', type: 'dryer', camera: 'back',
+        screen: { x: 0.48, y: 0.15, width: 0.04, height: 0.03 },
+        drum: { x: 0.46, y: 0.20, width: 0.10, height: 0.15 },
+      },
+      {
+        id: 'd5', label: 'Dryer 5', type: 'dryer', camera: 'back',
+        screen: { x: 0.66, y: 0.15, width: 0.04, height: 0.03 },
+        drum: { x: 0.64, y: 0.20, width: 0.10, height: 0.15 },
+      },
+      // Bottom row
+      {
+        id: 'd2', label: 'Dryer 2', type: 'dryer', camera: 'back',
+        screen: { x: 0.30, y: 0.45, width: 0.04, height: 0.03 },
+        drum: { x: 0.28, y: 0.50, width: 0.10, height: 0.15 },
+      },
+      {
+        id: 'd4', label: 'Dryer 4', type: 'dryer', camera: 'back',
+        screen: { x: 0.48, y: 0.45, width: 0.04, height: 0.03 },
+        drum: { x: 0.46, y: 0.50, width: 0.10, height: 0.15 },
+      },
+      {
+        id: 'd6', label: 'Dryer 6', type: 'dryer', camera: 'back',
+        screen: { x: 0.66, y: 0.45, width: 0.04, height: 0.03 },
+        drum: { x: 0.64, y: 0.50, width: 0.10, height: 0.15 },
+      },
     ],
   },
 ];
 
 /**
- * Calculate the maximum brightness pixel in a region.
- * This helps detect lit screens even if only part is bright.
- */
-function calculateMaxBrightness(
-  buffer: Buffer,
-  width: number,
-  height: number,
-  region: { x: number; y: number; width: number; height: number }
-): number {
-  const startX = Math.floor(region.x * width);
-  const startY = Math.floor(region.y * height);
-  const regionWidth = Math.floor(region.width * width);
-  const regionHeight = Math.floor(region.height * height);
-
-  let maxBrightness = 0;
-
-  for (let y = startY; y < startY + regionHeight && y < height; y++) {
-    for (let x = startX; x < startX + regionWidth && x < width; x++) {
-      const idx = (y * width + x) * 3;
-      if (idx + 2 < buffer.length) {
-        const r = buffer[idx];
-        const g = buffer[idx + 1];
-        const b = buffer[idx + 2];
-        const brightness = Math.max(r, g, b);
-        if (brightness > maxBrightness) {
-          maxBrightness = brightness;
-        }
-      }
-    }
-  }
-
-  return maxBrightness;
-}
-
-/**
- * Calculate average brightness and the percentage of bright pixels.
+ * Analyze region brightness (for screen and lid detection).
  */
 function analyzeRegionBrightness(
   buffer: Buffer,
   width: number,
   height: number,
-  region: { x: number; y: number; width: number; height: number },
-  brightThreshold: number
-): { avgBrightness: number; brightRatio: number; maxBrightness: number } {
+  region: { x: number; y: number; width: number; height: number }
+): { avgBrightness: number; maxBrightness: number } {
   const startX = Math.floor(region.x * width);
   const startY = Math.floor(region.y * height);
   const regionWidth = Math.floor(region.width * width);
   const regionHeight = Math.floor(region.height * height);
 
-  let brightnessSum = 0;
-  let brightPixels = 0;
+  let sumBrightness = 0;
   let maxBrightness = 0;
   let pixelCount = 0;
 
@@ -142,12 +180,9 @@ function analyzeRegionBrightness(
         const g = buffer[idx + 1];
         const b = buffer[idx + 2];
         const brightness = 0.299 * r + 0.587 * g + 0.114 * b;
-        brightnessSum += brightness;
+        sumBrightness += brightness;
         pixelCount++;
 
-        if (brightness > brightThreshold) {
-          brightPixels++;
-        }
         if (brightness > maxBrightness) {
           maxBrightness = brightness;
         }
@@ -156,42 +191,148 @@ function analyzeRegionBrightness(
   }
 
   return {
-    avgBrightness: pixelCount > 0 ? brightnessSum / pixelCount : 0,
-    brightRatio: pixelCount > 0 ? brightPixels / pixelCount : 0,
+    avgBrightness: pixelCount > 0 ? sumBrightness / pixelCount : 0,
     maxBrightness,
   };
 }
 
 /**
- * Determine machine status based on screen brightness.
- * A screen is considered "on" if it has sufficient bright pixels.
- * Uses strict criteria to avoid false positives from ambient light.
+ * Detect clothes in drum by analyzing color variance.
+ * Empty drum: uniform gray/black (low variance)
+ * Clothes present: varied colors (high variance)
  */
-function statusFromScreenBrightness(
-  avgBrightness: number,
-  brightRatio: number,
-  maxBrightness: number,
-  threshold: number
-): MachineStatus {
-  // Screen is on if:
-  // 1. More than 20% of pixels are above threshold (need significant screen illumination), AND
-  // 2. Max brightness is very high (> 200) indicating active display
-  // Both conditions must be met to avoid false positives
-  if (brightRatio > 0.20 && maxBrightness > 200) {
-    return 'running';
+function detectClothesInDrum(
+  buffer: Buffer,
+  width: number,
+  height: number,
+  region: { x: number; y: number; width: number; height: number }
+): { hasClothes: boolean; colorVariance: number } {
+  const startX = Math.floor(region.x * width);
+  const startY = Math.floor(region.y * height);
+  const regionWidth = Math.floor(region.width * width);
+  const regionHeight = Math.floor(region.height * height);
+
+  const pixels: { r: number; g: number; b: number }[] = [];
+
+  for (let y = startY; y < startY + regionHeight && y < height; y++) {
+    for (let x = startX; x < startX + regionWidth && x < width; x++) {
+      const idx = (y * width + x) * 3;
+      if (idx + 2 < buffer.length) {
+        pixels.push({
+          r: buffer[idx],
+          g: buffer[idx + 1],
+          b: buffer[idx + 2],
+        });
+      }
+    }
   }
-  return 'idle';
+
+  if (pixels.length === 0) {
+    return { hasClothes: false, colorVariance: 0 };
+  }
+
+  // Calculate mean RGB
+  const mean = {
+    r: pixels.reduce((sum, p) => sum + p.r, 0) / pixels.length,
+    g: pixels.reduce((sum, p) => sum + p.g, 0) / pixels.length,
+    b: pixels.reduce((sum, p) => sum + p.b, 0) / pixels.length,
+  };
+
+  // Calculate variance (standard deviation of color distances from mean)
+  const variance = Math.sqrt(
+    pixels.reduce((sum, p) => {
+      const dist = Math.sqrt(
+        (p.r - mean.r) ** 2 +
+        (p.g - mean.g) ** 2 +
+        (p.b - mean.b) ** 2
+      );
+      return sum + dist * dist;
+    }, 0) / pixels.length
+  );
+
+  return { hasClothes: variance > 25, colorVariance: variance };
 }
 
 /**
- * Analyze a camera frame to detect machine statuses using screen brightness.
+ * Check if lid is open by detecting high brightness in lid area.
+ * Open lid typically shows interior lighting or external light.
+ */
+function isLidOpen(
+  buffer: Buffer,
+  width: number,
+  height: number,
+  lidRegion: { x: number; y: number; width: number; height: number } | undefined,
+  threshold: number
+): boolean {
+  if (!lidRegion) {
+    // No lid region defined, assume closed
+    return false;
+  }
+
+  const { avgBrightness } = analyzeRegionBrightness(buffer, width, height, lidRegion);
+  return avgBrightness > threshold;
+}
+
+/**
+ * Multi-criteria machine status detection.
  *
- * @param agentId - The laundry agent ID
- * @param cameraPosition - 'front' or 'back'
- * @param frameBuffer - Raw RGB frame data
- * @param frameWidth - Frame width in pixels
- * @param frameHeight - Frame height in pixels
- * @returns Array of machine statuses
+ * Logic:
+ * - Display dark → OFF (machine not running)
+ * - Lid open → OFF (can't run with open lid)
+ * - No clothes in drum → OFF (nothing to wash/dry)
+ * - Display lit + lid closed + clothes visible → ON
+ */
+function detectMachineStatus(
+  buffer: Buffer,
+  width: number,
+  height: number,
+  machine: MachineRegion,
+  config: {
+    screenBrightnessThreshold: number;
+    clothesVarianceThreshold: number;
+    lidOpenBrightnessThreshold: number;
+  }
+): { status: MachineStatus; debug: { screenLit: boolean; lidOpen: boolean; hasClothes: boolean; screenBrightness: number; colorVariance: number } } {
+  // 1. Check screen brightness
+  const { avgBrightness: screenBrightness } = analyzeRegionBrightness(
+    buffer, width, height, machine.screen
+  );
+  const screenLit = screenBrightness > config.screenBrightnessThreshold;
+
+  // 2. Check if lid is open (optional check)
+  const lidOpen = isLidOpen(
+    buffer, width, height, machine.lid, config.lidOpenBrightnessThreshold
+  );
+
+  // 3. Check for clothes in drum
+  const { hasClothes, colorVariance } = detectClothesInDrum(
+    buffer, width, height, machine.drum
+  );
+
+  const debug = { screenLit, lidOpen, hasClothes, screenBrightness, colorVariance };
+
+  // Decision logic:
+  // - Dark screen = definitely OFF
+  if (!screenLit) {
+    return { status: 'idle', debug };
+  }
+
+  // - Open lid = definitely OFF
+  if (lidOpen) {
+    return { status: 'idle', debug };
+  }
+
+  // - No clothes = definitely OFF (even if screen is lit, could be just standby)
+  if (!hasClothes) {
+    return { status: 'idle', debug };
+  }
+
+  // All conditions met: screen lit + lid closed + clothes visible = RUNNING
+  return { status: 'running', debug };
+}
+
+/**
+ * Analyze a camera frame to detect machine statuses.
  */
 export function analyzeFrame(
   agentId: string,
@@ -206,20 +347,30 @@ export function analyzeFrame(
   }
 
   const cameraMachines = config.machines.filter(m => m.camera === cameraPosition);
-  const threshold = config.brightnessThreshold ?? 80;
+  const detectionConfig = {
+    screenBrightnessThreshold: config.screenBrightnessThreshold ?? 150,
+    clothesVarianceThreshold: config.clothesVarianceThreshold ?? 25,
+    lidOpenBrightnessThreshold: config.lidOpenBrightnessThreshold ?? 200,
+  };
+
   const results: LaundryMachine[] = [];
   const now = Date.now();
 
   for (const machine of cameraMachines) {
-    const { avgBrightness, brightRatio, maxBrightness } = analyzeRegionBrightness(
+    const { status, debug } = detectMachineStatus(
       frameBuffer,
       frameWidth,
       frameHeight,
       machine,
-      threshold
+      detectionConfig
     );
 
-    const status = statusFromScreenBrightness(avgBrightness, brightRatio, maxBrightness, threshold);
+    // Log debug info for tuning
+    console.log(
+      `[Detection] ${machine.label}: status=${status}, ` +
+      `screenLit=${debug.screenLit} (${debug.screenBrightness.toFixed(1)}), ` +
+      `lidOpen=${debug.lidOpen}, hasClothes=${debug.hasClothes} (var=${debug.colorVariance.toFixed(1)})`
+    );
 
     results.push({
       id: machine.id,
@@ -241,8 +392,8 @@ export function getMachineConfig(agentId: string): LaundryMachineConfig | undefi
 }
 
 /**
- * Clear cached frame data (not needed for brightness detection, kept for API).
+ * Clear cached frame data (kept for API compatibility).
  */
-export function clearFrameCache(agentId?: string): void {
-  // No-op for brightness detection
+export function clearFrameCache(_agentId?: string): void {
+  // No longer using frame cache since we removed motion detection
 }
