@@ -154,7 +154,7 @@ function isWithinOperatingHours(): boolean {
  * Save full frame as JPEG for training data collection.
  * Only saves during operating hours (07:00 - 01:00) every 10 minutes.
  */
-function saveFrameForTraining(
+export function saveFrameForTraining(
   agentId: string,
   cameraPosition: 'front' | 'back',
   jpegBuffer: Buffer

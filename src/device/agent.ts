@@ -8,7 +8,7 @@ import * as sharp from 'sharp';
 import { gpio } from './gpio';
 import { createScheduler, ScheduleEntry } from './scheduler';
 import { RELAYS_CONFIG } from './config';
-import { analyzeFrame, getMachineConfig, setJpegBufferForTraining } from './machineDetection';
+import { analyzeFrame, getMachineConfig, setJpegBufferForTraining, saveFrameForTraining } from './machineDetection';
 import type { LaundryMachine } from '../../types';
 
 dotenv.config({ path: process.env.AGENT_ENV_FILE || '.env.agent' });
@@ -41,10 +41,14 @@ const MACHINE_DETECTION_ENABLED = process.env.MACHINE_DETECTION_ENABLED !== 'fal
 const TRAINING_SERVER_PORT = parseDurationMs(process.env.TRAINING_SERVER_PORT, 4001);
 const TRAINING_SERVER_ENABLED = process.env.TRAINING_SERVER_ENABLED !== 'false';
 const TRAINING_FRAME_INTERVAL_MS = parseDurationMs(process.env.TRAINING_FRAME_INTERVAL_MS, 2000);
+// Training capture mode: saves frames without running detection (for building training datasets)
+const TRAINING_CAPTURE_ENABLED = process.env.TRAINING_CAPTURE_ENABLED === 'true';
+const TRAINING_CAPTURE_INTERVAL_MS = parseDurationMs(process.env.TRAINING_CAPTURE_INTERVAL_MS, 10 * 60 * 1000); // 10 min default
 
 let ws: WebSocket | null = null;
 let heartbeatTimer: NodeJS.Timeout | null = null;
 let machineDetectionTimer: NodeJS.Timeout | null = null;
+let trainingCaptureTimer: NodeJS.Timeout | null = null;
 let lastMachineStatus: LaundryMachine[] = [];
 
 const ensureScheduleDir = () => {
@@ -454,6 +458,58 @@ function stopMachineDetection() {
 }
 
 // ============================================================================
+// Training Capture Mode - Saves frames without running detection
+// ============================================================================
+async function runTrainingCapture() {
+  const frontCamera = cameraConfigs.find(c => c.position === 'front' && c.enabled && c.sourceType === 'rtsp' && c.rtspUrl);
+  const backCamera = cameraConfigs.find(c => c.position === 'back' && c.enabled && c.sourceType === 'rtsp' && c.rtspUrl);
+
+  // Capture front camera
+  if (frontCamera) {
+    const result = await getCameraFrame(frontCamera);
+    if (result.ok) {
+      const jpegBuffer = Buffer.from(result.data, 'base64');
+      saveFrameForTraining(AGENT_ID, 'front', jpegBuffer);
+    }
+  }
+
+  // Capture back camera
+  if (backCamera) {
+    const result = await getCameraFrame(backCamera);
+    if (result.ok) {
+      const jpegBuffer = Buffer.from(result.data, 'base64');
+      saveFrameForTraining(AGENT_ID, 'back', jpegBuffer);
+    }
+  }
+}
+
+function startTrainingCapture() {
+  if (!TRAINING_CAPTURE_ENABLED) {
+    console.log('[agent] training capture mode disabled');
+    return;
+  }
+
+  if (trainingCaptureTimer) return;
+
+  console.log(`[agent] starting training capture mode (interval=${TRAINING_CAPTURE_INTERVAL_MS}ms)`);
+  trainingCaptureTimer = setInterval(() => {
+    void runTrainingCapture();
+  }, TRAINING_CAPTURE_INTERVAL_MS);
+
+  // Run initial capture after cameras are configured
+  setTimeout(() => {
+    void runTrainingCapture();
+  }, 5000);
+}
+
+function stopTrainingCapture() {
+  if (trainingCaptureTimer) {
+    clearInterval(trainingCaptureTimer);
+    trainingCaptureTimer = null;
+  }
+}
+
+// ============================================================================
 // Training Server - Direct WebSocket for ML labeling (runs on Pi, no AWS proxy)
 // ============================================================================
 type TrainingClient = {
@@ -596,5 +652,8 @@ function startTrainingServer() {
 
 // Start training server
 startTrainingServer();
+
+// Start training capture mode (if enabled)
+startTrainingCapture();
 
 connect();
