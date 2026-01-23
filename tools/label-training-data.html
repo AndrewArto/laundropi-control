@@ -434,9 +434,9 @@
 
         <div class="keyboard-hints">
           <span><span class="kbd">A</span> / <span class="kbd">D</span> Navigate</span>
+          <span><span class="kbd">Space</span> Next</span>
           <span><span class="kbd">R</span> Running</span>
           <span><span class="kbd">I</span> Idle</span>
-          <span><span class="kbd">Space</span> Next unlabeled</span>
         </div>
       </div>
 
@@ -573,6 +573,15 @@
 
     function prevFrame() { showFrame(state.currentFrameIndex - 1); }
     function nextFrame() { showFrame(state.currentFrameIndex + 1); }
+
+    function isFrameFullyLabeled(frameIndex) {
+      if (frameIndex < 0 || frameIndex >= state.frames.length) return false;
+      const frame = state.frames[frameIndex];
+      const machines = getMachines();
+      if (machines.length === 0) return false;
+      const frameLabels = state.labels[frame.id] || {};
+      return machines.every(m => frameLabels[m.id]);
+    }
 
     function nextUnlabeled() {
       const machines = getMachines();
@@ -887,8 +896,7 @@
         return;
       }
 
-      $('statusDot').className = 'status-dot connecting';
-      $('connectBtn').textContent = 'Connecting...';
+      $('connectBtn').innerHTML = '<span class="status-dot connecting" id="statusDot"></span> Connecting...';
 
       // Connect directly to Pi via Tailscale
       const wsUrl = `ws://${host}:${port}/training?camera=${encodeURIComponent(camera)}`;
@@ -898,8 +906,7 @@
       state.ws.onopen = () => {
         console.log('[training] WebSocket connected');
         state.isConnected = true;
-        $('statusDot').className = 'status-dot connected';
-        $('connectBtn').innerHTML = '<span class="status-dot connected"></span> Disconnect';
+        $('connectBtn').innerHTML = '<span class="status-dot connected" id="statusDot"></span> Disconnect';
         $('liveIndicator').style.display = 'block';
       };
 
@@ -934,9 +941,9 @@
               cameraPosition: msg.cameraPosition,
             });
 
-            // Auto-advance to newest frame if we're at the end
-            if (state.currentFrameIndex === state.frames.length - 2 || state.frames.length === 1) {
-              showFrame(state.frames.length - 1);
+            // Only show the first frame automatically, then wait for user to label all machines
+            if (state.frames.length === 1) {
+              showFrame(0);
             }
             updateStats();
             return;
@@ -975,8 +982,7 @@
         state.ws = null;
       }
       state.isConnected = false;
-      $('statusDot').className = 'status-dot disconnected';
-      $('connectBtn').innerHTML = '<span class="status-dot disconnected"></span> Connect Live';
+      $('connectBtn').innerHTML = '<span class="status-dot disconnected" id="statusDot"></span> Connect Live';
       $('liveIndicator').style.display = 'none';
     }
 
@@ -1083,7 +1089,7 @@
           break;
         case ' ':
           e.preventDefault();
-          nextUnlabeled();
+          nextFrame();
           break;
       }
     });

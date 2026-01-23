@@ -17,7 +17,10 @@ import type { LaundryMachine, MachineStatus, MachineType } from '../../types';
 
 // Training data collection directory
 const TRAINING_DATA_DIR = '/tmp/machine-detection-frames';
-const SAVE_FRAMES_INTERVAL = 60_000; // Save frames every 60 seconds
+const SAVE_FRAMES_INTERVAL = 10 * 60 * 1000; // Save frames every 10 minutes
+const SAVE_FRAMES_MAX_COUNT = 1000; // Keep up to 1000 frames per camera
+const OPERATING_HOURS_START = 7; // 07:00
+const OPERATING_HOURS_END = 1; // 01:00 (next day)
 let lastFrameSaveTime = 0;
 
 // Machine region configuration
@@ -137,7 +140,19 @@ function detectClothesInDrum(
 }
 
 /**
+ * Check if current time is within operating hours (07:00 - 01:00).
+ */
+function isWithinOperatingHours(): boolean {
+  const now = new Date();
+  const hour = now.getHours();
+  // Operating hours: 07:00 to 01:00 (next day)
+  // This means: hour >= 7 OR hour < 1
+  return hour >= OPERATING_HOURS_START || hour < OPERATING_HOURS_END;
+}
+
+/**
  * Save full frame as JPEG for training data collection.
+ * Only saves during operating hours (07:00 - 01:00) every 10 minutes.
  */
 function saveFrameForTraining(
   agentId: string,
@@ -145,9 +160,17 @@ function saveFrameForTraining(
   jpegBuffer: Buffer
 ): void {
   const now = Date.now();
+
+  // Check time interval
   if (now - lastFrameSaveTime < SAVE_FRAMES_INTERVAL) {
     return;
   }
+
+  // Only save during operating hours
+  if (!isWithinOperatingHours()) {
+    return;
+  }
+
   lastFrameSaveTime = now;
 
   try {
@@ -163,10 +186,10 @@ function saveFrameForTraining(
     fs.writeFileSync(filepath, jpegBuffer);
     console.log(`[Training] Saved frame: ${filepath}`);
 
-    // Clean up old files (keep last 200 per camera)
+    // Clean up old files (keep last SAVE_FRAMES_MAX_COUNT per camera)
     const files = fs.readdirSync(dir).sort().reverse();
-    if (files.length > 200) {
-      for (const file of files.slice(200)) {
+    if (files.length > SAVE_FRAMES_MAX_COUNT) {
+      for (const file of files.slice(SAVE_FRAMES_MAX_COUNT)) {
         fs.unlinkSync(path.join(dir, file));
       }
     }
