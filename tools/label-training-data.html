@@ -1,0 +1,1099 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WashControl - ML Training Data Labeler</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #0f172a;
+      color: #e2e8f0;
+      min-height: 100vh;
+    }
+
+    /* Layout */
+    .app { display: flex; height: 100vh; }
+    .sidebar {
+      width: 320px;
+      background: #1e293b;
+      padding: 20px;
+      overflow-y: auto;
+      border-right: 1px solid #334155;
+    }
+    .main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+    .toolbar {
+      background: #1e293b;
+      padding: 12px 20px;
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      border-bottom: 1px solid #334155;
+    }
+    .canvas-area {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      overflow: auto;
+    }
+
+    /* Typography */
+    h1 { font-size: 18px; color: #6366f1; margin-bottom: 20px; }
+    h2 { font-size: 14px; color: #94a3b8; margin-bottom: 12px; text-transform: uppercase; letter-spacing: 0.5px; }
+    h3 { font-size: 13px; color: #cbd5e1; margin-bottom: 8px; }
+
+    /* Form elements */
+    select, input, button {
+      padding: 8px 12px;
+      border-radius: 6px;
+      border: 1px solid #475569;
+      background: #334155;
+      color: #e2e8f0;
+      font-size: 13px;
+    }
+    select:focus, input:focus { outline: none; border-color: #6366f1; }
+    button {
+      background: #6366f1;
+      border-color: #6366f1;
+      cursor: pointer;
+      font-weight: 500;
+      transition: background 0.15s;
+    }
+    button:hover { background: #4f46e5; }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    button.secondary { background: #475569; border-color: #475569; }
+    button.secondary:hover { background: #64748b; }
+    button.success { background: #059669; border-color: #059669; }
+    button.success:hover { background: #047857; }
+    button.danger { background: #dc2626; border-color: #dc2626; }
+    button.danger:hover { background: #b91c1c; }
+
+    /* Sidebar sections */
+    .section {
+      background: #0f172a;
+      border-radius: 8px;
+      padding: 16px;
+      margin-bottom: 16px;
+    }
+    .section-row {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+    .section-row:last-child { margin-bottom: 0; }
+    .section-row select, .section-row input { flex: 1; }
+
+    /* Mode indicator */
+    .mode-indicator {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 16px;
+    }
+    .mode-btn {
+      flex: 1;
+      padding: 12px;
+      text-align: center;
+      border-radius: 8px;
+      cursor: pointer;
+      border: 2px solid transparent;
+      background: #334155;
+      transition: all 0.15s;
+    }
+    .mode-btn.active {
+      background: #1e3a5f;
+      border-color: #3b82f6;
+      color: #60a5fa;
+    }
+    .mode-btn:hover:not(.active) { background: #475569; }
+
+    /* Connection status */
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      display: inline-block;
+      margin-right: 6px;
+    }
+    .status-dot.connected { background: #10b981; }
+    .status-dot.disconnected { background: #ef4444; }
+    .status-dot.connecting { background: #f59e0b; animation: pulse 1s infinite; }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+
+    /* Stats */
+    .stats-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+    .stat-box {
+      background: #334155;
+      padding: 12px;
+      border-radius: 6px;
+      text-align: center;
+    }
+    .stat-value { font-size: 24px; font-weight: 600; color: #f8fafc; }
+    .stat-label { font-size: 11px; color: #94a3b8; text-transform: uppercase; }
+    .stat-box.running .stat-value { color: #10b981; }
+    .stat-box.idle .stat-value { color: #6b7280; }
+
+    /* Frame container */
+    .frame-container {
+      position: relative;
+      display: inline-block;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    .frame-container img {
+      display: block;
+      max-width: 100%;
+      max-height: calc(100vh - 200px);
+    }
+
+    /* Machine regions */
+    .region {
+      position: absolute;
+      border: 3px solid;
+      cursor: pointer;
+      display: flex;
+      align-items: flex-end;
+      justify-content: center;
+      font-size: 12px;
+      font-weight: 600;
+      text-shadow: 0 1px 3px rgba(0,0,0,0.8);
+      transition: transform 0.1s, box-shadow 0.1s;
+    }
+    .region:hover { transform: scale(1.02); }
+    .region.running {
+      border-color: #10b981;
+      background: rgba(16, 185, 129, 0.25);
+    }
+    .region.idle {
+      border-color: #6b7280;
+      background: rgba(107, 114, 128, 0.25);
+    }
+    .region.unlabeled {
+      border-color: #f59e0b;
+      background: rgba(245, 158, 11, 0.15);
+      animation: attention 2s infinite;
+    }
+    @keyframes attention {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.4); }
+      50% { box-shadow: 0 0 0 8px rgba(245, 158, 11, 0); }
+    }
+    .region.setup-mode {
+      cursor: move;
+      border-style: dashed;
+    }
+    .region.selected {
+      border-color: #3b82f6 !important;
+      box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.3);
+    }
+    .region-label {
+      background: rgba(0,0,0,0.8);
+      padding: 3px 8px;
+      border-radius: 4px;
+      margin-bottom: 4px;
+      white-space: nowrap;
+    }
+    .region.running .region-label { color: #10b981; }
+    .region.idle .region-label { color: #9ca3af; }
+    .region.unlabeled .region-label { color: #fbbf24; }
+
+    /* Resize handles */
+    .resize-handle {
+      position: absolute;
+      width: 12px;
+      height: 12px;
+      background: #3b82f6;
+      border: 2px solid white;
+      border-radius: 2px;
+    }
+    .resize-handle.nw { top: -6px; left: -6px; cursor: nw-resize; }
+    .resize-handle.ne { top: -6px; right: -6px; cursor: ne-resize; }
+    .resize-handle.sw { bottom: -6px; left: -6px; cursor: sw-resize; }
+    .resize-handle.se { bottom: -6px; right: -6px; cursor: se-resize; }
+
+    /* Keyboard hints */
+    .keyboard-hints {
+      display: flex;
+      gap: 16px;
+      font-size: 12px;
+      color: #64748b;
+    }
+    .kbd {
+      background: #334155;
+      padding: 2px 6px;
+      border-radius: 3px;
+      font-family: monospace;
+      font-size: 11px;
+    }
+
+    /* Export area */
+    .export-textarea {
+      width: 100%;
+      height: 120px;
+      background: #0f172a;
+      color: #10b981;
+      border: 1px solid #334155;
+      border-radius: 6px;
+      padding: 10px;
+      font-family: monospace;
+      font-size: 11px;
+      resize: vertical;
+    }
+
+    /* Progress */
+    .progress-bar {
+      height: 4px;
+      background: #334155;
+      border-radius: 2px;
+      overflow: hidden;
+      margin-top: 8px;
+    }
+    .progress-fill {
+      height: 100%;
+      background: linear-gradient(90deg, #6366f1, #8b5cf6);
+      transition: width 0.3s;
+    }
+
+    /* Frame nav */
+    .frame-nav {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+    .frame-counter {
+      background: #334155;
+      padding: 6px 12px;
+      border-radius: 6px;
+      font-family: monospace;
+      min-width: 100px;
+      text-align: center;
+    }
+
+    /* Live indicator */
+    .live-badge {
+      background: #dc2626;
+      color: white;
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 600;
+      animation: pulse 1.5s infinite;
+    }
+
+    /* Machine list in setup mode */
+    .machine-list {
+      max-height: 200px;
+      overflow-y: auto;
+    }
+    .machine-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px;
+      background: #334155;
+      border-radius: 4px;
+      margin-bottom: 4px;
+      cursor: pointer;
+    }
+    .machine-item:hover { background: #475569; }
+    .machine-item.selected { background: #1e3a5f; border: 1px solid #3b82f6; }
+    .machine-type {
+      font-size: 10px;
+      padding: 2px 6px;
+      border-radius: 3px;
+      text-transform: uppercase;
+    }
+    .machine-type.washer { background: #1e40af; color: #93c5fd; }
+    .machine-type.dryer { background: #7c2d12; color: #fdba74; }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <!-- Sidebar -->
+    <div class="sidebar">
+      <h1>WashControl ML Trainer</h1>
+
+      <!-- Mode Toggle -->
+      <div class="mode-indicator">
+        <div class="mode-btn" id="setupModeBtn" onclick="setMode('setup')">
+          <div>Setup</div>
+          <div style="font-size:11px;color:#64748b">Position regions</div>
+        </div>
+        <div class="mode-btn active" id="labelModeBtn" onclick="setMode('label')">
+          <div>Label</div>
+          <div style="font-size:11px;color:#64748b">Tag images</div>
+        </div>
+      </div>
+
+      <!-- Connection -->
+      <div class="section">
+        <h2>Connection (Direct to Pi)</h2>
+        <div class="section-row">
+          <select id="agentSelect">
+            <option value="LdBrandoa1" data-ip="100.107.170.119">LdBrandoa1</option>
+            <option value="LdBrandoa2" data-ip="100.126.119.4">LdBrandoa2</option>
+          </select>
+          <select id="cameraSelect">
+            <option value="front">Front</option>
+            <option value="back">Back</option>
+          </select>
+        </div>
+        <div class="section-row">
+          <input type="text" id="piHost" placeholder="Pi IP (Tailscale)" style="flex:2" />
+          <input type="text" id="piPort" value="4001" placeholder="Port" style="width:60px" />
+        </div>
+        <div class="section-row">
+          <button id="connectBtn" onclick="toggleConnection()">
+            <span class="status-dot disconnected" id="statusDot"></span>
+            Connect Live
+          </button>
+        </div>
+        <div class="section-row" style="margin-top:8px">
+          <label style="font-size:12px;color:#94a3b8;display:flex;align-items:center;gap:8px;cursor:pointer">
+            <input type="file" id="folderInput" webkitdirectory multiple style="display:none" />
+            <button class="secondary" onclick="document.getElementById('folderInput').click()">Load Folder</button>
+          </label>
+        </div>
+      </div>
+
+      <!-- Stats -->
+      <div class="section">
+        <h2>Session Stats</h2>
+        <div class="stats-grid">
+          <div class="stat-box">
+            <div class="stat-value" id="statFrames">0</div>
+            <div class="stat-label">Frames</div>
+          </div>
+          <div class="stat-box">
+            <div class="stat-value" id="statLabeled">0</div>
+            <div class="stat-label">Labeled</div>
+          </div>
+          <div class="stat-box running">
+            <div class="stat-value" id="statRunning">0</div>
+            <div class="stat-label">Running</div>
+          </div>
+          <div class="stat-box idle">
+            <div class="stat-value" id="statIdle">0</div>
+            <div class="stat-label">Idle</div>
+          </div>
+        </div>
+        <div class="progress-bar">
+          <div class="progress-fill" id="progressFill" style="width:0%"></div>
+        </div>
+      </div>
+
+      <!-- Setup Mode: Machine List -->
+      <div class="section" id="setupSection" style="display:none">
+        <h2>Machines</h2>
+        <div class="machine-list" id="machineList"></div>
+        <div class="section-row" style="margin-top:12px">
+          <button class="secondary" onclick="addMachine('washer')">+ Washer</button>
+          <button class="secondary" onclick="addMachine('dryer')">+ Dryer</button>
+        </div>
+      </div>
+
+      <!-- Export -->
+      <div class="section">
+        <h2>Export Dataset</h2>
+        <div class="section-row">
+          <button class="success" onclick="exportYOLO()">Export YOLO</button>
+          <button class="secondary" onclick="exportRegionConfig()">Export Regions</button>
+        </div>
+        <textarea class="export-textarea" id="exportArea" readonly placeholder="Export data will appear here..."></textarea>
+      </div>
+
+      <!-- Danger Zone -->
+      <div class="section">
+        <div class="section-row">
+          <button class="danger" onclick="clearAllData()">Clear All Data</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Main Area -->
+    <div class="main">
+      <div class="toolbar">
+        <div class="frame-nav">
+          <button onclick="prevFrame()" title="Previous (A or ←)">← Prev</button>
+          <div class="frame-counter" id="frameCounter">0 / 0</div>
+          <button onclick="nextFrame()" title="Next (D or →)">Next →</button>
+        </div>
+
+        <div id="liveIndicator" style="display:none">
+          <span class="live-badge">LIVE</span>
+          <button class="secondary" onclick="requestFrame()" style="margin-left:8px" title="Capture single frame">Capture</button>
+        </div>
+
+        <div style="flex:1"></div>
+
+        <div class="keyboard-hints">
+          <span><span class="kbd">A</span> / <span class="kbd">D</span> Navigate</span>
+          <span><span class="kbd">R</span> Running</span>
+          <span><span class="kbd">I</span> Idle</span>
+          <span><span class="kbd">Space</span> Next unlabeled</span>
+        </div>
+      </div>
+
+      <div class="canvas-area">
+        <div class="frame-container" id="frameContainer">
+          <img id="frameImage" src="" alt="Load images to begin" />
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // ========== STATE ==========
+    const state = {
+      mode: 'label', // 'setup' or 'label'
+      frames: [],
+      currentFrameIndex: 0,
+      labels: {}, // { frameId: { machineId: 'running'|'idle' } }
+      selectedMachineId: null,
+      isConnected: false,
+      ws: null,
+      isDragging: false,
+      isResizing: false,
+      didMove: false,
+      resizeHandle: null,
+      dragStart: { x: 0, y: 0 },
+      dragStartRegion: null,
+    };
+
+    // Machine configs per agent/camera (use LdBrandoa* IDs to match agent names)
+    const MACHINE_CONFIGS = {
+      LdBrandoa1: {
+        front: [
+          { id: 'w1', label: 'W1', type: 'washer', drum: { x: 0.02, y: 0.35, width: 0.09, height: 0.15 } },
+          { id: 'w2', label: 'W2', type: 'washer', drum: { x: 0.13, y: 0.35, width: 0.09, height: 0.15 } },
+          { id: 'w3', label: 'W3', type: 'washer', drum: { x: 0.24, y: 0.35, width: 0.09, height: 0.15 } },
+          { id: 'w4', label: 'W4', type: 'washer', drum: { x: 0.35, y: 0.35, width: 0.09, height: 0.15 } },
+          { id: 'd5', label: 'D5', type: 'dryer', drum: { x: 0.70, y: 0.20, width: 0.10, height: 0.15 } },
+          { id: 'd7', label: 'D7', type: 'dryer', drum: { x: 0.84, y: 0.20, width: 0.10, height: 0.15 } },
+          { id: 'd6', label: 'D6', type: 'dryer', drum: { x: 0.70, y: 0.50, width: 0.10, height: 0.15 } },
+          { id: 'd8', label: 'D8', type: 'dryer', drum: { x: 0.84, y: 0.50, width: 0.10, height: 0.15 } },
+        ],
+        back: [],
+      },
+      LdBrandoa2: {
+        front: [
+          { id: 'w1', label: 'W1', type: 'washer', drum: { x: 0.05, y: 0.50, width: 0.07, height: 0.38 } },
+          { id: 'w2', label: 'W2', type: 'washer', drum: { x: 0.13, y: 0.50, width: 0.08, height: 0.38 } },
+          { id: 'w3', label: 'W3', type: 'washer', drum: { x: 0.22, y: 0.50, width: 0.08, height: 0.38 } },
+          { id: 'w4', label: 'W4', type: 'washer', drum: { x: 0.32, y: 0.50, width: 0.09, height: 0.38 } },
+          { id: 'd1', label: 'D1', type: 'dryer', drum: { x: 0.73, y: 0.15, width: 0.07, height: 0.22 } },
+          { id: 'd2', label: 'D2', type: 'dryer', drum: { x: 0.81, y: 0.15, width: 0.07, height: 0.22 } },
+          { id: 'd3', label: 'D3', type: 'dryer', drum: { x: 0.89, y: 0.15, width: 0.07, height: 0.22 } },
+          { id: 'd4', label: 'D4', type: 'dryer', drum: { x: 0.73, y: 0.52, width: 0.07, height: 0.26 } },
+          { id: 'd5', label: 'D5', type: 'dryer', drum: { x: 0.81, y: 0.52, width: 0.07, height: 0.26 } },
+          { id: 'd6', label: 'D6', type: 'dryer', drum: { x: 0.89, y: 0.52, width: 0.07, height: 0.26 } },
+        ],
+        back: [],
+      },
+    };
+
+    // ========== DOM REFS ==========
+    const $ = id => document.getElementById(id);
+    const frameImage = $('frameImage');
+    const frameContainer = $('frameContainer');
+    const agentSelect = $('agentSelect');
+    const cameraSelect = $('cameraSelect');
+
+    // ========== MODE MANAGEMENT ==========
+    function setMode(mode) {
+      state.mode = mode;
+      state.selectedMachineId = null;
+
+      $('setupModeBtn').classList.toggle('active', mode === 'setup');
+      $('labelModeBtn').classList.toggle('active', mode === 'label');
+      $('setupSection').style.display = mode === 'setup' ? 'block' : 'none';
+
+      if (mode === 'setup') renderMachineList();
+      renderRegions();
+    }
+
+    // ========== MACHINE CONFIG ==========
+    function getMachines() {
+      return MACHINE_CONFIGS[agentSelect.value]?.[cameraSelect.value] || [];
+    }
+
+    function renderMachineList() {
+      const machines = getMachines();
+      const html = machines.map(m => `
+        <div class="machine-item ${state.selectedMachineId === m.id ? 'selected' : ''}"
+             onclick="selectMachine('${m.id}')">
+          <span>${m.label}</span>
+          <span class="machine-type ${m.type}">${m.type}</span>
+        </div>
+      `).join('');
+      $('machineList').innerHTML = html;
+    }
+
+    function selectMachine(id) {
+      state.selectedMachineId = state.selectedMachineId === id ? null : id;
+      renderMachineList();
+      renderRegions();
+    }
+
+    function addMachine(type) {
+      const machines = getMachines();
+      const prefix = type === 'washer' ? 'w' : 'd';
+      const nums = machines.filter(m => m.type === type).map(m => parseInt(m.id.slice(1)) || 0);
+      const nextNum = nums.length ? Math.max(...nums) + 1 : 1;
+
+      machines.push({
+        id: `${prefix}${nextNum}`,
+        label: `${prefix.toUpperCase()}${nextNum}`,
+        type,
+        drum: { x: 0.4, y: 0.4, width: 0.1, height: 0.15 }
+      });
+
+      saveRegionConfig();
+      renderMachineList();
+      renderRegions();
+    }
+
+    // ========== FRAME MANAGEMENT ==========
+    function showFrame(index) {
+      if (state.frames.length === 0) return;
+      state.currentFrameIndex = Math.max(0, Math.min(index, state.frames.length - 1));
+      const frame = state.frames[state.currentFrameIndex];
+
+      frameImage.src = frame.url;
+      $('frameCounter').textContent = `${state.currentFrameIndex + 1} / ${state.frames.length}`;
+
+      frameImage.onload = () => renderRegions();
+    }
+
+    function prevFrame() { showFrame(state.currentFrameIndex - 1); }
+    function nextFrame() { showFrame(state.currentFrameIndex + 1); }
+
+    function nextUnlabeled() {
+      const machines = getMachines();
+      for (let i = state.currentFrameIndex; i < state.frames.length; i++) {
+        const frameLabels = state.labels[state.frames[i].id] || {};
+        const unlabeled = machines.some(m => !frameLabels[m.id]);
+        if (unlabeled) {
+          showFrame(i);
+          return;
+        }
+      }
+      // Wrap around
+      for (let i = 0; i < state.currentFrameIndex; i++) {
+        const frameLabels = state.labels[state.frames[i].id] || {};
+        const unlabeled = machines.some(m => !frameLabels[m.id]);
+        if (unlabeled) {
+          showFrame(i);
+          return;
+        }
+      }
+    }
+
+    // ========== RENDERING ==========
+    function renderRegions() {
+      document.querySelectorAll('.region').forEach(el => el.remove());
+
+      const machines = getMachines();
+      const frame = state.frames[state.currentFrameIndex];
+      const frameLabels = state.labels[frame?.id] || {};
+
+      const imgWidth = frameImage.clientWidth;
+      const imgHeight = frameImage.clientHeight;
+      if (!imgWidth || !imgHeight) return;
+
+      machines.forEach(machine => {
+        const region = document.createElement('div');
+        region.className = 'region';
+        region.dataset.machineId = machine.id;
+
+        // Status class
+        const status = frameLabels[machine.id];
+        if (status === 'running') region.classList.add('running');
+        else if (status === 'idle') region.classList.add('idle');
+        else region.classList.add('unlabeled');
+
+        // Mode-specific styling
+        if (state.mode === 'setup') {
+          region.classList.add('setup-mode');
+          if (state.selectedMachineId === machine.id) region.classList.add('selected');
+        }
+
+        // Position
+        region.style.left = `${machine.drum.x * imgWidth}px`;
+        region.style.top = `${machine.drum.y * imgHeight}px`;
+        region.style.width = `${machine.drum.width * imgWidth}px`;
+        region.style.height = `${machine.drum.height * imgHeight}px`;
+
+        // Label
+        const statusText = status || '?';
+        region.innerHTML = `<span class="region-label">${machine.label}: ${statusText}</span>`;
+
+        // Resize handles in setup mode
+        if (state.mode === 'setup' && state.selectedMachineId === machine.id) {
+          ['nw', 'ne', 'sw', 'se'].forEach(pos => {
+            const handle = document.createElement('div');
+            handle.className = `resize-handle ${pos}`;
+            handle.dataset.handle = pos;
+            region.appendChild(handle);
+          });
+        }
+
+        // Events
+        region.addEventListener('mousedown', e => handleMouseDown(e, machine));
+
+        frameContainer.appendChild(region);
+      });
+    }
+
+    // ========== INTERACTION ==========
+    function handleMouseDown(e, machine) {
+      state.didMove = false;
+      state.dragStart = { x: e.clientX, y: e.clientY };
+      state.dragStartRegion = { ...machine.drum };
+
+      if (state.mode === 'setup') {
+        state.selectedMachineId = machine.id;
+        renderMachineList();
+
+        if (e.target.classList.contains('resize-handle')) {
+          state.isResizing = true;
+          state.resizeHandle = e.target.dataset.handle;
+        } else {
+          state.isDragging = true;
+        }
+        renderRegions();
+      }
+
+      e.preventDefault();
+    }
+
+    document.addEventListener('mousemove', e => {
+      if (!state.dragStartRegion) return;
+      if (state.mode !== 'setup') return;
+
+      const imgWidth = frameImage.clientWidth;
+      const imgHeight = frameImage.clientHeight;
+      const dx = (e.clientX - state.dragStart.x) / imgWidth;
+      const dy = (e.clientY - state.dragStart.y) / imgHeight;
+
+      if (Math.abs(dx) > 0.005 || Math.abs(dy) > 0.005) {
+        state.didMove = true;
+      }
+
+      const machine = getMachines().find(m => m.id === state.selectedMachineId);
+      if (!machine) return;
+
+      if (state.isResizing) {
+        const start = state.dragStartRegion;
+        switch (state.resizeHandle) {
+          case 'nw':
+            machine.drum.x = Math.max(0, start.x + dx);
+            machine.drum.y = Math.max(0, start.y + dy);
+            machine.drum.width = Math.max(0.02, start.width - dx);
+            machine.drum.height = Math.max(0.02, start.height - dy);
+            break;
+          case 'ne':
+            machine.drum.y = Math.max(0, start.y + dy);
+            machine.drum.width = Math.max(0.02, start.width + dx);
+            machine.drum.height = Math.max(0.02, start.height - dy);
+            break;
+          case 'sw':
+            machine.drum.x = Math.max(0, start.x + dx);
+            machine.drum.width = Math.max(0.02, start.width - dx);
+            machine.drum.height = Math.max(0.02, start.height + dy);
+            break;
+          case 'se':
+            machine.drum.width = Math.max(0.02, start.width + dx);
+            machine.drum.height = Math.max(0.02, start.height + dy);
+            break;
+        }
+      } else if (state.isDragging) {
+        machine.drum.x = Math.max(0, Math.min(1 - machine.drum.width, state.dragStartRegion.x + dx));
+        machine.drum.y = Math.max(0, Math.min(1 - machine.drum.height, state.dragStartRegion.y + dy));
+      }
+
+      renderRegions();
+    });
+
+    document.addEventListener('mouseup', e => {
+      if (state.mode === 'label' && state.dragStartRegion && !state.didMove) {
+        // Toggle label on click
+        const machine = getMachines().find(m => m.id === state.selectedMachineId);
+        if (!machine) {
+          // Find which machine was clicked
+          const clicked = e.target.closest('.region');
+          if (clicked) {
+            toggleLabel(clicked.dataset.machineId);
+          }
+        }
+      }
+
+      // In label mode, any click on a region toggles it
+      if (state.mode === 'label') {
+        const clicked = e.target.closest('.region');
+        if (clicked && !state.didMove) {
+          toggleLabel(clicked.dataset.machineId);
+        }
+      }
+
+      if (state.didMove && state.mode === 'setup') {
+        saveRegionConfig();
+      }
+
+      state.dragStartRegion = null;
+      state.isDragging = false;
+      state.isResizing = false;
+      state.resizeHandle = null;
+      state.didMove = false;
+    });
+
+    function toggleLabel(machineId) {
+      const frame = state.frames[state.currentFrameIndex];
+      if (!frame) return;
+
+      if (!state.labels[frame.id]) state.labels[frame.id] = {};
+
+      const current = state.labels[frame.id][machineId];
+      if (!current) state.labels[frame.id][machineId] = 'running';
+      else if (current === 'running') state.labels[frame.id][machineId] = 'idle';
+      else delete state.labels[frame.id][machineId];
+
+      saveLabels();
+      renderRegions();
+      updateStats();
+    }
+
+    function setLabelForSelected(status) {
+      const frame = state.frames[state.currentFrameIndex];
+      if (!frame) return;
+
+      // Apply to all unlabeled machines
+      const machines = getMachines();
+      if (!state.labels[frame.id]) state.labels[frame.id] = {};
+
+      machines.forEach(m => {
+        if (!state.labels[frame.id][m.id]) {
+          state.labels[frame.id][m.id] = status;
+        }
+      });
+
+      saveLabels();
+      renderRegions();
+      updateStats();
+    }
+
+    // ========== STATS ==========
+    function updateStats() {
+      const machines = getMachines();
+      let totalLabeled = 0, running = 0, idle = 0;
+
+      Object.values(state.labels).forEach(frameLabels => {
+        Object.values(frameLabels).forEach(status => {
+          totalLabeled++;
+          if (status === 'running') running++;
+          else if (status === 'idle') idle++;
+        });
+      });
+
+      const totalPossible = state.frames.length * machines.length;
+      const progress = totalPossible > 0 ? (totalLabeled / totalPossible * 100) : 0;
+
+      $('statFrames').textContent = state.frames.length;
+      $('statLabeled').textContent = totalLabeled;
+      $('statRunning').textContent = running;
+      $('statIdle').textContent = idle;
+      $('progressFill').style.width = `${progress}%`;
+    }
+
+    // ========== PERSISTENCE ==========
+    function saveLabels() {
+      localStorage.setItem('mlTrainer_labels', JSON.stringify(state.labels));
+    }
+
+    function saveRegionConfig() {
+      localStorage.setItem('mlTrainer_regions', JSON.stringify(MACHINE_CONFIGS));
+    }
+
+    function loadFromStorage() {
+      try {
+        const labels = localStorage.getItem('mlTrainer_labels');
+        if (labels) state.labels = JSON.parse(labels);
+
+        const regions = localStorage.getItem('mlTrainer_regions');
+        if (regions) {
+          const saved = JSON.parse(regions);
+          for (const agent in saved) {
+            for (const camera in saved[agent]) {
+              if (MACHINE_CONFIGS[agent]?.[camera]) {
+                MACHINE_CONFIGS[agent][camera] = saved[agent][camera];
+              }
+            }
+          }
+        }
+      } catch (e) {
+        console.error('Failed to load from storage:', e);
+      }
+      updateStats();
+    }
+
+    function clearAllData() {
+      if (!confirm('Delete ALL labels and reset regions? This cannot be undone.')) return;
+      state.labels = {};
+      localStorage.removeItem('mlTrainer_labels');
+      localStorage.removeItem('mlTrainer_regions');
+      location.reload();
+    }
+
+    // ========== CONNECTION ==========
+    // Agent IP addresses (Tailscale)
+    const AGENT_IPS = {
+      'LdBrandoa1': '100.107.170.119',
+      'LdBrandoa2': '100.126.119.4',
+    };
+
+    // Update IP field when agent selection changes
+    agentSelect.addEventListener('change', () => {
+      const ip = AGENT_IPS[agentSelect.value] || '';
+      $('piHost').value = ip;
+      state.selectedMachineId = null;
+      renderRegions();
+      renderMachineList();
+    });
+
+    // Initialize IP field
+    $('piHost').value = AGENT_IPS[agentSelect.value] || '';
+
+    function toggleConnection() {
+      if (state.isConnected) {
+        disconnect();
+      } else {
+        connect();
+      }
+    }
+
+    function connect() {
+      const camera = cameraSelect.value;
+      const host = $('piHost').value.trim();
+      const port = $('piPort').value.trim() || '4001';
+
+      if (!host) {
+        alert('Please enter the Pi IP address (Tailscale)');
+        return;
+      }
+
+      $('statusDot').className = 'status-dot connecting';
+      $('connectBtn').textContent = 'Connecting...';
+
+      // Connect directly to Pi via Tailscale
+      const wsUrl = `ws://${host}:${port}/training?camera=${encodeURIComponent(camera)}`;
+      console.log('[training] Connecting directly to Pi:', wsUrl);
+      state.ws = new WebSocket(wsUrl);
+
+      state.ws.onopen = () => {
+        console.log('[training] WebSocket connected');
+        state.isConnected = true;
+        $('statusDot').className = 'status-dot connected';
+        $('connectBtn').innerHTML = '<span class="status-dot connected"></span> Disconnect';
+        $('liveIndicator').style.display = 'block';
+      };
+
+      state.ws.onmessage = (e) => {
+        try {
+          const msg = JSON.parse(e.data);
+
+          if (msg.type === 'connected') {
+            console.log('[training] Session info:', msg);
+            if (!msg.cameraEnabled) {
+              alert(`Camera ${msg.cameraPosition} is not enabled for ${msg.agentId}. Enable it in the UI first.`);
+            }
+            return;
+          }
+
+          if (msg.type === 'frame') {
+            // Convert base64 to blob URL
+            const binary = atob(msg.data);
+            const bytes = new Uint8Array(binary.length);
+            for (let i = 0; i < binary.length; i++) {
+              bytes[i] = binary.charCodeAt(i);
+            }
+            const blob = new Blob([bytes], { type: msg.contentType || 'image/jpeg' });
+            const url = URL.createObjectURL(blob);
+
+            // Add frame to collection
+            state.frames.push({
+              id: msg.frameId,
+              url,
+              timestamp: msg.timestamp,
+              agentId: msg.agentId,
+              cameraPosition: msg.cameraPosition,
+            });
+
+            // Auto-advance to newest frame if we're at the end
+            if (state.currentFrameIndex === state.frames.length - 2 || state.frames.length === 1) {
+              showFrame(state.frames.length - 1);
+            }
+            updateStats();
+            return;
+          }
+
+          if (msg.type === 'error') {
+            console.error('[training] Server error:', msg.message);
+            return;
+          }
+
+          if (msg.type === 'pong') {
+            console.log('[training] Pong received, latency:', Date.now() - msg.ts, 'ms');
+            return;
+          }
+
+        } catch (err) {
+          console.error('[training] Failed to parse message:', err);
+        }
+      };
+
+      state.ws.onclose = (e) => {
+        console.log('[training] WebSocket closed:', e.code, e.reason);
+        disconnect();
+      };
+
+      state.ws.onerror = (err) => {
+        console.error('[training] WebSocket error:', err);
+        disconnect();
+        alert('Failed to connect. Make sure:\n1. The central server is running\n2. The agent is connected\n3. The camera is enabled');
+      };
+    }
+
+    function disconnect() {
+      if (state.ws) {
+        state.ws.close();
+        state.ws = null;
+      }
+      state.isConnected = false;
+      $('statusDot').className = 'status-dot disconnected';
+      $('connectBtn').innerHTML = '<span class="status-dot disconnected"></span> Connect Live';
+      $('liveIndicator').style.display = 'none';
+    }
+
+    // Request a single frame manually
+    function requestFrame() {
+      if (state.ws && state.ws.readyState === WebSocket.OPEN) {
+        state.ws.send(JSON.stringify({ type: 'request_frame' }));
+      }
+    }
+
+    // ========== FILE INPUT ==========
+    $('folderInput').addEventListener('change', async (e) => {
+      state.frames = [];
+      const files = Array.from(e.target.files)
+        .filter(f => /\.(jpg|jpeg|png)$/i.test(f.name))
+        .sort((a, b) => a.name.localeCompare(b.name));
+
+      for (const file of files) {
+        const url = URL.createObjectURL(file);
+        state.frames.push({ id: file.name, url, file });
+      }
+
+      if (state.frames.length > 0) {
+        showFrame(0);
+      }
+      updateStats();
+    });
+
+    // ========== EXPORT ==========
+    function exportYOLO() {
+      // YOLO classification format: one folder per class with cropped images
+      // Since we can't create files directly, we'll output instructions + data
+
+      const agent = agentSelect.value;
+      const camera = cameraSelect.value;
+      const machines = getMachines();
+
+      let output = `# YOLO Classification Dataset Export\n`;
+      output += `# Agent: ${agent}, Camera: ${camera}\n`;
+      output += `# Generated: ${new Date().toISOString()}\n\n`;
+      output += `# Directory structure:\n`;
+      output += `#   dataset/\n`;
+      output += `#     train/\n`;
+      output += `#       running/  (images of drums with clothes)\n`;
+      output += `#       idle/     (images of empty drums)\n`;
+      output += `#     val/\n`;
+      output += `#       running/\n`;
+      output += `#       idle/\n\n`;
+      output += `# Crop regions (normalized x, y, width, height):\n`;
+
+      machines.forEach(m => {
+        output += `# ${m.label}: ${m.drum.x.toFixed(3)}, ${m.drum.y.toFixed(3)}, ${m.drum.width.toFixed(3)}, ${m.drum.height.toFixed(3)}\n`;
+      });
+
+      output += `\n# Labels (filename, machine_id, class):\n`;
+
+      Object.entries(state.labels).forEach(([frameId, frameLabels]) => {
+        Object.entries(frameLabels).forEach(([machineId, status]) => {
+          output += `${frameId},${machineId},${status}\n`;
+        });
+      });
+
+      $('exportArea').value = output;
+    }
+
+    function exportRegionConfig() {
+      const agent = agentSelect.value;
+      const camera = cameraSelect.value;
+      const machines = MACHINE_CONFIGS[agent][camera];
+
+      let code = `// Machine config for ${agent} ${camera}\n`;
+      code += `// Copy to machineDetection.ts\n\n`;
+      code += `${camera}: [\n`;
+
+      machines.forEach(m => {
+        code += `  { id: '${m.id}', label: '${m.label}', type: '${m.type}', `;
+        code += `drum: { x: ${m.drum.x.toFixed(3)}, y: ${m.drum.y.toFixed(3)}, `;
+        code += `width: ${m.drum.width.toFixed(3)}, height: ${m.drum.height.toFixed(3)} } },\n`;
+      });
+
+      code += `],`;
+
+      $('exportArea').value = code;
+    }
+
+    // ========== KEYBOARD ==========
+    document.addEventListener('keydown', e => {
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+
+      switch (e.key.toLowerCase()) {
+        case 'a':
+        case 'arrowleft':
+          prevFrame();
+          break;
+        case 'd':
+        case 'arrowright':
+          nextFrame();
+          break;
+        case 'r':
+          setLabelForSelected('running');
+          break;
+        case 'i':
+          setLabelForSelected('idle');
+          break;
+        case ' ':
+          e.preventDefault();
+          nextUnlabeled();
+          break;
+      }
+    });
+
+    // ========== INIT ==========
+    agentSelect.addEventListener('change', () => { state.selectedMachineId = null; renderRegions(); renderMachineList(); });
+    cameraSelect.addEventListener('change', () => { state.selectedMachineId = null; renderRegions(); renderMachineList(); });
+    window.addEventListener('resize', () => renderRegions());
+
+    loadFromStorage();
+  </script>
+</body>
+</html>

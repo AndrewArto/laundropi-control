@@ -1,5 +1,7 @@
 import * as dotenv from 'dotenv';
+import * as http from 'http';
 import WebSocket = require('ws');
+import { WebSocketServer } from 'ws';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as sharp from 'sharp';
@@ -36,6 +38,9 @@ const CAMERA_FRAME_FETCH_TIMEOUT_MS = parseDurationMs(process.env.CAMERA_FRAME_F
 const CAMERA_FRAME_CACHE_MS = parseDurationMs(process.env.CAMERA_FRAME_CACHE_MS, 5000);
 const MACHINE_DETECTION_INTERVAL_MS = parseDurationMs(process.env.MACHINE_DETECTION_INTERVAL_MS, 10000); // 10s default
 const MACHINE_DETECTION_ENABLED = process.env.MACHINE_DETECTION_ENABLED !== 'false';
+const TRAINING_SERVER_PORT = parseDurationMs(process.env.TRAINING_SERVER_PORT, 4001);
+const TRAINING_SERVER_ENABLED = process.env.TRAINING_SERVER_ENABLED !== 'false';
+const TRAINING_FRAME_INTERVAL_MS = parseDurationMs(process.env.TRAINING_FRAME_INTERVAL_MS, 2000);
 
 let ws: WebSocket | null = null;
 let heartbeatTimer: NodeJS.Timeout | null = null;
@@ -447,5 +452,149 @@ function stopMachineDetection() {
     machineDetectionTimer = null;
   }
 }
+
+// ============================================================================
+// Training Server - Direct WebSocket for ML labeling (runs on Pi, no AWS proxy)
+// ============================================================================
+type TrainingClient = {
+  socket: WebSocket;
+  cameraPosition: string;
+  interval: NodeJS.Timeout | null;
+  frameCount: number;
+};
+
+const trainingClients = new Set<TrainingClient>();
+
+function startTrainingServer() {
+  if (!TRAINING_SERVER_ENABLED) {
+    console.log('[agent] training server disabled');
+    return;
+  }
+
+  const server = http.createServer((req, res) => {
+    // Simple health check endpoint
+    if (req.url === '/health') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, agentId: AGENT_ID, clients: trainingClients.size }));
+      return;
+    }
+    res.writeHead(404);
+    res.end('Not found');
+  });
+
+  const wss = new WebSocketServer({ server });
+
+  wss.on('connection', (socket, req) => {
+    // Parse camera position from URL: /training?camera=front
+    const url = new URL(req.url || '', `http://${req.headers.host}`);
+    const cameraPosition = url.searchParams.get('camera') || 'front';
+
+    console.log(`[training] Client connected for ${cameraPosition} camera`);
+
+    const client: TrainingClient = {
+      socket,
+      cameraPosition,
+      interval: null,
+      frameCount: 0,
+    };
+    trainingClients.add(client);
+
+    // Send welcome message
+    const camera = cameraConfigs.find(c => c.position === cameraPosition);
+    socket.send(JSON.stringify({
+      type: 'connected',
+      agentId: AGENT_ID,
+      cameraPosition,
+      cameraId: camera?.id || null,
+      cameraEnabled: camera?.enabled || false,
+      cameraConfigured: !!camera?.rtspUrl,
+      frameInterval: TRAINING_FRAME_INTERVAL_MS,
+    }));
+
+    // Start streaming frames
+    const streamFrame = async () => {
+      if (socket.readyState !== WebSocket.OPEN) return;
+
+      const camera = cameraConfigs.find(c => c.position === cameraPosition && c.enabled);
+      if (!camera) {
+        socket.send(JSON.stringify({
+          type: 'error',
+          message: `No enabled ${cameraPosition} camera configured`,
+        }));
+        return;
+      }
+
+      try {
+        const result = await getCameraFrame(camera);
+        if (result.ok) {
+          client.frameCount++;
+          const frameId = `${AGENT_ID}_${cameraPosition}_${Date.now()}_${client.frameCount}`;
+          socket.send(JSON.stringify({
+            type: 'frame',
+            frameId,
+            agentId: AGENT_ID,
+            cameraPosition,
+            timestamp: Date.now(),
+            contentType: result.contentType,
+            data: result.data, // Already base64
+          }));
+        } else {
+          socket.send(JSON.stringify({
+            type: 'error',
+            message: result.error || 'Failed to fetch frame',
+          }));
+        }
+      } catch (err) {
+        socket.send(JSON.stringify({
+          type: 'error',
+          message: err instanceof Error ? err.message : 'Frame fetch failed',
+        }));
+      }
+    };
+
+    // Start interval
+    client.interval = setInterval(streamFrame, TRAINING_FRAME_INTERVAL_MS);
+    // Send first frame immediately
+    void streamFrame();
+
+    // Handle client messages
+    socket.on('message', (data) => {
+      try {
+        const msg = JSON.parse(data.toString());
+        if (msg.type === 'ping') {
+          socket.send(JSON.stringify({ type: 'pong', ts: Date.now() }));
+        } else if (msg.type === 'request_frame') {
+          void streamFrame();
+        } else if (msg.type === 'set_camera') {
+          // Allow switching camera mid-session
+          client.cameraPosition = msg.camera || 'front';
+          console.log(`[training] Client switched to ${client.cameraPosition} camera`);
+        }
+      } catch (err) {
+        console.error('[training] Failed to parse message:', err);
+      }
+    });
+
+    socket.on('close', () => {
+      console.log(`[training] Client disconnected from ${cameraPosition}`);
+      if (client.interval) {
+        clearInterval(client.interval);
+        client.interval = null;
+      }
+      trainingClients.delete(client);
+    });
+
+    socket.on('error', (err) => {
+      console.error('[training] Socket error:', err);
+    });
+  });
+
+  server.listen(TRAINING_SERVER_PORT, '0.0.0.0', () => {
+    console.log(`[agent] Training server listening on ws://0.0.0.0:${TRAINING_SERVER_PORT}/training?camera=front|back`);
+  });
+}
+
+// Start training server
+startTrainingServer();
 
 connect();
