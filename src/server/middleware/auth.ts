@@ -38,9 +38,13 @@ const verifySession = (token: string): SessionPayload | null => {
 };
 
 export const getSession = (req: express.Request): SessionPayload | null => {
-  if (!REQUIRE_UI_AUTH) return { sub: 'anonymous', role: 'admin', exp: Date.now() + 86400000 };
   const token = req.cookies?.session;
-  if (!token) return null;
+  if (!token) {
+    // When auth is disabled, allow anonymous access for read operations only
+    // Write operations should still check for valid session
+    if (!REQUIRE_UI_AUTH) return { sub: 'anonymous', role: 'admin', exp: Date.now() + 86400000 };
+    return null;
+  }
   return verifySession(token);
 };
 

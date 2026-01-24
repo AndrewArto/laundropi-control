@@ -1249,6 +1249,12 @@ app.put('/api/revenue/:agentId', (req, res) => {
   if (!isKnownLaundry(agentId)) {
     return res.status(404).json({ error: 'agent not found' });
   }
+  // Require valid session with username for revenue modifications
+  const session = res.locals.user as SessionPayload | undefined;
+  if (!session?.sub || session.sub === 'unknown') {
+    return res.status(401).json({ error: 'authentication required to modify revenue' });
+  }
+  const username = session.sub;
   const entryDate = resolveEntryDate(req.body?.entryDate || (req.query?.date as string | undefined));
   const coinsTotal = parseMoney(req.body?.coinsTotal);
   const euroCoinsCount = parseCount(req.body?.euroCoinsCount);
@@ -1260,8 +1266,6 @@ app.put('/api/revenue/:agentId', (req, res) => {
   if (deductionsError) return res.status(400).json({ error: deductionsError });
   const deductionsTotal = roundMoney(deductions.reduce((sum, item) => sum + item.amount, 0));
   const now = Date.now();
-  const session = res.locals.user as SessionPayload | undefined;
-  const username = session?.sub || 'unknown';
   const existing = getRevenueEntry(agentId, entryDate);
 
   if (!existing) {

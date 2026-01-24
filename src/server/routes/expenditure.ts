@@ -63,7 +63,10 @@ function matchesIgnoredTransaction(
  */
 router.post('/imports', express.text({ type: '*/*', limit: '5mb' }), (req, res) => {
   const session = getSession(req);
-  const user = session?.sub || 'unknown';
+  if (!session?.sub || session.sub === 'unknown') {
+    return res.status(401).json({ error: 'authentication required' });
+  }
+  const user = session.sub;
 
   const csvContent = req.body;
   if (!csvContent || typeof csvContent !== 'string') {
@@ -265,7 +268,10 @@ router.get('/imports/:id', (req, res) => {
  */
 router.delete('/imports/:id', (req, res) => {
   const session = getSession(req);
-  const user = session?.sub || 'unknown';
+  if (!session?.sub || session.sub === 'unknown') {
+    return res.status(401).json({ error: 'authentication required' });
+  }
+  const user = session.sub;
 
   const importRow = getExpenditureImport(req.params.id);
   if (!importRow) {
@@ -288,7 +294,10 @@ router.delete('/imports/:id', (req, res) => {
  */
 router.put('/imports/:id', (req, res) => {
   const session = getSession(req);
-  const user = session?.sub || 'unknown';
+  if (!session?.sub || session.sub === 'unknown') {
+    return res.status(401).json({ error: 'authentication required' });
+  }
+  const user = session.sub;
 
   const importRow = getExpenditureImport(req.params.id);
   if (!importRow) {
@@ -323,7 +332,10 @@ router.put('/imports/:id', (req, res) => {
  */
 router.put('/transactions/:id', (req, res) => {
   const session = getSession(req);
-  const user = session?.sub || 'unknown';
+  if (!session?.sub || session.sub === 'unknown') {
+    return res.status(401).json({ error: 'authentication required' });
+  }
+  const user = session.sub;
 
   const transaction = getExpenditureTransaction(req.params.id);
   if (!transaction) {
@@ -368,7 +380,10 @@ router.put('/transactions/:id', (req, res) => {
  */
 router.post('/transactions/:id/assign', (req, res) => {
   const session = getSession(req);
-  const user = session?.sub || 'unknown';
+  if (!session?.sub || session.sub === 'unknown') {
+    return res.status(401).json({ error: 'authentication required' });
+  }
+  const user = session.sub;
 
   const transaction = getExpenditureTransaction(req.params.id);
   if (!transaction) {
@@ -469,7 +484,10 @@ router.post('/transactions/:id/assign', (req, res) => {
  */
 router.post('/transactions/:id/assign-stripe', (req, res) => {
   const session = getSession(req);
-  const user = session?.sub || 'unknown';
+  if (!session?.sub || session.sub === 'unknown') {
+    return res.status(401).json({ error: 'authentication required' });
+  }
+  const user = session.sub;
 
   const transaction = getExpenditureTransaction(req.params.id);
   if (!transaction) {
