@@ -72,28 +72,7 @@ export const MACHINE_CONFIGS: LaundryMachineConfig[] = [
       lidOpenBrightness: 80,
     },
     machines: [
-      // Front camera - 4 washers (calibrated 2026-01-24)
-      {
-        id: 'w1', label: 'W1', type: 'washer', camera: 'front',
-        drum: { x: 0.174, y: 0.114, width: 0.047, height: 0.157 },
-        display: { x: 0.176, y: 0.064, width: 0.042, height: 0.051 },
-      },
-      {
-        id: 'w2', label: 'W2', type: 'washer', camera: 'front',
-        drum: { x: 0.214, y: 0.152, width: 0.059, height: 0.200 },
-        display: { x: 0.217, y: 0.081, width: 0.041, height: 0.068 },
-      },
-      {
-        id: 'w3', label: 'W3', type: 'washer', camera: 'front',
-        drum: { x: 0.274, y: 0.199, width: 0.078, height: 0.239 },
-        display: { x: 0.275, y: 0.117, width: 0.065, height: 0.070 },
-      },
-      {
-        id: 'w4', label: 'W4', type: 'washer', camera: 'front',
-        drum: { x: 0.360, y: 0.260, width: 0.146, height: 0.307 },
-        display: { x: 0.389, y: 0.183, width: 0.069, height: 0.078 },
-      },
-      // Front camera - 4 dryers (calibrated 2026-01-24)
+      // Front camera - 4 dryers only (washers detected from back camera)
       {
         id: 'd5', label: 'D5', type: 'dryer', camera: 'front',
         drum: { x: 0.655, y: 0.141, width: 0.140, height: 0.287 },
