@@ -81,17 +81,17 @@ export const MACHINE_CONFIGS: LaundryMachineConfig[] = [
       {
         id: 'w2', label: 'W2', type: 'washer', camera: 'front',
         drum: { x: 0.217, y: 0.541, width: 0.143, height: 0.262 },
-        display: { x: 0.210, y: 0.355, width: 0.045, height: 0.030 },
+        display: { x: 0.245, y: 0.417, width: 0.047, height: 0.037 },
       },
       {
         id: 'w3', label: 'W3', type: 'washer', camera: 'front',
         drum: { x: 0.394, y: 0.391, width: 0.131, height: 0.247 },
-        display: { x: 0.395, y: 0.270, width: 0.035, height: 0.022 },
+        display: { x: 0.432, y: 0.333, width: 0.036, height: 0.033 },
       },
       {
         id: 'w4', label: 'W4', type: 'washer', camera: 'front',
         drum: { x: 0.559, y: 0.275, width: 0.074, height: 0.226 },
-        display: { x: 0.555, y: 0.175, width: 0.030, height: 0.020 },
+        display: { x: 0.578, y: 0.269, width: 0.031, height: 0.031 },
       },
       // Back camera - 4 dryers (shows dryers in UI)
       {
