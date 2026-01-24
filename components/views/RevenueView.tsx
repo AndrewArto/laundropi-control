@@ -457,6 +457,9 @@ export const RevenueView: React.FC<RevenueViewProps> = (props) => {
         if (isGeneral) {
           const isExpanded = expandedAgents.has(laundry.id);
           const totalCosts = entry?.deductionsTotal ?? 0;
+          // Fix costs totals: profitLoss is negative (deductions only, no revenue)
+          const weekFixCosts = Math.abs(weekProfitLoss);
+          const monthFixCosts = Math.abs(monthProfitLoss);
 
           return (
             <div key={laundry.id} className="bg-slate-800 border border-purple-500/30 rounded-xl overflow-hidden">
@@ -481,10 +484,17 @@ export const RevenueView: React.FC<RevenueViewProps> = (props) => {
                     </div>
                   </div>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap justify-end">
+                  {(weekFixCosts > 0 || monthFixCosts > 0) && (
+                    <div className="flex items-center gap-2 text-xs text-purple-300">
+                      <span>Week: €{formatMoney(weekFixCosts)}</span>
+                      <span className="text-slate-600">|</span>
+                      <span>Month: €{formatMoney(monthFixCosts)}</span>
+                    </div>
+                  )}
                   {totalCosts > 0 && (
                     <span className="text-sm font-semibold text-red-400">
-                      €{formatMoney(totalCosts)}
+                      Today: €{formatMoney(totalCosts)}
                     </span>
                   )}
                   {entry?.hasEdits && (
