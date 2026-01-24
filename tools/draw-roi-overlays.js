@@ -19,7 +19,7 @@ const CONFIGS = {
       display: { x: 0.078, y: 0.465, width: 0.045, height: 0.030 } },
     { id: 'w2', label: 'W2', type: 'washer',
       drum: { x: 0.217, y: 0.541, width: 0.143, height: 0.262 },
-      display: { x: 0.245, y: 0.417, width: 0.047, height: 0.037 } },
+      display: { x: 0.260, y: 0.450, width: 0.040, height: 0.030 } },
     { id: 'w3', label: 'W3', type: 'washer',
       drum: { x: 0.394, y: 0.391, width: 0.131, height: 0.247 },
       display: { x: 0.432, y: 0.333, width: 0.036, height: 0.033 } },
