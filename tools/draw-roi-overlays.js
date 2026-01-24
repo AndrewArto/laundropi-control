@@ -22,10 +22,10 @@ const CONFIGS = {
       display: { x: 0.210, y: 0.355, width: 0.045, height: 0.030 } },
     { id: 'w3', label: 'W3', type: 'washer',
       drum: { x: 0.394, y: 0.391, width: 0.131, height: 0.247 },
-      display: { x: 0.400, y: 0.250, width: 0.040, height: 0.025 } },
+      display: { x: 0.395, y: 0.270, width: 0.035, height: 0.022 } },
     { id: 'w4', label: 'W4', type: 'washer',
       drum: { x: 0.559, y: 0.275, width: 0.074, height: 0.226 },
-      display: { x: 0.560, y: 0.170, width: 0.035, height: 0.022 } },
+      display: { x: 0.555, y: 0.175, width: 0.030, height: 0.020 } },
   ],
   brandoa1_back: [
     // 4 dryers
