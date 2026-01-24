@@ -119,28 +119,36 @@ const MonthlyLineChart: React.FC<LineChartProps> = ({ data, formatMoney }) => {
   const chartWidth = width - padding.left - padding.right;
   const chartHeight = height - padding.top - padding.bottom;
 
-  // Calculate min/max values across all series
-  const allValues = data.flatMap(d => [d.revenue, d.costs, d.profitLoss]);
+  // Filter valid data points (non-NaN) for calculating scales
+  const validData = data.filter(d => !isNaN(d.revenue));
+  const allValues = validData.flatMap(d => [d.revenue, d.costs, d.profitLoss]);
   const minValue = Math.min(0, ...allValues);
   const maxValue = Math.max(...allValues);
   const valueRange = maxValue - minValue || 1;
 
-  // Scale functions
+  // Scale functions - use full data length for X to show full month
   const xScale = (index: number) => padding.left + (index / (data.length - 1 || 1)) * chartWidth;
   const yScale = (value: number) => padding.top + chartHeight - ((value - minValue) / valueRange) * chartHeight;
 
-  // Generate path strings
-  const generatePath = (values: number[]) => {
-    return values.map((v, i) => {
+  // Generate path strings - only for valid (non-NaN) values
+  const generatePath = (getValue: (d: LineChartDataPoint) => number) => {
+    let pathStarted = false;
+    return data.map((d, i) => {
+      const v = getValue(d);
+      if (isNaN(v)) return '';
       const x = xScale(i);
       const y = yScale(v);
-      return i === 0 ? `M ${x} ${y}` : `L ${x} ${y}`;
+      if (!pathStarted) {
+        pathStarted = true;
+        return `M ${x} ${y}`;
+      }
+      return `L ${x} ${y}`;
     }).join(' ');
   };
 
-  const revenuePath = generatePath(data.map(d => d.revenue));
-  const costsPath = generatePath(data.map(d => d.costs));
-  const plPath = generatePath(data.map(d => d.profitLoss));
+  const revenuePath = generatePath(d => d.revenue);
+  const costsPath = generatePath(d => d.costs);
+  const plPath = generatePath(d => d.profitLoss);
 
   // Y-axis ticks
   const yTicks = 5;
@@ -238,14 +246,17 @@ const MonthlyLineChart: React.FC<LineChartProps> = ({ data, formatMoney }) => {
           strokeLinejoin="round"
         />
 
-        {/* Data points */}
-        {data.map((d, i) => (
-          <g key={i}>
-            <circle cx={xScale(i)} cy={yScale(d.revenue)} r={3} fill="white" />
-            <circle cx={xScale(i)} cy={yScale(d.costs)} r={3} fill="#f87171" />
-            <circle cx={xScale(i)} cy={yScale(d.profitLoss)} r={3} fill="#34d399" />
-          </g>
-        ))}
+        {/* Data points - only for valid (non-NaN) values */}
+        {data.map((d, i) => {
+          if (isNaN(d.revenue)) return null;
+          return (
+            <g key={i}>
+              <circle cx={xScale(i)} cy={yScale(d.revenue)} r={3} fill="white" />
+              <circle cx={xScale(i)} cy={yScale(d.costs)} r={3} fill="#f87171" />
+              <circle cx={xScale(i)} cy={yScale(d.profitLoss)} r={3} fill="#34d399" />
+            </g>
+          );
+        })}
       </svg>
 
       {/* Legend */}
@@ -367,16 +378,17 @@ export const RevenueView: React.FC<RevenueViewProps> = (props) => {
     });
   };
 
-  // Fetch monthly chart data when expanded (cumulative)
-  const fetchChartData = useCallback(async (startDate: string, endDate: string) => {
+  // Fetch monthly chart data when expanded (cumulative, up to selected date)
+  const fetchChartData = useCallback(async (startDate: string, endDate: string, currentDate: string) => {
     setChartLoading(true);
     try {
-      const entries = await ApiService.listRevenueEntries({ startDate, endDate });
+      // Only fetch entries up to the current selected date
+      const entries = await ApiService.listRevenueEntries({ startDate, endDate: currentDate });
 
       // Group entries by date and sum up daily revenue/costs/P&L
       const dailyMap = new Map<string, { revenue: number; costs: number; profitLoss: number }>();
 
-      // Initialize all days in the range
+      // Initialize all days in the full month range (for X-axis)
       const start = new Date(startDate);
       const end = new Date(endDate);
       for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
@@ -384,7 +396,7 @@ export const RevenueView: React.FC<RevenueViewProps> = (props) => {
         dailyMap.set(dateStr, { revenue: 0, costs: 0, profitLoss: 0 });
       }
 
-      // Aggregate entries per day
+      // Aggregate entries per day (all agents' deductions are already included in each entry)
       for (const entry of entries) {
         const existing = dailyMap.get(entry.entryDate) || { revenue: 0, costs: 0, profitLoss: 0 };
         const revenue = (entry.coinsTotal || 0) + (entry.billsTotal || 0);
@@ -395,16 +407,21 @@ export const RevenueView: React.FC<RevenueViewProps> = (props) => {
         dailyMap.set(entry.entryDate, existing);
       }
 
-      // Convert to array sorted by date, then make cumulative
+      // Convert to array sorted by date, then make cumulative up to currentDate
       const sortedDaily = Array.from(dailyMap.entries()).sort(([a], [b]) => a.localeCompare(b));
       let cumRevenue = 0;
       let cumCosts = 0;
       let cumPL = 0;
       const chartPoints: LineChartDataPoint[] = sortedDaily.map(([date, values]) => {
-        cumRevenue += values.revenue;
-        cumCosts += values.costs;
-        cumPL += values.profitLoss;
-        return { date, revenue: cumRevenue, costs: cumCosts, profitLoss: cumPL };
+        // Only accumulate values up to and including currentDate
+        if (date <= currentDate) {
+          cumRevenue += values.revenue;
+          cumCosts += values.costs;
+          cumPL += values.profitLoss;
+          return { date, revenue: cumRevenue, costs: cumCosts, profitLoss: cumPL };
+        }
+        // Future dates: return null values (will be filtered in chart)
+        return { date, revenue: NaN, costs: NaN, profitLoss: NaN };
       });
 
       setChartData(chartPoints);
@@ -416,12 +433,12 @@ export const RevenueView: React.FC<RevenueViewProps> = (props) => {
     }
   }, []);
 
-  // Load chart data when expanded
+  // Load chart data when expanded or date changes
   useEffect(() => {
     if (chartExpanded && props.revenueSummary) {
-      fetchChartData(props.revenueSummary.month.startDate, props.revenueSummary.month.endDate);
+      fetchChartData(props.revenueSummary.month.startDate, props.revenueSummary.month.endDate, props.revenueDate);
     }
-  }, [chartExpanded, props.revenueSummary, fetchChartData]);
+  }, [chartExpanded, props.revenueSummary, props.revenueDate, fetchChartData]);
 
   const {
     authUser,
@@ -604,30 +621,32 @@ export const RevenueView: React.FC<RevenueViewProps> = (props) => {
             </button>
           </div>
         </div>
-        <button
-          type="button"
-          onClick={() => setIsRevenueCalendarOpen(prev => !prev)}
-          className="flex items-center justify-between gap-2 px-3 py-2 text-xs rounded-md border border-slate-600 text-slate-300 hover:border-slate-500 hover:text-white sm:justify-start"
-          aria-expanded={isRevenueCalendarOpen}
-        >
-          <span className="flex items-center gap-2">
-            <CalendarClock className="w-4 h-4" />
-            Calendar
-          </span>
-          {isRevenueCalendarOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-        </button>
-        <button
-          type="button"
-          onClick={() => setChartExpanded(prev => !prev)}
-          className="flex items-center justify-between gap-2 px-3 py-2 text-xs rounded-md border border-slate-600 text-slate-300 hover:border-slate-500 hover:text-white sm:justify-start"
-          aria-expanded={chartExpanded}
-        >
-          <span className="flex items-center gap-2">
-            <TrendingUp className="w-4 h-4" />
-            Trend
-          </span>
-          {chartExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setIsRevenueCalendarOpen(prev => !prev)}
+            className="flex items-center justify-between gap-2 px-3 py-2 text-xs rounded-md border border-slate-600 text-slate-300 hover:border-slate-500 hover:text-white sm:justify-start"
+            aria-expanded={isRevenueCalendarOpen}
+          >
+            <span className="flex items-center gap-2">
+              <CalendarClock className="w-4 h-4" />
+              Calendar
+            </span>
+            {isRevenueCalendarOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+          </button>
+          <button
+            type="button"
+            onClick={() => setChartExpanded(prev => !prev)}
+            className="flex items-center justify-between gap-2 px-3 py-2 text-xs rounded-md border border-slate-600 text-slate-300 hover:border-slate-500 hover:text-white sm:justify-start"
+            aria-expanded={chartExpanded}
+          >
+            <span className="flex items-center gap-2">
+              <TrendingUp className="w-4 h-4" />
+              Trend
+            </span>
+            {chartExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+          </button>
+        </div>
       </div>
 
       {isRevenueCalendarOpen && renderRevenueCalendar()}
