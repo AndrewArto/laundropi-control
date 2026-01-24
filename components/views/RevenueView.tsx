@@ -651,6 +651,20 @@ export const RevenueView: React.FC<RevenueViewProps> = (props) => {
 
       {isRevenueCalendarOpen && renderRevenueCalendar()}
 
+      {/* Monthly Line Chart (when expanded via Trend button) - before pie charts */}
+      {chartExpanded && revenueSummary && (
+        <div className="bg-slate-800 border border-slate-700 rounded-xl p-4">
+          <div className="text-xs text-slate-500 mb-3">
+            Cumulative trend: {revenueSummary.month.startDate} → {revenueSummary.month.endDate}
+          </div>
+          {chartLoading ? (
+            <div className="text-sm text-slate-400 py-4">Loading chart data...</div>
+          ) : (
+            <MonthlyLineChart data={chartData} formatMoney={formatMoney} />
+          )}
+        </div>
+      )}
+
       {revenueError && (
         <div className="bg-red-500/10 border border-red-500/40 text-red-200 px-3 py-2 rounded-lg text-sm">
           {revenueError}
@@ -689,20 +703,6 @@ export const RevenueView: React.FC<RevenueViewProps> = (props) => {
           </div>
         );
       })()}
-
-      {/* Monthly Line Chart (when expanded via Trend button) */}
-      {chartExpanded && revenueSummary && (
-        <div className="bg-slate-800 border border-slate-700 rounded-xl p-4">
-          <div className="text-xs text-slate-500 mb-3">
-            Cumulative trend: {revenueSummary.month.startDate} → {revenueSummary.month.endDate}
-          </div>
-          {chartLoading ? (
-            <div className="text-sm text-slate-400 py-4">Loading chart data...</div>
-          ) : (
-            <MonthlyLineChart data={chartData} formatMoney={formatMoney} />
-          )}
-        </div>
-      )}
 
       {revenueLoading && (
         <div className="text-sm text-slate-400">Loading revenue data...</div>
