@@ -109,6 +109,9 @@ interface LineChartProps {
 }
 
 const MonthlyLineChart: React.FC<LineChartProps> = ({ data, formatMoney }) => {
+  const [hoverIndex, setHoverIndex] = useState<number | null>(null);
+  const svgRef = React.useRef<SVGSVGElement>(null);
+
   if (data.length === 0) {
     return <div className="text-sm text-slate-400 p-4">No data available for this month.</div>;
   }
@@ -157,9 +160,33 @@ const MonthlyLineChart: React.FC<LineChartProps> = ({ data, formatMoney }) => {
   // X-axis labels (show every few days to avoid crowding)
   const xLabelInterval = Math.max(1, Math.floor(data.length / 6));
 
+  // Handle mouse move on chart
+  const handleMouseMove = (e: React.MouseEvent<SVGSVGElement>) => {
+    if (!svgRef.current) return;
+    const rect = svgRef.current.getBoundingClientRect();
+    const svgX = ((e.clientX - rect.left) / rect.width) * width;
+    // Find closest data point index
+    const relX = svgX - padding.left;
+    const index = Math.round((relX / chartWidth) * (data.length - 1));
+    if (index >= 0 && index < data.length) {
+      setHoverIndex(index);
+    }
+  };
+
+  const handleMouseLeave = () => setHoverIndex(null);
+
+  const hoverData = hoverIndex !== null ? data[hoverIndex] : null;
+  const hoverX = hoverIndex !== null ? xScale(hoverIndex) : 0;
+
   return (
     <div className="w-full overflow-x-auto">
-      <svg viewBox={`0 0 ${width} ${height}`} className="min-w-[600px] w-full h-auto">
+      <svg
+        ref={svgRef}
+        viewBox={`0 0 ${width} ${height}`}
+        className="min-w-[600px] w-full h-auto"
+        onMouseMove={handleMouseMove}
+        onMouseLeave={handleMouseLeave}
+      >
         {/* Grid lines */}
         {yTickValues.map((val, i) => (
           <line
@@ -257,23 +284,57 @@ const MonthlyLineChart: React.FC<LineChartProps> = ({ data, formatMoney }) => {
             </g>
           );
         })}
+
+        {/* Crosshair */}
+        {hoverIndex !== null && hoverData && !isNaN(hoverData.revenue) && (
+          <g>
+            {/* Vertical line */}
+            <line
+              x1={hoverX}
+              y1={padding.top}
+              x2={hoverX}
+              y2={height - padding.bottom}
+              stroke="#94a3b8"
+              strokeWidth={1}
+              strokeDasharray="4 2"
+            />
+            {/* Highlighted points */}
+            <circle cx={hoverX} cy={yScale(hoverData.revenue)} r={5} fill="white" stroke="#1e293b" strokeWidth={2} />
+            <circle cx={hoverX} cy={yScale(hoverData.costs)} r={5} fill="#f87171" stroke="#1e293b" strokeWidth={2} />
+            <circle cx={hoverX} cy={yScale(hoverData.profitLoss)} r={5} fill="#34d399" stroke="#1e293b" strokeWidth={2} />
+          </g>
+        )}
       </svg>
 
-      {/* Legend */}
-      <div className="flex gap-4 justify-center mt-2 text-xs">
-        <div className="flex items-center gap-1">
-          <div className="w-3 h-0.5 bg-white" />
-          <span className="text-slate-400">Revenue</span>
+      {/* Tooltip / Values display */}
+      {hoverIndex !== null && hoverData && !isNaN(hoverData.revenue) && (
+        <div className="flex gap-4 justify-center mt-1 text-xs bg-slate-900/80 rounded px-3 py-1.5">
+          <span className="text-slate-400">{hoverData.date.split('-')[2]}/{hoverData.date.split('-')[1]}</span>
+          <span className="text-white">Rev: €{formatMoney(hoverData.revenue)}</span>
+          <span className="text-red-400">Cost: €{formatMoney(hoverData.costs)}</span>
+          <span className={hoverData.profitLoss >= 0 ? 'text-emerald-400' : 'text-red-400'}>
+            P/L: €{formatMoney(hoverData.profitLoss)}
+          </span>
         </div>
-        <div className="flex items-center gap-1">
-          <div className="w-3 h-0.5 bg-red-400" />
-          <span className="text-slate-400">Costs</span>
+      )}
+
+      {/* Legend (show when not hovering) */}
+      {hoverIndex === null && (
+        <div className="flex gap-4 justify-center mt-2 text-xs">
+          <div className="flex items-center gap-1">
+            <div className="w-3 h-0.5 bg-white" />
+            <span className="text-slate-400">Revenue</span>
+          </div>
+          <div className="flex items-center gap-1">
+            <div className="w-3 h-0.5 bg-red-400" />
+            <span className="text-slate-400">Costs</span>
+          </div>
+          <div className="flex items-center gap-1">
+            <div className="w-3 h-0.5 bg-emerald-400" />
+            <span className="text-slate-400">P/L</span>
+          </div>
         </div>
-        <div className="flex items-center gap-1">
-          <div className="w-3 h-0.5 bg-emerald-400" />
-          <span className="text-slate-400">P/L</span>
-        </div>
-      </div>
+      )}
     </div>
   );
 };
