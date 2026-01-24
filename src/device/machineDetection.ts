@@ -1,95 +1,215 @@
 /**
  * Machine status detection via camera frame analysis.
  *
- * Three-criteria detection:
- * 1. Display: Dark = always OFF, Lit = could be either state
- * 2. Lid: Open = always OFF, Closed = could be either state
- * 3. Clothes inside: Yes = always ON, No = always OFF
+ * Three-criteria detection (ROI-based, no ML):
+ * 1. Display: Dark = IDLE (definitive), Lit = could be either
+ * 2. Lid: Open = IDLE (definitive), Closed = could be either
+ * 3. Clothes in drum: Yes = RUNNING (definitive), No = could be either
  *
- * Priority: Clothes visible → ON (overrides display state)
+ * Decision logic:
+ * - If clothes visible → RUNNING (highest priority)
+ * - Else if display is off → IDLE
+ * - Else if lid is open → IDLE
+ * - Else → RUNNING (display on, lid closed, no clothes visible but could be running)
  *
- * Also saves frames for ML training data collection.
+ * Washer layout: Display is centered above the drum
+ * Dryer layout: Stacked in columns of 2, display in middle of column
+ *   - Top dryer: display on left side of middle section
+ *   - Bottom dryer: display on right side of middle section
  */
 
 import * as fs from 'fs';
 import * as path from 'path';
 import type { LaundryMachine, MachineStatus, MachineType } from '../../types';
 
-// Training data collection directory
+// Training data collection
 const TRAINING_DATA_DIR = '/tmp/machine-detection-frames';
-const SAVE_FRAMES_INTERVAL = 10 * 60 * 1000; // Save frames every 10 minutes
-const SAVE_FRAMES_MAX_COUNT = 1000; // Keep up to 1000 frames per camera
+const SAVE_FRAMES_INTERVAL = 10 * 60 * 1000; // 10 minutes
+const SAVE_FRAMES_MAX_COUNT = 1000;
 const OPERATING_HOURS_START = 7; // 07:00
 const OPERATING_HOURS_END = 1; // 01:00 (next day)
 let lastFrameSaveTime = 0;
 
-// Machine region configuration
+// ROI (Region of Interest) definition
+interface ROI {
+  x: number;      // normalized 0-1
+  y: number;      // normalized 0-1
+  width: number;  // normalized 0-1
+  height: number; // normalized 0-1
+}
+
+// Machine region configuration with all three ROIs
 export interface MachineRegion {
   id: string;
   label: string;
   type: MachineType;
   camera: 'front' | 'back';
-  // Drum/window region for clothes detection
-  drum: { x: number; y: number; width: number; height: number };
+  drum: ROI;       // Clothes detection region
+  display: ROI;    // Control display region
+  lid?: ROI;       // Lid/door region (optional, uses drum area if not specified)
+}
+
+// Detection thresholds
+interface DetectionThresholds {
+  displayBrightnessOn: number;    // Display is ON if brightness > this
+  clothesVariance: number;        // Clothes present if variance > this
+  lidOpenBrightness: number;      // Lid is OPEN if brightness > this (light visible through open door)
 }
 
 export interface LaundryMachineConfig {
   agentId: string;
   machines: MachineRegion[];
-  // Color variance threshold for clothes detection
-  clothesVarianceThreshold?: number;
+  thresholds: DetectionThresholds;
 }
 
 // Machine configurations for each laundry
 export const MACHINE_CONFIGS: LaundryMachineConfig[] = [
   {
     agentId: 'Brandoa1',
-    clothesVarianceThreshold: 40,
+    thresholds: {
+      displayBrightnessOn: 30,
+      clothesVariance: 40,
+      lidOpenBrightness: 80,
+    },
     machines: [
-      // Front camera - 4 washers
-      { id: 'w1', label: 'Washer 1', type: 'washer', camera: 'front', drum: { x: 0.02, y: 0.35, width: 0.09, height: 0.15 } },
-      { id: 'w2', label: 'Washer 2', type: 'washer', camera: 'front', drum: { x: 0.13, y: 0.35, width: 0.09, height: 0.15 } },
-      { id: 'w3', label: 'Washer 3', type: 'washer', camera: 'front', drum: { x: 0.24, y: 0.35, width: 0.09, height: 0.15 } },
-      { id: 'w4', label: 'Washer 4', type: 'washer', camera: 'front', drum: { x: 0.35, y: 0.35, width: 0.09, height: 0.15 } },
-      // Front camera - 4 dryers (2x2 stack)
-      { id: 'd5', label: 'Dryer 5', type: 'dryer', camera: 'front', drum: { x: 0.70, y: 0.20, width: 0.10, height: 0.15 } },
-      { id: 'd7', label: 'Dryer 7', type: 'dryer', camera: 'front', drum: { x: 0.84, y: 0.20, width: 0.10, height: 0.15 } },
-      { id: 'd6', label: 'Dryer 6', type: 'dryer', camera: 'front', drum: { x: 0.70, y: 0.50, width: 0.10, height: 0.15 } },
-      { id: 'd8', label: 'Dryer 8', type: 'dryer', camera: 'front', drum: { x: 0.84, y: 0.50, width: 0.10, height: 0.15 } },
+      // Front camera - 4 washers (calibrated 2026-01-24)
+      {
+        id: 'w1', label: 'W1', type: 'washer', camera: 'front',
+        drum: { x: 0.174, y: 0.114, width: 0.047, height: 0.157 },
+        display: { x: 0.176, y: 0.064, width: 0.042, height: 0.051 },
+      },
+      {
+        id: 'w2', label: 'W2', type: 'washer', camera: 'front',
+        drum: { x: 0.214, y: 0.152, width: 0.059, height: 0.200 },
+        display: { x: 0.217, y: 0.081, width: 0.041, height: 0.068 },
+      },
+      {
+        id: 'w3', label: 'W3', type: 'washer', camera: 'front',
+        drum: { x: 0.274, y: 0.199, width: 0.078, height: 0.239 },
+        display: { x: 0.275, y: 0.117, width: 0.065, height: 0.070 },
+      },
+      {
+        id: 'w4', label: 'W4', type: 'washer', camera: 'front',
+        drum: { x: 0.360, y: 0.260, width: 0.146, height: 0.307 },
+        display: { x: 0.389, y: 0.183, width: 0.069, height: 0.078 },
+      },
+      // Front camera - 4 dryers (calibrated 2026-01-24)
+      {
+        id: 'd5', label: 'D5', type: 'dryer', camera: 'front',
+        drum: { x: 0.655, y: 0.141, width: 0.140, height: 0.287 },
+        display: { x: 0.616, y: 0.392, width: 0.033, height: 0.054 },
+      },
+      {
+        id: 'd6', label: 'D6', type: 'dryer', camera: 'front',
+        drum: { x: 0.853, y: 0.239, width: 0.154, height: 0.370 },
+        display: { x: 0.765, y: 0.493, width: 0.034, height: 0.064 },
+      },
+      {
+        id: 'd7', label: 'D7', type: 'dryer', camera: 'front',
+        drum: { x: 0.624, y: 0.563, width: 0.120, height: 0.280 },
+        display: { x: 0.810, y: 0.529, width: 0.037, height: 0.066 },
+      },
+      {
+        id: 'd8', label: 'D8', type: 'dryer', camera: 'front',
+        drum: { x: 0.790, y: 0.750, width: 0.147, height: 0.228 },
+        display: { x: 0.963, y: 0.656, width: 0.037, height: 0.075 },
+      },
+      // Back camera - 4 washers (calibrated 2026-01-24)
+      {
+        id: 'w1', label: 'W1', type: 'washer', camera: 'back',
+        drum: { x: 0.019, y: 0.707, width: 0.141, height: 0.241 },
+        display: { x: 0.000, y: 0.603, width: 0.080, height: 0.080 },
+      },
+      {
+        id: 'w2', label: 'W2', type: 'washer', camera: 'back',
+        drum: { x: 0.217, y: 0.541, width: 0.143, height: 0.262 },
+        display: { x: 0.232, y: 0.411, width: 0.080, height: 0.080 },
+      },
+      {
+        id: 'w3', label: 'W3', type: 'washer', camera: 'back',
+        drum: { x: 0.394, y: 0.391, width: 0.131, height: 0.247 },
+        display: { x: 0.420, y: 0.274, width: 0.080, height: 0.080 },
+      },
+      {
+        id: 'w4', label: 'W4', type: 'washer', camera: 'back',
+        drum: { x: 0.559, y: 0.275, width: 0.074, height: 0.226 },
+        display: { x: 0.580, y: 0.168, width: 0.062, height: 0.065 },
+      },
     ],
   },
   {
     agentId: 'Brandoa2',
-    clothesVarianceThreshold: 40,
+    thresholds: {
+      displayBrightnessOn: 30,
+      clothesVariance: 40,
+      lidOpenBrightness: 80,
+    },
     machines: [
-      // Front camera - 4 washers
-      { id: 'w1', label: 'Washer 1', type: 'washer', camera: 'front', drum: { x: 0.06, y: 0.35, width: 0.09, height: 0.15 } },
-      { id: 'w2', label: 'Washer 2', type: 'washer', camera: 'front', drum: { x: 0.21, y: 0.35, width: 0.09, height: 0.15 } },
-      { id: 'w3', label: 'Washer 3', type: 'washer', camera: 'front', drum: { x: 0.36, y: 0.35, width: 0.09, height: 0.15 } },
-      { id: 'w4', label: 'Washer 4', type: 'washer', camera: 'front', drum: { x: 0.51, y: 0.35, width: 0.09, height: 0.15 } },
-      // Back camera - 6 dryers (2 rows of 3)
-      { id: 'd1', label: 'Dryer 1', type: 'dryer', camera: 'back', drum: { x: 0.28, y: 0.20, width: 0.10, height: 0.15 } },
-      { id: 'd3', label: 'Dryer 3', type: 'dryer', camera: 'back', drum: { x: 0.46, y: 0.20, width: 0.10, height: 0.15 } },
-      { id: 'd5', label: 'Dryer 5', type: 'dryer', camera: 'back', drum: { x: 0.64, y: 0.20, width: 0.10, height: 0.15 } },
-      { id: 'd2', label: 'Dryer 2', type: 'dryer', camera: 'back', drum: { x: 0.28, y: 0.50, width: 0.10, height: 0.15 } },
-      { id: 'd4', label: 'Dryer 4', type: 'dryer', camera: 'back', drum: { x: 0.46, y: 0.50, width: 0.10, height: 0.15 } },
-      { id: 'd6', label: 'Dryer 6', type: 'dryer', camera: 'back', drum: { x: 0.64, y: 0.50, width: 0.10, height: 0.15 } },
+      // Front camera - 4 washers (calibrated 2026-01-24)
+      {
+        id: 'w1', label: 'W1', type: 'washer', camera: 'front',
+        drum: { x: 0.522, y: 0.251, width: 0.049, height: 0.167 },
+        display: { x: 0.526, y: 0.188, width: 0.046, height: 0.051 },
+      },
+      {
+        id: 'w2', label: 'W2', type: 'washer', camera: 'front',
+        drum: { x: 0.436, y: 0.324, width: 0.071, height: 0.210 },
+        display: { x: 0.449, y: 0.233, width: 0.053, height: 0.053 },
+      },
+      {
+        id: 'w3', label: 'W3', type: 'washer', camera: 'front',
+        drum: { x: 0.324, y: 0.411, width: 0.097, height: 0.229 },
+        display: { x: 0.344, y: 0.317, width: 0.037, height: 0.048 },
+      },
+      {
+        id: 'w4', label: 'W4', type: 'washer', camera: 'front',
+        drum: { x: 0.142, y: 0.557, width: 0.136, height: 0.275 },
+        display: { x: 0.161, y: 0.449, width: 0.046, height: 0.053 },
+      },
+      // Back camera - 6 dryers (recalibrated 2026-01-24)
+      {
+        id: 'd1', label: 'D1', type: 'dryer', camera: 'back',
+        drum: { x: 0.772, y: 0.632, width: 0.108, height: 0.214 },
+        display: { x: 0.887, y: 0.562, width: 0.032, height: 0.059 },
+      },
+      {
+        id: 'd2', label: 'D2', type: 'dryer', camera: 'back',
+        drum: { x: 0.823, y: 0.271, width: 0.095, height: 0.249 },
+        display: { x: 0.788, y: 0.475, width: 0.028, height: 0.049 },
+      },
+      {
+        id: 'd3', label: 'D3', type: 'dryer', camera: 'back',
+        drum: { x: 0.685, y: 0.523, width: 0.075, height: 0.200 },
+        display: { x: 0.762, y: 0.450, width: 0.024, height: 0.051 },
+      },
+      {
+        id: 'd4', label: 'D4', type: 'dryer', camera: 'back',
+        drum: { x: 0.710, y: 0.204, width: 0.067, height: 0.218 },
+        display: { x: 0.685, y: 0.382, width: 0.022, height: 0.049 },
+      },
+      {
+        id: 'd5', label: 'D5', type: 'dryer', camera: 'back',
+        drum: { x: 0.604, y: 0.431, width: 0.067, height: 0.198 },
+        display: { x: 0.663, y: 0.362, width: 0.022, height: 0.047 },
+      },
+      {
+        id: 'd6', label: 'D6', type: 'dryer', camera: 'back',
+        drum: { x: 0.621, y: 0.155, width: 0.057, height: 0.173 },
+        display: { x: 0.602, y: 0.314, width: 0.020, height: 0.046 },
+      },
     ],
   },
 ];
 
 /**
- * Detect clothes in drum by analyzing color variance.
- * Empty drum: uniform dark color (low variance)
- * Clothes present: varied colors/textures (high variance)
+ * Analyze a region and return pixel statistics.
  */
-function detectClothesInDrum(
+function analyzeRegion(
   buffer: Buffer,
   width: number,
   height: number,
-  region: { x: number; y: number; width: number; height: number },
-  threshold: number
-): { hasClothes: boolean; variance: number; avgBrightness: number } {
+  region: ROI
+): { avgBrightness: number; variance: number; pixelCount: number } {
   const startX = Math.floor(region.x * width);
   const startY = Math.floor(region.y * height);
   const regionWidth = Math.floor(region.width * width);
@@ -112,7 +232,7 @@ function detectClothesInDrum(
   }
 
   if (pixels.length === 0) {
-    return { hasClothes: false, variance: 0, avgBrightness: 0 };
+    return { avgBrightness: 0, variance: 0, pixelCount: 0 };
   }
 
   const avgBrightness = sumBrightness / pixels.length;
@@ -136,7 +256,7 @@ function detectClothesInDrum(
     }, 0) / pixels.length
   );
 
-  return { hasClothes: variance > threshold, variance, avgBrightness };
+  return { avgBrightness, variance, pixelCount: pixels.length };
 }
 
 /**
@@ -145,14 +265,11 @@ function detectClothesInDrum(
 function isWithinOperatingHours(): boolean {
   const now = new Date();
   const hour = now.getHours();
-  // Operating hours: 07:00 to 01:00 (next day)
-  // This means: hour >= 7 OR hour < 1
   return hour >= OPERATING_HOURS_START || hour < OPERATING_HOURS_END;
 }
 
 /**
  * Save full frame as JPEG for training data collection.
- * Only saves during operating hours (07:00 - 01:00) every 10 minutes.
  */
 export function saveFrameForTraining(
   agentId: string,
@@ -161,12 +278,10 @@ export function saveFrameForTraining(
 ): void {
   const now = Date.now();
 
-  // Check time interval
   if (now - lastFrameSaveTime < SAVE_FRAMES_INTERVAL) {
     return;
   }
 
-  // Only save during operating hours
   if (!isWithinOperatingHours()) {
     return;
   }
@@ -186,7 +301,6 @@ export function saveFrameForTraining(
     fs.writeFileSync(filepath, jpegBuffer);
     console.log(`[Training] Saved frame: ${filepath}`);
 
-    // Clean up old files (keep last SAVE_FRAMES_MAX_COUNT per camera)
     const files = fs.readdirSync(dir).sort().reverse();
     if (files.length > SAVE_FRAMES_MAX_COUNT) {
       for (const file of files.slice(SAVE_FRAMES_MAX_COUNT)) {
@@ -203,18 +317,19 @@ let pendingJpegBuffer: Buffer | null = null;
 
 /**
  * Set the original JPEG buffer for training data collection.
- * Call this before analyzeFrame with the raw JPEG from camera.
  */
 export function setJpegBufferForTraining(jpeg: Buffer): void {
   pendingJpegBuffer = jpeg;
 }
 
 /**
- * Analyze a camera frame to detect machine statuses.
+ * Analyze a camera frame to detect machine statuses using three-criteria approach.
  *
- * Logic:
- * - Clothes visible in drum → RUNNING (machine occupied)
- * - No clothes visible → IDLE (machine available)
+ * Decision logic:
+ * 1. Clothes visible in drum → RUNNING (highest priority, overrides everything)
+ * 2. Display is off (dark) → IDLE
+ * 3. Lid is open (high brightness in drum area) → IDLE
+ * 4. Otherwise (display on, lid closed, no visible clothes) → RUNNING
  */
 export function analyzeFrame(
   agentId: string,
@@ -235,22 +350,47 @@ export function analyzeFrame(
   }
 
   const cameraMachines = config.machines.filter(m => m.camera === cameraPosition);
-  const threshold = config.clothesVarianceThreshold ?? 40;
+  const { displayBrightnessOn, clothesVariance, lidOpenBrightness } = config.thresholds;
   const results: LaundryMachine[] = [];
   const now = Date.now();
 
   for (const machine of cameraMachines) {
-    const { hasClothes, variance, avgBrightness } = detectClothesInDrum(
-      frameBuffer, frameWidth, frameHeight, machine.drum, threshold
-    );
+    // Analyze all three regions
+    const displayStats = analyzeRegion(frameBuffer, frameWidth, frameHeight, machine.display);
+    const drumStats = analyzeRegion(frameBuffer, frameWidth, frameHeight, machine.drum);
 
-    // Clothes in drum = occupied (running), empty = available (idle)
-    const status: MachineStatus = hasClothes ? 'running' : 'idle';
+    // Criteria evaluation
+    const displayIsOn = displayStats.avgBrightness > displayBrightnessOn;
+    const hasClothes = drumStats.variance > clothesVariance;
+    const lidIsOpen = drumStats.avgBrightness > lidOpenBrightness;
+
+    // Decision logic
+    let status: MachineStatus;
+    let reason: string;
+
+    if (hasClothes) {
+      // Clothes visible = definitely running
+      status = 'running';
+      reason = 'clothes';
+    } else if (!displayIsOn) {
+      // Display off = definitely idle
+      status = 'idle';
+      reason = 'display-off';
+    } else if (lidIsOpen) {
+      // Lid open (high brightness in drum) = idle
+      status = 'idle';
+      reason = 'lid-open';
+    } else {
+      // Display on, lid closed, no visible clothes = assume running
+      status = 'running';
+      reason = 'display-on';
+    }
 
     console.log(
-      `[Detection] ${machine.label}: ${status} - ` +
-      `variance=${variance.toFixed(1)} (threshold=${threshold}), ` +
-      `brightness=${avgBrightness.toFixed(1)}`
+      `[Detection] ${machine.label}: ${status} (${reason}) - ` +
+      `display=${displayStats.avgBrightness.toFixed(1)} (>${displayBrightnessOn}=${displayIsOn ? 'ON' : 'OFF'}), ` +
+      `clothes-var=${drumStats.variance.toFixed(1)} (>${clothesVariance}=${hasClothes}), ` +
+      `drum-bright=${drumStats.avgBrightness.toFixed(1)} (>${lidOpenBrightness}=${lidIsOpen ? 'OPEN' : 'CLOSED'})`
     );
 
     results.push({
@@ -276,5 +416,5 @@ export function getMachineConfig(agentId: string): LaundryMachineConfig | undefi
  * Clear cached frame data.
  */
 export function clearFrameCache(_agentId?: string): void {
-  // No frame cache needed for variance-based detection
+  // No frame cache needed for ROI-based detection
 }
