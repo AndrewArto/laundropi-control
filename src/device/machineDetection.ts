@@ -119,31 +119,31 @@ export const MACHINE_CONFIGS: LaundryMachineConfig[] = [
   {
     agentId: 'Brandoa2',
     thresholds: {
-      displayBrightnessOn: 50,
+      displayBrightnessOn: 80,
       clothesVariance: 100,
       lidOpenBrightness: 80,
     },
     machines: [
-      // Front camera - 4 washers (calibrated 2026-01-24)
+      // Front camera - 4 washers (recalibrated 2026-01-24 - smaller display ROIs targeting LCD)
       {
         id: 'w1', label: 'W1', type: 'washer', camera: 'front',
         drum: { x: 0.522, y: 0.251, width: 0.049, height: 0.167 },
-        display: { x: 0.526, y: 0.188, width: 0.046, height: 0.051 },
+        display: { x: 0.540, y: 0.200, width: 0.025, height: 0.025 },
       },
       {
         id: 'w2', label: 'W2', type: 'washer', camera: 'front',
         drum: { x: 0.436, y: 0.324, width: 0.071, height: 0.210 },
-        display: { x: 0.449, y: 0.233, width: 0.053, height: 0.053 },
+        display: { x: 0.460, y: 0.255, width: 0.030, height: 0.030 },
       },
       {
         id: 'w3', label: 'W3', type: 'washer', camera: 'front',
         drum: { x: 0.324, y: 0.411, width: 0.097, height: 0.229 },
-        display: { x: 0.344, y: 0.317, width: 0.037, height: 0.048 },
+        display: { x: 0.355, y: 0.335, width: 0.030, height: 0.030 },
       },
       {
         id: 'w4', label: 'W4', type: 'washer', camera: 'front',
         drum: { x: 0.142, y: 0.557, width: 0.136, height: 0.275 },
-        display: { x: 0.161, y: 0.449, width: 0.046, height: 0.053 },
+        display: { x: 0.185, y: 0.470, width: 0.035, height: 0.035 },
       },
       // Back camera - 6 dryers (recalibrated 2026-01-24)
       {
