@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Coins, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ChevronDown, ChevronUp, Download, CalendarClock, Upload, Building2, TrendingUp } from 'lucide-react';
+import { Coins, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ChevronDown, ChevronUp, Download, CalendarClock, Upload, Building2, TrendingUp, WashingMachine } from 'lucide-react';
 import { RevenueEntry, RevenueAuditEntry, RevenueSummary, UiUser, ExpenditureImport, ExpenditureTransaction, GENERAL_AGENT_ID, GENERAL_LAUNDRY } from '../../types';
 import type { DateEntryInfo } from '../../hooks/useRevenue';
 import { BankImportView } from './BankImportView';
 import type { ReconciliationSummary, PendingChange } from '../../hooks/useReconciliation';
 import { ApiService } from '../../services/api';
+import { formatShortDate } from '../../utils/dateTime';
 
 // Map field names to user-friendly labels
 const fieldLabels: Record<string, string> = {
@@ -86,9 +87,9 @@ const DonutChart: React.FC<DonutChartProps> = ({ revenue, costs, size = 60, labe
       <div className="text-left min-w-0">
         <div className={`${large ? 'text-xs' : 'text-[10px]'} text-slate-500 uppercase`}>{label}</div>
         <div className={`${large ? 'text-2xl font-semibold' : 'text-xs'} text-white`}>€{formatMoney(revenue)}</div>
-        <div className={`${large ? 'text-base' : 'text-[10px]'} text-red-400`}>−€{formatMoney(costs)}</div>
+        <div className={`${large ? 'text-base' : 'text-[10px]'} text-white`}>−€{formatMoney(costs)}</div>
         <div className={`${large ? 'text-lg' : 'text-xs'} font-semibold ${profitLoss >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-          P/L €{formatMoney(profitLoss)}
+          P/L {profitLoss >= 0 ? '' : '−'}€{formatMoney(Math.abs(profitLoss))}
         </div>
       </div>
     </div>
@@ -311,9 +312,9 @@ const MonthlyLineChart: React.FC<LineChartProps> = ({ data, formatMoney }) => {
         <div className="flex gap-4 justify-center mt-1 text-xs bg-slate-900/80 rounded px-3 py-1.5">
           <span className="text-slate-400">{hoverData.date.split('-')[2]}/{hoverData.date.split('-')[1]}</span>
           <span className="text-white">Rev: €{formatMoney(hoverData.revenue)}</span>
-          <span className="text-red-400">Cost: €{formatMoney(hoverData.costs)}</span>
+          <span className="text-white">Cost: −€{formatMoney(hoverData.costs)}</span>
           <span className={hoverData.profitLoss >= 0 ? 'text-emerald-400' : 'text-red-400'}>
-            P/L: €{formatMoney(hoverData.profitLoss)}
+            P/L: {hoverData.profitLoss >= 0 ? '' : '−'}€{formatMoney(Math.abs(hoverData.profitLoss))}
           </span>
         </div>
       )}
@@ -806,50 +807,57 @@ export const RevenueView: React.FC<RevenueViewProps> = (props) => {
               {/* Collapsible header */}
               <button
                 onClick={() => toggleAgentExpanded(laundry.id)}
-                className="w-full p-4 flex items-center justify-between gap-4 hover:bg-slate-700/30 transition-colors"
+                className="w-full p-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between hover:bg-slate-700/30 transition-colors"
               >
                 <div className="flex items-center gap-3">
                   {isExpanded ? (
-                    <ChevronUp className="w-5 h-5 text-purple-400" />
+                    <ChevronUp className="w-5 h-5 text-purple-400 flex-shrink-0" />
                   ) : (
-                    <ChevronDown className="w-5 h-5 text-purple-400" />
+                    <ChevronDown className="w-5 h-5 text-purple-400 flex-shrink-0" />
                   )}
-                  <div className="flex items-center gap-2">
-                    <Building2 className="w-5 h-5 text-purple-400" />
-                    <div className="text-left">
-                      <div className="text-sm font-semibold text-white">{laundry.name}</div>
-                      <div className="text-xs text-slate-500">
-                        {isExpanded ? 'Fixed costs (deducted from total P&L)' : 'Click to expand'}
-                      </div>
-                    </div>
+                  <Building2 className="w-5 h-5 text-purple-400 flex-shrink-0" />
+                  <div className="text-left">
+                    <div className="text-sm font-semibold text-white">{laundry.name}</div>
+                    {!isExpanded && (
+                      <div className="text-xs text-slate-500 hidden sm:block">Click to expand</div>
+                    )}
                   </div>
                 </div>
-                <div className="flex items-center gap-2 flex-wrap justify-end">
-                  <div className="flex items-center gap-2 text-xs text-purple-300">
-                    <span>Week: €{formatMoney(weekFixCosts)}</span>
-                    <span className="text-slate-600">|</span>
-                    <span>Month: €{formatMoney(monthFixCosts)}</span>
+
+                {/* Summary columns - responsive layout, aligned with laundry sections */}
+                <div className="flex flex-wrap items-center gap-3 sm:gap-4 pl-8 sm:pl-0">
+                  {/* Selected date's cost - matches date column width */}
+                  <div className="flex flex-col items-start flex-shrink-0 sm:w-[70px]">
+                    <div className="text-[10px] text-purple-400/70 uppercase tracking-wide">{formatShortDate(revenueDate)}</div>
+                    <div className="text-sm text-white">−€{formatMoney(totalCosts)}</div>
                   </div>
-                  {totalCosts > 0 && (
-                    <span className="text-sm font-semibold text-red-400">
-                      Today: €{formatMoney(totalCosts)}
+                  {/* Week - matches DonutChart width */}
+                  <div className="flex flex-col items-start flex-shrink-0 sm:w-[140px]">
+                    <div className="text-[10px] text-purple-400/70 uppercase tracking-wide">Week</div>
+                    <div className="text-sm text-white">−€{formatMoney(weekFixCosts)}</div>
+                  </div>
+                  {/* Month - matches DonutChart width */}
+                  <div className="flex flex-col items-start flex-shrink-0 sm:w-[140px]">
+                    <div className="text-[10px] text-purple-400/70 uppercase tracking-wide">Month</div>
+                    <div className="text-sm text-white">−€{formatMoney(monthFixCosts)}</div>
+                  </div>
+                  <div className="flex flex-col items-end gap-1 flex-shrink-0 ml-auto">
+                    {entry?.hasEdits && (
+                      <span className="text-xs px-2 py-1 rounded-full border border-amber-400 text-amber-200 bg-amber-500/10 whitespace-nowrap">
+                        Edited
+                      </span>
+                    )}
+                    <span className="text-xs px-2 py-1 rounded-full border border-purple-500/50 text-purple-300 bg-purple-500/10 whitespace-nowrap">
+                      {entry ? 'Entry loaded' : 'No entry yet'}
                     </span>
-                  )}
-                  {entry?.hasEdits && (
-                    <span className="text-xs px-2 py-1 rounded-full border border-amber-400 text-amber-200 bg-amber-500/10">
-                      Edited
-                    </span>
-                  )}
-                  <span className="text-xs px-2 py-1 rounded-full border border-purple-500/50 text-purple-300 bg-purple-500/10">
-                    Costs only
-                  </span>
+                  </div>
                 </div>
               </button>
 
               {/* Collapsible content */}
               {isExpanded && (
-                <div className="p-4 pt-0 space-y-4">
-                  <div className="space-y-2">
+                <div className="p-4 pt-0 space-y-4 border-t border-purple-500/30">
+                  <div className="space-y-2 pt-4">
                     <div className="flex items-center justify-between">
                       <div className="text-sm text-slate-300">Costs (comment required)</div>
                       <button
@@ -946,59 +954,66 @@ export const RevenueView: React.FC<RevenueViewProps> = (props) => {
         const isExpanded = expandedAgents.has(laundry.id);
         const weekCosts = (revenueSummary?.week.totalsByAgent?.[laundry.id] ?? 0) - (revenueSummary?.week.profitLossByAgent?.[laundry.id] ?? 0);
         const monthCosts = (revenueSummary?.month.totalsByAgent?.[laundry.id] ?? 0) - (revenueSummary?.month.profitLossByAgent?.[laundry.id] ?? 0);
+        const todayRevenue = entry?.coinsTotal ?? 0;
+        const todayCosts = entry?.deductionsTotal ?? 0;
 
         return (
           <div key={laundry.id} className="bg-slate-800 border border-slate-700 rounded-xl overflow-hidden">
             {/* Collapsible header */}
             <button
               onClick={() => toggleAgentExpanded(laundry.id)}
-              className="w-full p-4 flex items-center justify-between gap-4 hover:bg-slate-700/30 transition-colors"
+              className="w-full p-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between hover:bg-slate-700/30 transition-colors"
             >
               <div className="flex items-center gap-3">
                 {isExpanded ? (
-                  <ChevronUp className="w-5 h-5 text-slate-400" />
+                  <ChevronUp className="w-5 h-5 text-slate-400 flex-shrink-0" />
                 ) : (
-                  <ChevronDown className="w-5 h-5 text-slate-400" />
+                  <ChevronDown className="w-5 h-5 text-slate-400 flex-shrink-0" />
                 )}
+                <WashingMachine className="w-5 h-5 text-indigo-400 flex-shrink-0" />
                 <div className="text-left">
                   <div className="text-sm font-semibold text-white">{laundry.name}</div>
                   {!isExpanded && (
-                    <div className="text-xs text-slate-500">Click to expand</div>
+                    <div className="text-xs text-slate-500 hidden sm:block">Click to expand</div>
                   )}
                 </div>
               </div>
 
-              {/* Pie charts - always visible, centered with fixed width */}
-              <div className="flex items-center gap-2">
-                <div className="flex items-center gap-4">
-                  <div className="w-[140px]">
-                    <DonutChart
-                      revenue={weekTotal}
-                      costs={weekCosts}
-                      size={50}
-                      label="Week"
-                      profitLoss={weekProfitLoss}
-                      formatMoney={formatMoney}
-                    />
-                  </div>
-                  <div className="w-[140px]">
-                    <DonutChart
-                      revenue={monthTotal}
-                      costs={monthCosts}
-                      size={50}
-                      label="Month"
-                      profitLoss={monthProfitLoss}
-                      formatMoney={formatMoney}
-                    />
-                  </div>
+              {/* Summary: Selected date + Week/Month pie charts - responsive layout */}
+              <div className="flex flex-wrap items-center gap-3 sm:gap-4 pl-8 sm:pl-0">
+                {/* Selected date's values */}
+                <div className="flex flex-col items-start flex-shrink-0 sm:w-[70px]">
+                  <div className="text-[10px] text-slate-500 uppercase tracking-wide">{formatShortDate(revenueDate)}</div>
+                  <div className="text-sm text-white">€{formatMoney(todayRevenue)}</div>
+                  <div className="text-xs text-white">−€{formatMoney(todayCosts)}</div>
                 </div>
-                <div className="flex items-center gap-2 w-[180px] justify-end">
+                <div className="flex-shrink-0 sm:w-[140px]">
+                  <DonutChart
+                    revenue={weekTotal}
+                    costs={weekCosts}
+                    size={50}
+                    label="Week"
+                    profitLoss={weekProfitLoss}
+                    formatMoney={formatMoney}
+                  />
+                </div>
+                <div className="flex-shrink-0 sm:w-[140px]">
+                  <DonutChart
+                    revenue={monthTotal}
+                    costs={monthCosts}
+                    size={50}
+                    label="Month"
+                    profitLoss={monthProfitLoss}
+                    formatMoney={formatMoney}
+                  />
+                </div>
+                <div className="flex flex-col items-end gap-1 flex-shrink-0 ml-auto">
                   {entry?.hasEdits && (
-                    <span className="text-xs px-2 py-1 rounded-full border border-amber-400 text-amber-200 bg-amber-500/10">
+                    <span className="text-xs px-2 py-1 rounded-full border border-amber-400 text-amber-200 bg-amber-500/10 whitespace-nowrap">
                       Edited
                     </span>
                   )}
-                  <span className="text-xs px-2 py-1 rounded-full border border-slate-600 text-slate-300 bg-slate-900/40">
+                  <span className="text-xs px-2 py-1 rounded-full border border-slate-600 text-slate-300 bg-slate-900/40 whitespace-nowrap">
                     {entry ? 'Entry loaded' : 'No entry yet'}
                   </span>
                 </div>

@@ -78,3 +78,11 @@ export const getMonthRange = (value: string) => {
     daysInMonth,
   };
 };
+
+const SHORT_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+export const formatShortDate = (value: string): string => {
+  const parts = parseDateParts(value);
+  if (!parts) return value;
+  return `${SHORT_MONTHS[parts.month - 1]} ${parts.day}`;
+};
