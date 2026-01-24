@@ -367,13 +367,13 @@ export const RevenueView: React.FC<RevenueViewProps> = (props) => {
     });
   };
 
-  // Fetch monthly chart data when expanded
+  // Fetch monthly chart data when expanded (cumulative)
   const fetchChartData = useCallback(async (startDate: string, endDate: string) => {
     setChartLoading(true);
     try {
       const entries = await ApiService.listRevenueEntries({ startDate, endDate });
 
-      // Group entries by date and sum up revenue/costs/P&L
+      // Group entries by date and sum up daily revenue/costs/P&L
       const dailyMap = new Map<string, { revenue: number; costs: number; profitLoss: number }>();
 
       // Initialize all days in the range
@@ -384,7 +384,7 @@ export const RevenueView: React.FC<RevenueViewProps> = (props) => {
         dailyMap.set(dateStr, { revenue: 0, costs: 0, profitLoss: 0 });
       }
 
-      // Aggregate entries
+      // Aggregate entries per day
       for (const entry of entries) {
         const existing = dailyMap.get(entry.entryDate) || { revenue: 0, costs: 0, profitLoss: 0 };
         const revenue = (entry.coinsTotal || 0) + (entry.billsTotal || 0);
@@ -395,10 +395,17 @@ export const RevenueView: React.FC<RevenueViewProps> = (props) => {
         dailyMap.set(entry.entryDate, existing);
       }
 
-      // Convert to array sorted by date
-      const chartPoints: LineChartDataPoint[] = Array.from(dailyMap.entries())
-        .sort(([a], [b]) => a.localeCompare(b))
-        .map(([date, values]) => ({ date, ...values }));
+      // Convert to array sorted by date, then make cumulative
+      const sortedDaily = Array.from(dailyMap.entries()).sort(([a], [b]) => a.localeCompare(b));
+      let cumRevenue = 0;
+      let cumCosts = 0;
+      let cumPL = 0;
+      const chartPoints: LineChartDataPoint[] = sortedDaily.map(([date, values]) => {
+        cumRevenue += values.revenue;
+        cumCosts += values.costs;
+        cumPL += values.profitLoss;
+        return { date, revenue: cumRevenue, costs: cumCosts, profitLoss: cumPL };
+      });
 
       setChartData(chartPoints);
     } catch (err) {
@@ -609,6 +616,18 @@ export const RevenueView: React.FC<RevenueViewProps> = (props) => {
           </span>
           {isRevenueCalendarOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
         </button>
+        <button
+          type="button"
+          onClick={() => setChartExpanded(prev => !prev)}
+          className="flex items-center justify-between gap-2 px-3 py-2 text-xs rounded-md border border-slate-600 text-slate-300 hover:border-slate-500 hover:text-white sm:justify-start"
+          aria-expanded={chartExpanded}
+        >
+          <span className="flex items-center gap-2">
+            <TrendingUp className="w-4 h-4" />
+            Trend
+          </span>
+          {chartExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+        </button>
       </div>
 
       {isRevenueCalendarOpen && renderRevenueCalendar()}
@@ -652,39 +671,16 @@ export const RevenueView: React.FC<RevenueViewProps> = (props) => {
         );
       })()}
 
-      {/* Collapsible Monthly Line Chart */}
-      {revenueSummary && (
-        <div className="bg-slate-800 border border-slate-700 rounded-xl overflow-hidden">
-          <button
-            onClick={() => setChartExpanded(prev => !prev)}
-            className="w-full p-4 flex items-center justify-between gap-4 hover:bg-slate-700/30 transition-colors"
-          >
-            <div className="flex items-center gap-3">
-              {chartExpanded ? (
-                <ChevronUp className="w-5 h-5 text-indigo-400" />
-              ) : (
-                <ChevronDown className="w-5 h-5 text-indigo-400" />
-              )}
-              <div className="flex items-center gap-2">
-                <TrendingUp className="w-5 h-5 text-indigo-400" />
-                <div className="text-left">
-                  <div className="text-sm font-semibold text-white">Monthly Trend</div>
-                  <div className="text-xs text-slate-500">
-                    {chartExpanded ? 'Daily breakdown for ' : 'Click to view daily trend for '}{revenueSummary.month.startDate} → {revenueSummary.month.endDate}
-                  </div>
-                </div>
-              </div>
-            </div>
-          </button>
-
-          {chartExpanded && (
-            <div className="p-4 pt-0">
-              {chartLoading ? (
-                <div className="text-sm text-slate-400 py-4">Loading chart data...</div>
-              ) : (
-                <MonthlyLineChart data={chartData} formatMoney={formatMoney} />
-              )}
-            </div>
+      {/* Monthly Line Chart (when expanded via Trend button) */}
+      {chartExpanded && revenueSummary && (
+        <div className="bg-slate-800 border border-slate-700 rounded-xl p-4">
+          <div className="text-xs text-slate-500 mb-3">
+            Cumulative trend: {revenueSummary.month.startDate} → {revenueSummary.month.endDate}
+          </div>
+          {chartLoading ? (
+            <div className="text-sm text-slate-400 py-4">Loading chart data...</div>
+          ) : (
+            <MonthlyLineChart data={chartData} formatMoney={formatMoney} />
           )}
         </div>
       )}
