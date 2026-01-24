@@ -825,13 +825,11 @@ export const RevenueView: React.FC<RevenueViewProps> = (props) => {
                   </div>
                 </div>
                 <div className="flex items-center gap-2 flex-wrap justify-end">
-                  {(weekFixCosts > 0 || monthFixCosts > 0) && (
-                    <div className="flex items-center gap-2 text-xs text-purple-300">
-                      <span>Week: €{formatMoney(weekFixCosts)}</span>
-                      <span className="text-slate-600">|</span>
-                      <span>Month: €{formatMoney(monthFixCosts)}</span>
-                    </div>
-                  )}
+                  <div className="flex items-center gap-2 text-xs text-purple-300">
+                    <span>Week: €{formatMoney(weekFixCosts)}</span>
+                    <span className="text-slate-600">|</span>
+                    <span>Month: €{formatMoney(monthFixCosts)}</span>
+                  </div>
                   {totalCosts > 0 && (
                     <span className="text-sm font-semibold text-red-400">
                       Today: €{formatMoney(totalCosts)}
