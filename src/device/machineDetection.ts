@@ -121,7 +121,7 @@ export const MACHINE_CONFIGS: LaundryMachineConfig[] = [
     thresholds: {
       displayBrightnessOn: 80,
       clothesVariance: 60,        // lowered from 100 - dryers show 70-104 variance with clothes
-      lidOpenBrightness: 120,     // raised from 80 - closed dryers show 63-115 brightness
+      lidOpenBrightness: 95,      // D1 lid-open shows 99.2, closed dryers show 75-118 (some overlap)
     },
     machines: [
       // Front camera - 4 washers (recalibrated 2026-01-24 - smaller display ROIs targeting LCD)
