@@ -2053,6 +2053,7 @@ wss.on('connection', (socket) => {
               label: m.label || m.id || '',
               type: m.type || 'washer',
               status: m.status || 'unknown',
+              reason: m.reason,
               lastUpdated: m.lastUpdated || Date.now(),
             })),
             lastAnalyzed: Date.now(),
