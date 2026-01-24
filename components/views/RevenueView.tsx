@@ -85,6 +85,7 @@ const DonutChart: React.FC<DonutChartProps> = ({ revenue, costs, size = 60, labe
       <div className="text-left min-w-0">
         <div className={`${large ? 'text-xs' : 'text-[10px]'} text-slate-500 uppercase`}>{label}</div>
         <div className={`${large ? 'text-2xl font-semibold' : 'text-xs'} text-white`}>€{formatMoney(revenue)}</div>
+        <div className={`${large ? 'text-base' : 'text-[10px]'} text-red-400`}>−€{formatMoney(costs)}</div>
         <div className={`${large ? 'text-lg' : 'text-xs'} font-semibold ${profitLoss >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
           P/L €{formatMoney(profitLoss)}
         </div>
