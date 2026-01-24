@@ -67,7 +67,7 @@ export const MACHINE_CONFIGS: LaundryMachineConfig[] = [
   {
     agentId: 'Brandoa1',
     thresholds: {
-      displayBrightnessOn: 50,
+      displayBrightnessOn: 130,
       clothesVariance: 100,
       lidOpenBrightness: 80,
     },
