@@ -305,10 +305,10 @@ export function setJpegBufferForTraining(jpeg: Buffer): void {
  * Analyze a camera frame to detect machine statuses using three-criteria approach.
  *
  * Decision logic:
- * 1. Clothes visible in drum → RUNNING (highest priority, overrides everything)
- * 2. Display is off (dark) → IDLE
- * 3. Lid is open (high brightness in drum area) → IDLE
- * 4. Otherwise (display on, lid closed, no visible clothes) → RUNNING
+ * - RUNNING requires ALL THREE: display ON + lid closed + clothes visible
+ * - IDLE if display is off (highest priority)
+ * - IDLE if lid is open
+ * - IDLE if no clothes visible (even with display on)
  */
 export function analyzeFrame(
   agentId: string,
@@ -356,12 +356,12 @@ export function analyzeFrame(
       status = 'idle';
       reason = 'lid-open';
     } else if (hasClothes) {
-      // Clothes visible = running
+      // Display on + lid closed + clothes visible = RUNNING
       status = 'running';
       reason = 'clothes';
     } else {
-      // Display on, lid closed, no visible clothes = assume running
-      status = 'running';
+      // Display on, lid closed, but NO clothes = idle (waiting for cycle)
+      status = 'idle';
       reason = 'display-on';
     }
 
