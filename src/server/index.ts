@@ -1116,7 +1116,16 @@ app.post('/lead', (req, res) => {
   return res.json({ ok: true });
 });
 
-app.get('/api/leads', (_req, res) => {
+// Serve static assets from public directory (logo, etc.)
+app.use(express.static(path.join(__dirname, '../../public')));
+
+// Apply authentication middleware to all /api routes
+app.use('/api', requireUiAuth);
+app.use('/api/revenue', requireAdmin);
+app.use('/api/expenditure', requireAdmin, expenditureRoutes);
+
+// Protected leads endpoints (admin only)
+app.get('/api/leads', requireAdmin, (_req, res) => {
   try {
     const leads = listLeads();
     res.json(leads);
@@ -1126,18 +1135,11 @@ app.get('/api/leads', (_req, res) => {
   }
 });
 
-// Serve leads viewer HTML page
-app.get('/leads', (_req, res) => {
+// Serve leads viewer HTML page (requires auth via API calls)
+app.get('/leads', requireUiAuth, requireAdmin, (_req, res) => {
   const filePath = path.join(__dirname, '../../public/leads.html');
   res.sendFile(filePath);
 });
-
-// Serve static assets from public directory (logo, etc.)
-app.use(express.static(path.join(__dirname, '../../public')));
-
-app.use('/api', requireUiAuth);
-app.use('/api/revenue', requireAdmin);
-app.use('/api/expenditure', requireAdmin, expenditureRoutes);
 
 app.get('/api/revenue/summary', (req, res) => {
   const dateStr = resolveEntryDate(req.query?.date as string | undefined);
