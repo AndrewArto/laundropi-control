@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Relay, Schedule, RelayType, RelayGroup, RevenueEntry, RevenueAuditEntry, RevenueSummary, UiUser, CameraConfig, Laundry, RelaySelection, LaundryMachineStatus } from './types';
+import { Relay, Schedule, RelayType, RelayGroup, RevenueEntry, RevenueAuditEntry, RevenueSummary, UiUser, CameraConfig, Laundry, RelaySelection, LaundryMachineStatus, GENERAL_AGENT_ID } from './types';
 import { ApiService, resolveBaseUrl } from './services/api';
 import { DAYS_OF_WEEK } from './constants';
 import { useAuth } from './hooks/useAuth';
@@ -555,10 +555,12 @@ const App: React.FC = () => {
       const currentLaundries = [...laundries];
       if (currentLaundries.length === 0) return;
 
-      const results = await Promise.all(currentLaundries.map(async (laundry) => {
-        const response = await ApiService.getRevenueEntry(laundry.id, date);
+      // Include GENERAL_AGENT_ID (Fix cost) in the fetch
+      const agentIds = [...currentLaundries.map(l => l.id), GENERAL_AGENT_ID];
+      const results = await Promise.all(agentIds.map(async (agentId) => {
+        const response = await ApiService.getRevenueEntry(agentId, date);
         return {
-          agentId: laundry.id,
+          agentId,
           entry: response?.entry ?? null,
           audit: response?.audit ?? [],
         };

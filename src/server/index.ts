@@ -170,7 +170,7 @@ const PRIMARY_CAMERAS_DEFAULT_ENABLED = asBool(process.env.PRIMARY_CAMERAS_DEFAU
 const PRIMARY_CAMERA_FRONT_RTSP_URL = (process.env.PRIMARY_CAMERA_FRONT_RTSP_URL || '').trim();
 const PRIMARY_CAMERA_BACK_RTSP_URL = (process.env.PRIMARY_CAMERA_BACK_RTSP_URL || '').trim();
 
-const isKnownLaundry = (agentId: string) => KNOWN_LAUNDRY_SET.size === 0 || KNOWN_LAUNDRY_SET.has(agentId) || agentId === 'FixCost';
+const isKnownLaundry = (agentId: string) => KNOWN_LAUNDRY_SET.size === 0 || KNOWN_LAUNDRY_SET.has(agentId) || agentId === 'FixCost' || agentId === GENERAL_AGENT_ID;
 const isPrimaryLaundry = (agentId: string) => Boolean(PRIMARY_LAUNDRY_ID) && agentId === PRIMARY_LAUNDRY_ID;
 
 if (REQUIRE_UI_AUTH && !SESSION_SECRET) {
@@ -657,7 +657,7 @@ const buildRevenueSummary = (entries: RevenueEntryRow[]) => {
 };
 
 // Fix cost agent ID for business-wide costs (not tied to specific laundromat)
-const GENERAL_AGENT_ID = 'FixCost';
+const GENERAL_AGENT_ID = 'General';
 
 const filterEntriesByKnownAgents = (entries: RevenueEntryRow[]) => {
   if (!KNOWN_LAUNDRY_SET.size) return entries;
