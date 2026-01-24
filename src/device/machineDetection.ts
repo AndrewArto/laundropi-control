@@ -69,7 +69,7 @@ export const MACHINE_CONFIGS: LaundryMachineConfig[] = [
     thresholds: {
       displayBrightnessOn: 120,
       clothesVariance: 100,
-      lidOpenBrightness: 60,
+      lidOpenBrightness: 80,
     },
     machines: [
       // Front camera - 4 washers (recalibrated 2026-01-24 - targeting LCD screens)
