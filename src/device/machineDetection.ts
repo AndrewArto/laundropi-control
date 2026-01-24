@@ -86,7 +86,7 @@ export const MACHINE_CONFIGS: LaundryMachineConfig[] = [
       {
         id: 'w3', label: 'W3', type: 'washer', camera: 'front',
         drum: { x: 0.394, y: 0.391, width: 0.131, height: 0.247 },
-        display: { x: 0.432, y: 0.333, width: 0.036, height: 0.033 },
+        display: { x: 0.405, y: 0.295, width: 0.045, height: 0.040 },
       },
       {
         id: 'w4', label: 'W4', type: 'washer', camera: 'front',
