@@ -118,7 +118,7 @@ export interface Laundry {
 }
 
 // Special agent ID for fixed costs (not tied to a specific laundromat)
-export const GENERAL_AGENT_ID = 'FixCost';
+export const GENERAL_AGENT_ID = 'General';
 
 // Create a synthetic "Fix cost" laundry for finance/cost tracking
 export const GENERAL_LAUNDRY: Laundry = {

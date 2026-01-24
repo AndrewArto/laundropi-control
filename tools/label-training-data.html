@@ -192,6 +192,43 @@
       border-color: #3b82f6 !important;
       box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.3);
     }
+    /* Region types for setup mode */
+    .region.drum-region {
+      border-color: #10b981;
+      background: rgba(16, 185, 129, 0.15);
+    }
+    .region.display-region {
+      border-color: #ef4444;
+      background: rgba(239, 68, 68, 0.15);
+    }
+    .region.drum-region.selected {
+      border-color: #10b981 !important;
+      box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.4);
+    }
+    .region.display-region.selected {
+      border-color: #ef4444 !important;
+      box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.4);
+    }
+    /* Region type toggle */
+    .region-type-toggle {
+      display: flex;
+      gap: 4px;
+      margin-bottom: 12px;
+    }
+    .region-type-btn {
+      flex: 1;
+      padding: 8px;
+      text-align: center;
+      border-radius: 6px;
+      cursor: pointer;
+      border: 2px solid transparent;
+      background: #334155;
+      font-size: 12px;
+      transition: all 0.15s;
+    }
+    .region-type-btn.active.drum { background: #064e3b; border-color: #10b981; color: #6ee7b7; }
+    .region-type-btn.active.display { background: #7f1d1d; border-color: #ef4444; color: #fca5a5; }
+    .region-type-btn:hover:not(.active) { background: #475569; }
     .region-label {
       background: rgba(0,0,0,0.8);
       padding: 3px 8px;
@@ -390,6 +427,17 @@
 
       <!-- Setup Mode: Machine List -->
       <div class="section" id="setupSection" style="display:none">
+        <h2>Region Type</h2>
+        <div class="region-type-toggle">
+          <div class="region-type-btn drum active" id="drumTypeBtn" onclick="setRegionType('drum')">
+            <div>Drum</div>
+            <div style="font-size:10px;opacity:0.7">Clothes area</div>
+          </div>
+          <div class="region-type-btn display" id="displayTypeBtn" onclick="setRegionType('display')">
+            <div>Display</div>
+            <div style="font-size:10px;opacity:0.7">Screen area</div>
+          </div>
+        </div>
         <h2>Machines</h2>
         <div class="machine-list" id="machineList"></div>
         <div class="section-row" style="margin-top:12px">
@@ -452,10 +500,12 @@
     // ========== STATE ==========
     const state = {
       mode: 'label', // 'setup' or 'label'
+      regionType: 'drum', // 'drum' or 'display' - which region to edit in setup mode
       frames: [],
       currentFrameIndex: 0,
       labels: {}, // { frameId: { machineId: 'running'|'idle' } }
       selectedMachineId: null,
+      selectedRegionType: null, // which region is being dragged
       isConnected: false,
       ws: null,
       isDragging: false,
@@ -467,34 +517,41 @@
     };
 
     // Machine configs per agent/camera (use LdBrandoa* IDs to match agent names)
+    // Each machine has both drum (for clothes detection) and display (for on/off detection) regions
     const MACHINE_CONFIGS = {
       LdBrandoa1: {
         front: [
-          { id: 'w1', label: 'W1', type: 'washer', drum: { x: 0.02, y: 0.35, width: 0.09, height: 0.15 } },
-          { id: 'w2', label: 'W2', type: 'washer', drum: { x: 0.13, y: 0.35, width: 0.09, height: 0.15 } },
-          { id: 'w3', label: 'W3', type: 'washer', drum: { x: 0.24, y: 0.35, width: 0.09, height: 0.15 } },
-          { id: 'w4', label: 'W4', type: 'washer', drum: { x: 0.35, y: 0.35, width: 0.09, height: 0.15 } },
-          { id: 'd5', label: 'D5', type: 'dryer', drum: { x: 0.70, y: 0.20, width: 0.10, height: 0.15 } },
-          { id: 'd7', label: 'D7', type: 'dryer', drum: { x: 0.84, y: 0.20, width: 0.10, height: 0.15 } },
-          { id: 'd6', label: 'D6', type: 'dryer', drum: { x: 0.70, y: 0.50, width: 0.10, height: 0.15 } },
-          { id: 'd8', label: 'D8', type: 'dryer', drum: { x: 0.84, y: 0.50, width: 0.10, height: 0.15 } },
+          { id: 'w1', label: 'W1', type: 'washer', drum: { x: 0.12, y: 0.32, width: 0.09, height: 0.18 }, display: { x: 0.125, y: 0.12, width: 0.08, height: 0.10 } },
+          { id: 'w2', label: 'W2', type: 'washer', drum: { x: 0.22, y: 0.32, width: 0.09, height: 0.18 }, display: { x: 0.225, y: 0.12, width: 0.08, height: 0.10 } },
+          { id: 'w3', label: 'W3', type: 'washer', drum: { x: 0.32, y: 0.32, width: 0.09, height: 0.18 }, display: { x: 0.325, y: 0.12, width: 0.08, height: 0.10 } },
+          { id: 'w4', label: 'W4', type: 'washer', drum: { x: 0.42, y: 0.32, width: 0.09, height: 0.18 }, display: { x: 0.425, y: 0.12, width: 0.08, height: 0.10 } },
+          { id: 'd5', label: 'D5', type: 'dryer', drum: { x: 0.70, y: 0.05, width: 0.12, height: 0.28 }, display: { x: 0.55, y: 0.35, width: 0.06, height: 0.08 } },
+          { id: 'd6', label: 'D6', type: 'dryer', drum: { x: 0.70, y: 0.48, width: 0.12, height: 0.32 }, display: { x: 0.61, y: 0.35, width: 0.06, height: 0.08 } },
+          { id: 'd7', label: 'D7', type: 'dryer', drum: { x: 0.86, y: 0.05, width: 0.12, height: 0.28 }, display: { x: 0.55, y: 0.44, width: 0.06, height: 0.08 } },
+          { id: 'd8', label: 'D8', type: 'dryer', drum: { x: 0.86, y: 0.48, width: 0.12, height: 0.32 }, display: { x: 0.61, y: 0.44, width: 0.06, height: 0.08 } },
         ],
-        back: [],
+        back: [
+          { id: 'w1', label: 'W1', type: 'washer', drum: { x: 0.15, y: 0.40, width: 0.10, height: 0.25 }, display: { x: 0.16, y: 0.28, width: 0.08, height: 0.08 } },
+          { id: 'w2', label: 'W2', type: 'washer', drum: { x: 0.26, y: 0.40, width: 0.10, height: 0.25 }, display: { x: 0.27, y: 0.28, width: 0.08, height: 0.08 } },
+          { id: 'w3', label: 'W3', type: 'washer', drum: { x: 0.37, y: 0.40, width: 0.10, height: 0.25 }, display: { x: 0.38, y: 0.28, width: 0.08, height: 0.08 } },
+          { id: 'w4', label: 'W4', type: 'washer', drum: { x: 0.48, y: 0.40, width: 0.10, height: 0.25 }, display: { x: 0.49, y: 0.28, width: 0.08, height: 0.08 } },
+        ],
       },
       LdBrandoa2: {
         front: [
-          { id: 'w1', label: 'W1', type: 'washer', drum: { x: 0.05, y: 0.50, width: 0.07, height: 0.38 } },
-          { id: 'w2', label: 'W2', type: 'washer', drum: { x: 0.13, y: 0.50, width: 0.08, height: 0.38 } },
-          { id: 'w3', label: 'W3', type: 'washer', drum: { x: 0.22, y: 0.50, width: 0.08, height: 0.38 } },
-          { id: 'w4', label: 'W4', type: 'washer', drum: { x: 0.32, y: 0.50, width: 0.09, height: 0.38 } },
-          { id: 'd1', label: 'D1', type: 'dryer', drum: { x: 0.73, y: 0.15, width: 0.07, height: 0.22 } },
-          { id: 'd2', label: 'D2', type: 'dryer', drum: { x: 0.81, y: 0.15, width: 0.07, height: 0.22 } },
-          { id: 'd3', label: 'D3', type: 'dryer', drum: { x: 0.89, y: 0.15, width: 0.07, height: 0.22 } },
-          { id: 'd4', label: 'D4', type: 'dryer', drum: { x: 0.73, y: 0.52, width: 0.07, height: 0.26 } },
-          { id: 'd5', label: 'D5', type: 'dryer', drum: { x: 0.81, y: 0.52, width: 0.07, height: 0.26 } },
-          { id: 'd6', label: 'D6', type: 'dryer', drum: { x: 0.89, y: 0.52, width: 0.07, height: 0.26 } },
+          { id: 'w1', label: 'W1', type: 'washer', drum: { x: 0.055, y: 0.44, width: 0.11, height: 0.28 }, display: { x: 0.055, y: 0.32, width: 0.11, height: 0.10 } },
+          { id: 'w2', label: 'W2', type: 'washer', drum: { x: 0.18, y: 0.44, width: 0.11, height: 0.28 }, display: { x: 0.18, y: 0.32, width: 0.11, height: 0.10 } },
+          { id: 'w3', label: 'W3', type: 'washer', drum: { x: 0.305, y: 0.44, width: 0.11, height: 0.28 }, display: { x: 0.305, y: 0.32, width: 0.11, height: 0.10 } },
+          { id: 'w4', label: 'W4', type: 'washer', drum: { x: 0.43, y: 0.44, width: 0.11, height: 0.28 }, display: { x: 0.43, y: 0.32, width: 0.11, height: 0.10 } },
         ],
-        back: [],
+        back: [
+          { id: 'd1', label: 'D1', type: 'dryer', drum: { x: 0.50, y: 0.08, width: 0.11, height: 0.24 }, display: { x: 0.50, y: 0.33, width: 0.055, height: 0.06 } },
+          { id: 'd2', label: 'D2', type: 'dryer', drum: { x: 0.50, y: 0.42, width: 0.11, height: 0.26 }, display: { x: 0.555, y: 0.33, width: 0.055, height: 0.06 } },
+          { id: 'd3', label: 'D3', type: 'dryer', drum: { x: 0.64, y: 0.08, width: 0.11, height: 0.24 }, display: { x: 0.64, y: 0.33, width: 0.055, height: 0.06 } },
+          { id: 'd4', label: 'D4', type: 'dryer', drum: { x: 0.64, y: 0.42, width: 0.11, height: 0.26 }, display: { x: 0.695, y: 0.33, width: 0.055, height: 0.06 } },
+          { id: 'd5', label: 'D5', type: 'dryer', drum: { x: 0.78, y: 0.08, width: 0.11, height: 0.24 }, display: { x: 0.78, y: 0.33, width: 0.055, height: 0.06 } },
+          { id: 'd6', label: 'D6', type: 'dryer', drum: { x: 0.78, y: 0.42, width: 0.11, height: 0.26 }, display: { x: 0.835, y: 0.33, width: 0.055, height: 0.06 } },
+        ],
       },
     };
 
@@ -515,6 +572,13 @@
       $('setupSection').style.display = mode === 'setup' ? 'block' : 'none';
 
       if (mode === 'setup') renderMachineList();
+      renderRegions();
+    }
+
+    function setRegionType(type) {
+      state.regionType = type;
+      $('drumTypeBtn').classList.toggle('active', type === 'drum');
+      $('displayTypeBtn').classList.toggle('active', type === 'display');
       renderRegions();
     }
 
@@ -551,7 +615,8 @@
         id: `${prefix}${nextNum}`,
         label: `${prefix.toUpperCase()}${nextNum}`,
         type,
-        drum: { x: 0.4, y: 0.4, width: 0.1, height: 0.15 }
+        drum: { x: 0.4, y: 0.4, width: 0.1, height: 0.15 },
+        display: { x: 0.4, y: 0.3, width: 0.1, height: 0.08 }
       });
 
       saveRegionConfig();
@@ -617,57 +682,91 @@
       if (!imgWidth || !imgHeight) return;
 
       machines.forEach(machine => {
-        const region = document.createElement('div');
-        region.className = 'region';
-        region.dataset.machineId = machine.id;
+        // In setup mode, show both drum and display regions
+        // In label mode, show only drum regions (for labeling running/idle)
+        const regionsToRender = state.mode === 'setup'
+          ? [
+              { type: 'drum', roi: machine.drum },
+              { type: 'display', roi: machine.display }
+            ]
+          : [{ type: 'drum', roi: machine.drum }];
 
-        // Status class
-        const status = frameLabels[machine.id];
-        if (status === 'running') region.classList.add('running');
-        else if (status === 'idle') region.classList.add('idle');
-        else region.classList.add('unlabeled');
+        regionsToRender.forEach(({ type: regionType, roi }) => {
+          if (!roi) return; // Skip if region doesn't exist
 
-        // Mode-specific styling
-        if (state.mode === 'setup') {
-          region.classList.add('setup-mode');
-          if (state.selectedMachineId === machine.id) region.classList.add('selected');
-        }
+          const region = document.createElement('div');
+          region.className = 'region';
+          region.dataset.machineId = machine.id;
+          region.dataset.regionType = regionType;
 
-        // Position
-        region.style.left = `${machine.drum.x * imgWidth}px`;
-        region.style.top = `${machine.drum.y * imgHeight}px`;
-        region.style.width = `${machine.drum.width * imgWidth}px`;
-        region.style.height = `${machine.drum.height * imgHeight}px`;
+          // Mode-specific styling
+          if (state.mode === 'setup') {
+            region.classList.add('setup-mode');
+            region.classList.add(`${regionType}-region`);
+            // Selected if this machine AND this region type is selected
+            const isSelected = state.selectedMachineId === machine.id && state.regionType === regionType;
+            if (isSelected) region.classList.add('selected');
+          } else {
+            // Label mode - show status
+            const status = frameLabels[machine.id];
+            if (status === 'running') region.classList.add('running');
+            else if (status === 'idle') region.classList.add('idle');
+            else region.classList.add('unlabeled');
+          }
 
-        // Label
-        const statusText = status || '?';
-        region.innerHTML = `<span class="region-label">${machine.label}: ${statusText}</span>`;
+          // Position
+          region.style.left = `${roi.x * imgWidth}px`;
+          region.style.top = `${roi.y * imgHeight}px`;
+          region.style.width = `${roi.width * imgWidth}px`;
+          region.style.height = `${roi.height * imgHeight}px`;
 
-        // Resize handles in setup mode
-        if (state.mode === 'setup' && state.selectedMachineId === machine.id) {
-          ['nw', 'ne', 'sw', 'se'].forEach(pos => {
-            const handle = document.createElement('div');
-            handle.className = `resize-handle ${pos}`;
-            handle.dataset.handle = pos;
-            region.appendChild(handle);
-          });
-        }
+          // Label
+          if (state.mode === 'setup') {
+            const typeLabel = regionType === 'drum' ? 'D' : 'S'; // D=Drum, S=Screen
+            region.innerHTML = `<span class="region-label">${machine.label} ${typeLabel}</span>`;
+          } else {
+            const statusText = frameLabels[machine.id] || '?';
+            region.innerHTML = `<span class="region-label">${machine.label}: ${statusText}</span>`;
+          }
 
-        // Events
-        region.addEventListener('mousedown', e => handleMouseDown(e, machine));
+          // Resize handles in setup mode for selected region
+          const isSelectedForResize = state.mode === 'setup' &&
+            state.selectedMachineId === machine.id &&
+            state.regionType === regionType;
+          if (isSelectedForResize) {
+            ['nw', 'ne', 'sw', 'se'].forEach(pos => {
+              const handle = document.createElement('div');
+              handle.className = `resize-handle ${pos}`;
+              handle.dataset.handle = pos;
+              region.appendChild(handle);
+            });
+          }
 
-        frameContainer.appendChild(region);
+          // Events
+          region.addEventListener('mousedown', e => handleMouseDown(e, machine, regionType));
+
+          frameContainer.appendChild(region);
+        });
       });
     }
 
     // ========== INTERACTION ==========
-    function handleMouseDown(e, machine) {
+    function handleMouseDown(e, machine, regionType = 'drum') {
       state.didMove = false;
       state.dragStart = { x: e.clientX, y: e.clientY };
-      state.dragStartRegion = { ...machine.drum };
+
+      // Get the correct ROI based on region type
+      const roi = regionType === 'display' ? machine.display : machine.drum;
+      if (!roi) return;
+
+      state.dragStartRegion = { ...roi };
+      state.selectedRegionType = regionType;
 
       if (state.mode === 'setup') {
         state.selectedMachineId = machine.id;
+        state.regionType = regionType; // Switch to this region type
+        $('drumTypeBtn').classList.toggle('active', regionType === 'drum');
+        $('displayTypeBtn').classList.toggle('active', regionType === 'display');
         renderMachineList();
 
         if (e.target.classList.contains('resize-handle')) {
@@ -698,33 +797,37 @@
       const machine = getMachines().find(m => m.id === state.selectedMachineId);
       if (!machine) return;
 
+      // Get the correct ROI to modify
+      const roi = state.selectedRegionType === 'display' ? machine.display : machine.drum;
+      if (!roi) return;
+
       if (state.isResizing) {
         const start = state.dragStartRegion;
         switch (state.resizeHandle) {
           case 'nw':
-            machine.drum.x = Math.max(0, start.x + dx);
-            machine.drum.y = Math.max(0, start.y + dy);
-            machine.drum.width = Math.max(0.02, start.width - dx);
-            machine.drum.height = Math.max(0.02, start.height - dy);
+            roi.x = Math.max(0, start.x + dx);
+            roi.y = Math.max(0, start.y + dy);
+            roi.width = Math.max(0.02, start.width - dx);
+            roi.height = Math.max(0.02, start.height - dy);
             break;
           case 'ne':
-            machine.drum.y = Math.max(0, start.y + dy);
-            machine.drum.width = Math.max(0.02, start.width + dx);
-            machine.drum.height = Math.max(0.02, start.height - dy);
+            roi.y = Math.max(0, start.y + dy);
+            roi.width = Math.max(0.02, start.width + dx);
+            roi.height = Math.max(0.02, start.height - dy);
             break;
           case 'sw':
-            machine.drum.x = Math.max(0, start.x + dx);
-            machine.drum.width = Math.max(0.02, start.width - dx);
-            machine.drum.height = Math.max(0.02, start.height + dy);
+            roi.x = Math.max(0, start.x + dx);
+            roi.width = Math.max(0.02, start.width - dx);
+            roi.height = Math.max(0.02, start.height + dy);
             break;
           case 'se':
-            machine.drum.width = Math.max(0.02, start.width + dx);
-            machine.drum.height = Math.max(0.02, start.height + dy);
+            roi.width = Math.max(0.02, start.width + dx);
+            roi.height = Math.max(0.02, start.height + dy);
             break;
         }
       } else if (state.isDragging) {
-        machine.drum.x = Math.max(0, Math.min(1 - machine.drum.width, state.dragStartRegion.x + dx));
-        machine.drum.y = Math.max(0, Math.min(1 - machine.drum.height, state.dragStartRegion.y + dy));
+        roi.x = Math.max(0, Math.min(1 - roi.width, state.dragStartRegion.x + dx));
+        roi.y = Math.max(0, Math.min(1 - roi.height, state.dragStartRegion.y + dy));
       }
 
       renderRegions();
@@ -1054,16 +1157,21 @@
       const machines = MACHINE_CONFIGS[agent][camera];
 
       let code = `// Machine config for ${agent} ${camera}\n`;
-      code += `// Copy to machineDetection.ts\n\n`;
-      code += `${camera}: [\n`;
+      code += `// Copy to machineDetection.ts MACHINE_CONFIGS\n\n`;
+      code += `// ${agent} ${camera} camera machines:\n`;
+      code += `[\n`;
 
       machines.forEach(m => {
-        code += `  { id: '${m.id}', label: '${m.label}', type: '${m.type}', `;
-        code += `drum: { x: ${m.drum.x.toFixed(3)}, y: ${m.drum.y.toFixed(3)}, `;
-        code += `width: ${m.drum.width.toFixed(3)}, height: ${m.drum.height.toFixed(3)} } },\n`;
+        code += `  {\n`;
+        code += `    id: '${m.id}', label: '${m.label}', type: '${m.type}', camera: '${camera}',\n`;
+        code += `    drum: { x: ${m.drum.x.toFixed(3)}, y: ${m.drum.y.toFixed(3)}, width: ${m.drum.width.toFixed(3)}, height: ${m.drum.height.toFixed(3)} },\n`;
+        if (m.display) {
+          code += `    display: { x: ${m.display.x.toFixed(3)}, y: ${m.display.y.toFixed(3)}, width: ${m.display.width.toFixed(3)}, height: ${m.display.height.toFixed(3)} },\n`;
+        }
+        code += `  },\n`;
       });
 
-      code += `],`;
+      code += `]`;
 
       $('exportArea').value = code;
     }

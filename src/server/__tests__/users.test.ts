@@ -1,6 +1,8 @@
 import request from 'supertest';
 import { describe, it, expect, vi } from 'vitest';
 
+const TEST_ADMIN_PASSWORD = 'test-admin-password-123';
+
 const setupApp = async () => {
   vi.resetModules();
   process.env.NODE_ENV = 'test';
@@ -12,6 +14,7 @@ const setupApp = async () => {
   process.env.SESSION_COOKIE_SECURE = 'false';
   process.env.CORS_ORIGINS = 'http://localhost';
   process.env.REQUIRE_CORS_ORIGINS = 'false';
+  process.env.INITIAL_ADMIN_PASSWORD = TEST_ADMIN_PASSWORD;
   const mod = await import('../index');
   return mod.app as import('express').Express;
 };
@@ -21,7 +24,7 @@ describe('User management API', () => {
     const app = await setupApp();
     const admin = request.agent(app);
 
-    await admin.post('/auth/login').send({ username: 'admin', password: 'admin' }).expect(200);
+    await admin.post('/auth/login').send({ username: 'admin', password: TEST_ADMIN_PASSWORD }).expect(200);
 
     const initial = await admin.get('/api/users').expect(200);
     expect(initial.body.some((u: any) => u.username === 'admin')).toBe(true);
