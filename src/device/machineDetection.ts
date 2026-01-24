@@ -72,47 +72,47 @@ export const MACHINE_CONFIGS: LaundryMachineConfig[] = [
       lidOpenBrightness: 80,
     },
     machines: [
-      // Front camera - 4 dryers only (washers detected from back camera)
+      // Front camera - 4 washers (recalibrated 2026-01-24)
       {
-        id: 'd5', label: 'D5', type: 'dryer', camera: 'front',
+        id: 'w1', label: 'W1', type: 'washer', camera: 'front',
+        drum: { x: 0.019, y: 0.707, width: 0.141, height: 0.241 },
+        display: { x: 0.055, y: 0.540, width: 0.035, height: 0.045 },
+      },
+      {
+        id: 'w2', label: 'W2', type: 'washer', camera: 'front',
+        drum: { x: 0.217, y: 0.541, width: 0.143, height: 0.262 },
+        display: { x: 0.190, y: 0.400, width: 0.035, height: 0.045 },
+      },
+      {
+        id: 'w3', label: 'W3', type: 'washer', camera: 'front',
+        drum: { x: 0.394, y: 0.391, width: 0.131, height: 0.247 },
+        display: { x: 0.340, y: 0.290, width: 0.035, height: 0.045 },
+      },
+      {
+        id: 'w4', label: 'W4', type: 'washer', camera: 'front',
+        drum: { x: 0.559, y: 0.275, width: 0.074, height: 0.226 },
+        display: { x: 0.490, y: 0.190, width: 0.030, height: 0.040 },
+      },
+      // Back camera - 4 dryers (shows dryers in UI)
+      {
+        id: 'd5', label: 'D5', type: 'dryer', camera: 'back',
         drum: { x: 0.655, y: 0.141, width: 0.140, height: 0.287 },
         display: { x: 0.616, y: 0.392, width: 0.033, height: 0.054 },
       },
       {
-        id: 'd6', label: 'D6', type: 'dryer', camera: 'front',
+        id: 'd6', label: 'D6', type: 'dryer', camera: 'back',
         drum: { x: 0.853, y: 0.239, width: 0.154, height: 0.370 },
         display: { x: 0.765, y: 0.493, width: 0.034, height: 0.064 },
       },
       {
-        id: 'd7', label: 'D7', type: 'dryer', camera: 'front',
+        id: 'd7', label: 'D7', type: 'dryer', camera: 'back',
         drum: { x: 0.624, y: 0.563, width: 0.120, height: 0.280 },
         display: { x: 0.810, y: 0.529, width: 0.037, height: 0.066 },
       },
       {
-        id: 'd8', label: 'D8', type: 'dryer', camera: 'front',
+        id: 'd8', label: 'D8', type: 'dryer', camera: 'back',
         drum: { x: 0.790, y: 0.750, width: 0.147, height: 0.228 },
         display: { x: 0.963, y: 0.656, width: 0.037, height: 0.075 },
-      },
-      // Back camera - 4 washers (calibrated 2026-01-24)
-      {
-        id: 'w1', label: 'W1', type: 'washer', camera: 'back',
-        drum: { x: 0.019, y: 0.707, width: 0.141, height: 0.241 },
-        display: { x: 0.000, y: 0.603, width: 0.080, height: 0.080 },
-      },
-      {
-        id: 'w2', label: 'W2', type: 'washer', camera: 'back',
-        drum: { x: 0.217, y: 0.541, width: 0.143, height: 0.262 },
-        display: { x: 0.232, y: 0.411, width: 0.080, height: 0.080 },
-      },
-      {
-        id: 'w3', label: 'W3', type: 'washer', camera: 'back',
-        drum: { x: 0.394, y: 0.391, width: 0.131, height: 0.247 },
-        display: { x: 0.420, y: 0.274, width: 0.080, height: 0.080 },
-      },
-      {
-        id: 'w4', label: 'W4', type: 'washer', camera: 'back',
-        drum: { x: 0.559, y: 0.275, width: 0.074, height: 0.226 },
-        display: { x: 0.580, y: 0.168, width: 0.062, height: 0.065 },
       },
     ],
   },
