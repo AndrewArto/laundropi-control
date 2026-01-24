@@ -4,12 +4,12 @@
  * Three-criteria detection (ROI-based, no ML):
  * 1. Display: Dark = IDLE (definitive), Lit = could be either
  * 2. Lid: Open = IDLE (definitive), Closed = could be either
- * 3. Clothes in drum: Yes = RUNNING (definitive), No = could be either
+ * 3. Clothes in drum: Yes = RUNNING (supporting), No = could be either
  *
- * Decision logic:
- * - If clothes visible → RUNNING (highest priority)
- * - Else if display is off → IDLE
+ * Decision logic (door open or screen off = IDLE takes priority):
+ * - If display is off → IDLE (highest priority)
  * - Else if lid is open → IDLE
+ * - Else if clothes visible → RUNNING
  * - Else → RUNNING (display on, lid closed, no clothes visible but could be running)
  *
  * Washer layout: Display is centered above the drum
@@ -69,7 +69,7 @@ export const MACHINE_CONFIGS: LaundryMachineConfig[] = [
     thresholds: {
       displayBrightnessOn: 120,
       clothesVariance: 100,
-      lidOpenBrightness: 80,
+      lidOpenBrightness: 60,
     },
     machines: [
       // Front camera - 4 washers (recalibrated 2026-01-24 - targeting LCD screens)
@@ -343,22 +343,22 @@ export function analyzeFrame(
     const hasClothes = drumStats.variance > clothesVariance;
     const lidIsOpen = drumStats.avgBrightness > lidOpenBrightness;
 
-    // Decision logic
+    // Decision logic - door open or screen off = IDLE (highest priority)
     let status: MachineStatus;
     let reason: string;
 
-    if (hasClothes) {
-      // Clothes visible = definitely running
-      status = 'running';
-      reason = 'clothes';
-    } else if (!displayIsOn) {
-      // Display off = definitely idle
+    if (!displayIsOn) {
+      // Display off = definitely idle (highest priority)
       status = 'idle';
       reason = 'display-off';
     } else if (lidIsOpen) {
       // Lid open (high brightness in drum) = idle
       status = 'idle';
       reason = 'lid-open';
+    } else if (hasClothes) {
+      // Clothes visible = running
+      status = 'running';
+      reason = 'clothes';
     } else {
       // Display on, lid closed, no visible clothes = assume running
       status = 'running';
