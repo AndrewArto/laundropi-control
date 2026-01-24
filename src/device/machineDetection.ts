@@ -20,7 +20,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import type { LaundryMachine, MachineStatus, MachineType } from '../../types';
+import type { LaundryMachine, MachineStatus, MachineType, DetectionReason } from '../../types';
 
 // Training data collection
 const TRAINING_DATA_DIR = '/tmp/machine-detection-frames';
@@ -345,7 +345,7 @@ export function analyzeFrame(
 
     // Decision logic - door open or screen off = IDLE (highest priority)
     let status: MachineStatus;
-    let reason: string;
+    let reason: DetectionReason;
 
     if (!displayIsOn) {
       // Display off = definitely idle (highest priority)
@@ -377,6 +377,7 @@ export function analyzeFrame(
       label: machine.label,
       type: machine.type,
       status,
+      reason,
       lastUpdated: now,
     });
   }

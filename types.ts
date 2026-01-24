@@ -237,11 +237,14 @@ export interface ExpenditureAudit {
 export type MachineType = 'washer' | 'dryer';
 export type MachineStatus = 'idle' | 'running' | 'unknown';
 
+export type DetectionReason = 'display-off' | 'lid-open' | 'clothes' | 'display-on' | 'unknown';
+
 export interface LaundryMachine {
   id: string;
   label: string;
   type: MachineType;
   status: MachineStatus;
+  reason?: DetectionReason;
   lastUpdated: number;
 }
 

@@ -320,17 +320,25 @@ export const DashboardView: React.FC<DashboardViewProps> = (props) => {
                                     ? 'border-slate-600 bg-slate-800/50 text-slate-400'
                                     : 'border-slate-700 bg-slate-900/50 text-slate-500'
                                 }`}
+                                title={machine.reason ? `Detection: ${machine.reason}` : undefined}
                               >
                                 <span>{machine.label}</span>
-                                <span className={`px-1.5 py-0.5 rounded text-[10px] uppercase ${
-                                  machine.status === 'running'
-                                    ? 'bg-emerald-500/20 text-emerald-300'
-                                    : machine.status === 'idle'
-                                    ? 'bg-slate-700 text-slate-400'
-                                    : 'bg-slate-800 text-slate-500'
-                                }`}>
-                                  {machine.status}
-                                </span>
+                                <div className="flex items-center gap-1">
+                                  <span className={`px-1.5 py-0.5 rounded text-[10px] uppercase ${
+                                    machine.status === 'running'
+                                      ? 'bg-emerald-500/20 text-emerald-300'
+                                      : machine.status === 'idle'
+                                      ? 'bg-slate-700 text-slate-400'
+                                      : 'bg-slate-800 text-slate-500'
+                                  }`}>
+                                    {machine.status}
+                                  </span>
+                                  {machine.reason && (
+                                    <span className="text-[9px] text-slate-500">
+                                      ({machine.reason})
+                                    </span>
+                                  )}
+                                </div>
                               </div>
                             ))}
                           </div>
@@ -355,17 +363,25 @@ export const DashboardView: React.FC<DashboardViewProps> = (props) => {
                                     ? 'border-slate-600 bg-slate-800/50 text-slate-400'
                                     : 'border-slate-700 bg-slate-900/50 text-slate-500'
                                 }`}
+                                title={machine.reason ? `Detection: ${machine.reason}` : undefined}
                               >
                                 <span>{machine.label}</span>
-                                <span className={`px-1.5 py-0.5 rounded text-[10px] uppercase ${
-                                  machine.status === 'running'
-                                    ? 'bg-emerald-500/20 text-emerald-300'
-                                    : machine.status === 'idle'
-                                    ? 'bg-slate-700 text-slate-400'
-                                    : 'bg-slate-800 text-slate-500'
-                                }`}>
-                                  {machine.status}
-                                </span>
+                                <div className="flex items-center gap-1">
+                                  <span className={`px-1.5 py-0.5 rounded text-[10px] uppercase ${
+                                    machine.status === 'running'
+                                      ? 'bg-emerald-500/20 text-emerald-300'
+                                      : machine.status === 'idle'
+                                      ? 'bg-slate-700 text-slate-400'
+                                      : 'bg-slate-800 text-slate-500'
+                                  }`}>
+                                    {machine.status}
+                                  </span>
+                                  {machine.reason && (
+                                    <span className="text-[9px] text-slate-500">
+                                      ({machine.reason})
+                                    </span>
+                                  )}
+                                </div>
                               </div>
                             ))}
                           </div>
