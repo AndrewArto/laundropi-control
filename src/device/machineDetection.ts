@@ -120,8 +120,8 @@ export const MACHINE_CONFIGS: LaundryMachineConfig[] = [
     agentId: 'Brandoa2',
     thresholds: {
       displayBrightnessOn: 80,
-      clothesVariance: 100,
-      lidOpenBrightness: 80,
+      clothesVariance: 60,        // lowered from 100 - dryers show 70-104 variance with clothes
+      lidOpenBrightness: 120,     // raised from 80 - closed dryers show 63-115 brightness
     },
     machines: [
       // Front camera - 4 washers (recalibrated 2026-01-24 - smaller display ROIs targeting LCD)
