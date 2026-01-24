@@ -1,9 +1,10 @@
-import React, { useState } from 'react';
-import { Coins, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ChevronDown, ChevronUp, Download, CalendarClock, Upload, Building2 } from 'lucide-react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { Coins, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ChevronDown, ChevronUp, Download, CalendarClock, Upload, Building2, TrendingUp } from 'lucide-react';
 import { RevenueEntry, RevenueAuditEntry, RevenueSummary, UiUser, ExpenditureImport, ExpenditureTransaction, GENERAL_AGENT_ID, GENERAL_LAUNDRY } from '../../types';
 import type { DateEntryInfo } from '../../hooks/useRevenue';
 import { BankImportView } from './BankImportView';
 import type { ReconciliationSummary, PendingChange } from '../../hooks/useReconciliation';
+import { ApiService } from '../../services/api';
 
 // Map field names to user-friendly labels
 const fieldLabels: Record<string, string> = {
@@ -94,6 +95,178 @@ const DonutChart: React.FC<DonutChartProps> = ({ revenue, costs, size = 60, labe
   );
 };
 
+// Line chart component for monthly revenue/costs/P&L visualization
+interface LineChartDataPoint {
+  date: string;
+  revenue: number;
+  costs: number;
+  profitLoss: number;
+}
+
+interface LineChartProps {
+  data: LineChartDataPoint[];
+  formatMoney: (val: number) => string;
+}
+
+const MonthlyLineChart: React.FC<LineChartProps> = ({ data, formatMoney }) => {
+  if (data.length === 0) {
+    return <div className="text-sm text-slate-400 p-4">No data available for this month.</div>;
+  }
+
+  const width = 800;
+  const height = 300;
+  const padding = { top: 20, right: 20, bottom: 40, left: 60 };
+  const chartWidth = width - padding.left - padding.right;
+  const chartHeight = height - padding.top - padding.bottom;
+
+  // Calculate min/max values across all series
+  const allValues = data.flatMap(d => [d.revenue, d.costs, d.profitLoss]);
+  const minValue = Math.min(0, ...allValues);
+  const maxValue = Math.max(...allValues);
+  const valueRange = maxValue - minValue || 1;
+
+  // Scale functions
+  const xScale = (index: number) => padding.left + (index / (data.length - 1 || 1)) * chartWidth;
+  const yScale = (value: number) => padding.top + chartHeight - ((value - minValue) / valueRange) * chartHeight;
+
+  // Generate path strings
+  const generatePath = (values: number[]) => {
+    return values.map((v, i) => {
+      const x = xScale(i);
+      const y = yScale(v);
+      return i === 0 ? `M ${x} ${y}` : `L ${x} ${y}`;
+    }).join(' ');
+  };
+
+  const revenuePath = generatePath(data.map(d => d.revenue));
+  const costsPath = generatePath(data.map(d => d.costs));
+  const plPath = generatePath(data.map(d => d.profitLoss));
+
+  // Y-axis ticks
+  const yTicks = 5;
+  const yTickValues = Array.from({ length: yTicks + 1 }, (_, i) => minValue + (valueRange * i) / yTicks);
+
+  // X-axis labels (show every few days to avoid crowding)
+  const xLabelInterval = Math.max(1, Math.floor(data.length / 6));
+
+  return (
+    <div className="w-full overflow-x-auto">
+      <svg viewBox={`0 0 ${width} ${height}`} className="min-w-[600px] w-full h-auto">
+        {/* Grid lines */}
+        {yTickValues.map((val, i) => (
+          <line
+            key={i}
+            x1={padding.left}
+            y1={yScale(val)}
+            x2={width - padding.right}
+            y2={yScale(val)}
+            stroke="currentColor"
+            strokeOpacity={0.1}
+            className="text-slate-600"
+          />
+        ))}
+
+        {/* Zero line */}
+        {minValue < 0 && (
+          <line
+            x1={padding.left}
+            y1={yScale(0)}
+            x2={width - padding.right}
+            y2={yScale(0)}
+            stroke="currentColor"
+            strokeOpacity={0.3}
+            strokeDasharray="4 2"
+            className="text-slate-400"
+          />
+        )}
+
+        {/* Y-axis labels */}
+        {yTickValues.map((val, i) => (
+          <text
+            key={i}
+            x={padding.left - 8}
+            y={yScale(val)}
+            textAnchor="end"
+            dominantBaseline="middle"
+            className="text-[10px] fill-slate-500"
+          >
+            €{formatMoney(val)}
+          </text>
+        ))}
+
+        {/* X-axis labels */}
+        {data.map((d, i) => {
+          if (i % xLabelInterval !== 0 && i !== data.length - 1) return null;
+          const day = d.date.split('-')[2];
+          return (
+            <text
+              key={i}
+              x={xScale(i)}
+              y={height - padding.bottom + 20}
+              textAnchor="middle"
+              className="text-[10px] fill-slate-500"
+            >
+              {day}
+            </text>
+          );
+        })}
+
+        {/* Revenue line (white) */}
+        <path
+          d={revenuePath}
+          fill="none"
+          stroke="white"
+          strokeWidth={2}
+          strokeLinejoin="round"
+        />
+
+        {/* Costs line (red) */}
+        <path
+          d={costsPath}
+          fill="none"
+          stroke="#f87171"
+          strokeWidth={2}
+          strokeLinejoin="round"
+        />
+
+        {/* P/L line (green/emerald) */}
+        <path
+          d={plPath}
+          fill="none"
+          stroke="#34d399"
+          strokeWidth={2}
+          strokeLinejoin="round"
+        />
+
+        {/* Data points */}
+        {data.map((d, i) => (
+          <g key={i}>
+            <circle cx={xScale(i)} cy={yScale(d.revenue)} r={3} fill="white" />
+            <circle cx={xScale(i)} cy={yScale(d.costs)} r={3} fill="#f87171" />
+            <circle cx={xScale(i)} cy={yScale(d.profitLoss)} r={3} fill="#34d399" />
+          </g>
+        ))}
+      </svg>
+
+      {/* Legend */}
+      <div className="flex gap-4 justify-center mt-2 text-xs">
+        <div className="flex items-center gap-1">
+          <div className="w-3 h-0.5 bg-white" />
+          <span className="text-slate-400">Revenue</span>
+        </div>
+        <div className="flex items-center gap-1">
+          <div className="w-3 h-0.5 bg-red-400" />
+          <span className="text-slate-400">Costs</span>
+        </div>
+        <div className="flex items-center gap-1">
+          <div className="w-3 h-0.5 bg-emerald-400" />
+          <span className="text-slate-400">P/L</span>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 interface Laundry {
   id: string;
   name: string;
@@ -177,6 +350,11 @@ export const RevenueView: React.FC<RevenueViewProps> = (props) => {
   // Track which agent sections are expanded (default all collapsed)
   const [expandedAgents, setExpandedAgents] = useState<Set<string>>(new Set());
 
+  // Monthly line chart state
+  const [chartExpanded, setChartExpanded] = useState(false);
+  const [chartData, setChartData] = useState<LineChartDataPoint[]>([]);
+  const [chartLoading, setChartLoading] = useState(false);
+
   const toggleAgentExpanded = (agentId: string) => {
     setExpandedAgents(prev => {
       const next = new Set(prev);
@@ -188,6 +366,55 @@ export const RevenueView: React.FC<RevenueViewProps> = (props) => {
       return next;
     });
   };
+
+  // Fetch monthly chart data when expanded
+  const fetchChartData = useCallback(async (startDate: string, endDate: string) => {
+    setChartLoading(true);
+    try {
+      const entries = await ApiService.listRevenueEntries({ startDate, endDate });
+
+      // Group entries by date and sum up revenue/costs/P&L
+      const dailyMap = new Map<string, { revenue: number; costs: number; profitLoss: number }>();
+
+      // Initialize all days in the range
+      const start = new Date(startDate);
+      const end = new Date(endDate);
+      for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+        const dateStr = d.toISOString().split('T')[0];
+        dailyMap.set(dateStr, { revenue: 0, costs: 0, profitLoss: 0 });
+      }
+
+      // Aggregate entries
+      for (const entry of entries) {
+        const existing = dailyMap.get(entry.entryDate) || { revenue: 0, costs: 0, profitLoss: 0 };
+        const revenue = (entry.coinsTotal || 0) + (entry.billsTotal || 0);
+        const costs = entry.deductionsTotal || 0;
+        existing.revenue += revenue;
+        existing.costs += costs;
+        existing.profitLoss += revenue - costs;
+        dailyMap.set(entry.entryDate, existing);
+      }
+
+      // Convert to array sorted by date
+      const chartPoints: LineChartDataPoint[] = Array.from(dailyMap.entries())
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([date, values]) => ({ date, ...values }));
+
+      setChartData(chartPoints);
+    } catch (err) {
+      console.error('Failed to fetch chart data', err);
+      setChartData([]);
+    } finally {
+      setChartLoading(false);
+    }
+  }, []);
+
+  // Load chart data when expanded
+  useEffect(() => {
+    if (chartExpanded && props.revenueSummary) {
+      fetchChartData(props.revenueSummary.month.startDate, props.revenueSummary.month.endDate);
+    }
+  }, [chartExpanded, props.revenueSummary, fetchChartData]);
 
   const {
     authUser,
@@ -424,6 +651,43 @@ export const RevenueView: React.FC<RevenueViewProps> = (props) => {
           </div>
         );
       })()}
+
+      {/* Collapsible Monthly Line Chart */}
+      {revenueSummary && (
+        <div className="bg-slate-800 border border-slate-700 rounded-xl overflow-hidden">
+          <button
+            onClick={() => setChartExpanded(prev => !prev)}
+            className="w-full p-4 flex items-center justify-between gap-4 hover:bg-slate-700/30 transition-colors"
+          >
+            <div className="flex items-center gap-3">
+              {chartExpanded ? (
+                <ChevronUp className="w-5 h-5 text-indigo-400" />
+              ) : (
+                <ChevronDown className="w-5 h-5 text-indigo-400" />
+              )}
+              <div className="flex items-center gap-2">
+                <TrendingUp className="w-5 h-5 text-indigo-400" />
+                <div className="text-left">
+                  <div className="text-sm font-semibold text-white">Monthly Trend</div>
+                  <div className="text-xs text-slate-500">
+                    {chartExpanded ? 'Daily breakdown for ' : 'Click to view daily trend for '}{revenueSummary.month.startDate} → {revenueSummary.month.endDate}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </button>
+
+          {chartExpanded && (
+            <div className="p-4 pt-0">
+              {chartLoading ? (
+                <div className="text-sm text-slate-400 py-4">Loading chart data...</div>
+              ) : (
+                <MonthlyLineChart data={chartData} formatMoney={formatMoney} />
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       {revenueLoading && (
         <div className="text-sm text-slate-400">Loading revenue data...</div>
