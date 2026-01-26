@@ -846,13 +846,14 @@ export const RevenueView: React.FC<RevenueViewProps> = (props) => {
                     <div className="text-sm text-white">−€{formatMoney(monthFixCosts)}</div>
                   </div>
                   <div className="flex flex-col items-end gap-1 flex-shrink-0 ml-auto">
-                    {entry?.hasEdits && (
-                      <span className="text-xs px-2 py-1 rounded-full border border-amber-400 text-amber-200 bg-amber-500/10 whitespace-nowrap">
-                        Edited
-                      </span>
-                    )}
-                    <span className="text-xs px-2 py-1 rounded-full border border-purple-500/50 text-purple-300 bg-purple-500/10 whitespace-nowrap">
-                      {entry ? 'Entry loaded' : 'No entry yet'}
+                    <span className={`text-xs px-2 py-1 rounded-full border whitespace-nowrap ${
+                      entry?.hasEdits
+                        ? 'border-amber-400 text-amber-200 bg-amber-500/10'
+                        : entry
+                          ? 'border-green-500/50 text-green-300 bg-green-500/10'
+                          : 'border-purple-500/50 text-purple-300 bg-purple-500/10'
+                    }`}>
+                      {entry?.hasEdits ? 'Edited' : entry ? 'Entry loaded' : 'No entry yet'}
                     </span>
                   </div>
                 </div>
@@ -1020,13 +1021,14 @@ export const RevenueView: React.FC<RevenueViewProps> = (props) => {
                   />
                 </div>
                 <div className="flex flex-col items-end gap-1 flex-shrink-0 ml-auto">
-                  {entry?.hasEdits && (
-                    <span className="text-xs px-2 py-1 rounded-full border border-amber-400 text-amber-200 bg-amber-500/10 whitespace-nowrap">
-                      Edited
-                    </span>
-                  )}
-                  <span className="text-xs px-2 py-1 rounded-full border border-slate-600 text-slate-300 bg-slate-900/40 whitespace-nowrap">
-                    {entry ? 'Entry loaded' : 'No entry yet'}
+                  <span className={`text-xs px-2 py-1 rounded-full border whitespace-nowrap ${
+                    entry?.hasEdits
+                      ? 'border-amber-400 text-amber-200 bg-amber-500/10'
+                      : entry
+                        ? 'border-green-500/50 text-green-300 bg-green-500/10'
+                        : 'border-slate-600 text-slate-300 bg-slate-900/40'
+                  }`}>
+                    {entry?.hasEdits ? 'Edited' : entry ? 'Entry loaded' : 'No entry yet'}
                   </span>
                 </div>
               </div>
