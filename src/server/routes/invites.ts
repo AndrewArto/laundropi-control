@@ -16,6 +16,8 @@ import { getSession } from '../middleware/auth';
 import { sendInviteEmail } from '../services/email';
 
 const router = express.Router();
+// Public router for unauthenticated endpoints (validate/complete)
+export const publicRouter = express.Router();
 
 // Default viewer expiry in days (30 days)
 const VIEWER_DEFAULT_EXPIRY_DAYS = Number(process.env.VIEWER_DEFAULT_EXPIRY_DAYS || 30);
@@ -134,7 +136,7 @@ router.delete('/:tokenPrefix', (req, res) => {
  * GET /api/invites/validate/:token
  * Validate token (public - for setup page)
  */
-router.get('/validate/:token', (req, res) => {
+publicRouter.get('/validate/:token', (req, res) => {
   const token = req.params.token;
   const invite = getInviteToken(token);
 
@@ -161,7 +163,7 @@ router.get('/validate/:token', (req, res) => {
  * POST /api/invites/complete/:token
  * Set password and create account (public - for setup page)
  */
-router.post('/complete/:token', (req, res) => {
+publicRouter.post('/complete/:token', (req, res) => {
   const token = req.params.token;
   const password = String(req.body?.password || '');
 

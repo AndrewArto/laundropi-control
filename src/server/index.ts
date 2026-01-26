@@ -7,7 +7,7 @@ import * as crypto from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
 import { listAgents, updateHeartbeat, saveMeta, getAgent, updateRelayMeta, listSchedules, upsertSchedule, deleteSchedule, listGroups, listGroupsForMembership, upsertGroup, deleteGroup, GroupRow, deleteAgent, upsertAgent, upsertCommand, listPendingCommands, deleteCommand, updateCommandsForRelay, expireOldCommands, insertLead, getLastLeadTimestampForIp, listLeads, getRevenueEntry, listRevenueEntriesBetween, listRevenueEntries, listRevenueEntryDatesBetween, listRevenueEntryDatesWithInfo, upsertRevenueEntry, insertRevenueAudit, listRevenueAudit, RevenueEntryRow, listUiUsers, getUiUser, createUiUser, updateUiUserRole, updateUiUserPassword, updateUiUserLastLogin, deleteUiUser, countUiUsers, listCameras, getCamera, upsertCamera, deleteCamera, upsertIntegrationSecret, getIntegrationSecret, deleteIntegrationSecret, CameraRow, listInventory, getInventory, updateInventory, getInventoryAudit, getLastInventoryChange, DetergentType } from './db';
 import expenditureRoutes from './routes/expenditure';
-import inviteRoutes from './routes/invites';
+import inviteRoutes, { publicRouter as invitePublicRoutes } from './routes/invites';
 
 
 const asBool = (val: string | undefined, fallback = false) => {
@@ -1165,8 +1165,7 @@ app.use(express.static(path.join(__dirname, '../../public')));
 
 // Public invite endpoints (must be registered BEFORE global /api auth middleware)
 // These allow unauthenticated access for the setup page
-app.use('/api/invites/validate', inviteRoutes);
-app.use('/api/invites/complete', inviteRoutes);
+app.use('/api/invites', invitePublicRoutes);
 
 // Apply authentication middleware to all /api routes
 app.use('/api', requireUiAuth);
