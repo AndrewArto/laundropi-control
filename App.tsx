@@ -917,7 +917,8 @@ const App: React.FC = () => {
     if (!isAuthenticated || authUser?.role !== 'admin') return;
     if (activeTab !== Tab.SETTINGS) return;
     fetchUsersFromHook(handleAuthFailure);
-  }, [activeTab, isAuthenticated, authUser?.role, fetchUsersFromHook, handleAuthFailure]);
+    fetchInvitesFromHook(handleAuthFailure);
+  }, [activeTab, isAuthenticated, authUser?.role, fetchUsersFromHook, fetchInvitesFromHook, handleAuthFailure]);
 
   useEffect(() => {
     const primary = laundries[0];
