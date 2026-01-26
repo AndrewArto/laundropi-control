@@ -10,6 +10,7 @@ lerna-debug.log*
 node_modules
 dist
 dist-ssr
+dist-agent
 *.local
 
 # Editor directories and files
@@ -33,6 +34,11 @@ tmp/
 
 # Local DB and certificates
 central.db
+
+# Tools temporary output
+tools/calibration-frames/
+tools/roi-calibration/
+tools/training-frames/
 central.db-shm
 central.db-wal
 central.aws.db*
