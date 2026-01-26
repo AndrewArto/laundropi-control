@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { SettingsView } from '../views/SettingsView';
+import type { UserRole } from '../../types';
 
 describe('SettingsView', () => {
   const mockAdminUser = {
@@ -20,20 +21,33 @@ describe('SettingsView', () => {
     userCreateLoading: false,
     newUserName: '',
     newUserPassword: '',
-    newUserRole: 'user' as const,
+    newUserRole: 'user' as UserRole,
     userRoleDrafts: {},
     userPasswordDrafts: {},
     userSaving: {},
     userSaveErrors: {},
+    // Invite props
+    invites: [],
+    invitesLoading: false,
+    invitesError: null,
+    inviteEmail: '',
+    inviteSending: false,
+    inviteResult: null,
+    inviteError: null,
     setNewUserName: vi.fn(),
     setNewUserPassword: vi.fn(),
     setNewUserRole: vi.fn(),
     setUserRoleDrafts: vi.fn(),
     setUserPasswordDrafts: vi.fn(),
+    setInviteEmail: vi.fn(),
+    setInviteResult: vi.fn(),
     fetchUsers: vi.fn(),
+    fetchInvites: vi.fn(),
     handleCreateUserFromHook: vi.fn(),
     handleRoleSaveFromHook: vi.fn(),
     handlePasswordSaveFromHook: vi.fn(),
+    handleSendInviteFromHook: vi.fn(),
+    handleCancelInviteFromHook: vi.fn(),
     handleAuthFailure: vi.fn(),
     formatLastLogin: vi.fn(() => 'Just now'),
   };

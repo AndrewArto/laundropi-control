@@ -177,6 +177,27 @@ export const ApiService = {
     });
   },
 
+  // Invite endpoints for viewer role
+  async createInvite(email: string, expiryDays?: number): Promise<{ ok: boolean; invite: { email: string; expiryDays: number }; mockUrl?: string }> {
+    const res = await request(`${API_BASE}/invites`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, expiryDays })
+    });
+    return await res.json();
+  },
+
+  async listInvites(): Promise<Array<{ token: string; email: string; role: string; expiresAt: number; createdBy: string; createdAt: number }>> {
+    const res = await request(`${API_BASE}/invites`);
+    return await res.json();
+  },
+
+  async cancelInvite(tokenPrefix: string): Promise<void> {
+    await request(`${API_BASE}/invites/${tokenPrefix}`, {
+      method: 'DELETE'
+    });
+  },
+
   async listAgents(): Promise<{ agentId: string; lastHeartbeat: number | null; online: boolean }[]> {
     const res = await request(`${API_BASE}/agents`);
     return await res.json();

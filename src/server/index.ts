@@ -7,6 +7,7 @@ import * as crypto from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
 import { listAgents, updateHeartbeat, saveMeta, getAgent, updateRelayMeta, listSchedules, upsertSchedule, deleteSchedule, listGroups, listGroupsForMembership, upsertGroup, deleteGroup, GroupRow, deleteAgent, upsertAgent, upsertCommand, listPendingCommands, deleteCommand, updateCommandsForRelay, expireOldCommands, insertLead, getLastLeadTimestampForIp, listLeads, getRevenueEntry, listRevenueEntriesBetween, listRevenueEntries, listRevenueEntryDatesBetween, listRevenueEntryDatesWithInfo, upsertRevenueEntry, insertRevenueAudit, listRevenueAudit, RevenueEntryRow, listUiUsers, getUiUser, createUiUser, updateUiUserRole, updateUiUserPassword, updateUiUserLastLogin, countUiUsers, listCameras, getCamera, upsertCamera, deleteCamera, upsertIntegrationSecret, getIntegrationSecret, deleteIntegrationSecret, CameraRow, listInventory, getInventory, updateInventory, getInventoryAudit, getLastInventoryChange, DetergentType } from './db';
 import expenditureRoutes from './routes/expenditure';
+import inviteRoutes from './routes/invites';
 
 
 const asBool = (val: string | undefined, fallback = false) => {
@@ -131,9 +132,13 @@ const normalizeSameSite = (val?: string) => {
   return 'lax';
 };
 
-type UserRole = 'admin' | 'user';
+type UserRole = 'admin' | 'user' | 'viewer';
 
-const normalizeRole = (val?: string): UserRole => (val === 'admin' ? 'admin' : 'user');
+const normalizeRole = (val?: string): UserRole => {
+  if (val === 'admin') return 'admin';
+  if (val === 'viewer') return 'viewer';
+  return 'user';
+};
 
 const isValidUsername = (val: string) => {
   const trimmed = val.trim();
@@ -426,16 +431,19 @@ const isSameFfmpegDevice = (a: string | null, b: string | null) => {
 };
 
 const getPrimaryCameraDefaults = (agentId: string, position: string): PrimaryCameraDefaults | null => {
-  if (!isPrimaryLaundry(agentId)) return null;
-  const raw = position === 'front'
-    ? PRIMARY_CAMERA_FRONT_RTSP_URL
-    : position === 'back'
-      ? PRIMARY_CAMERA_BACK_RTSP_URL
-      : '';
-  const rtspUrl = raw ? normalizeRtspUrl(raw) : null;
-  if (rtspUrl) {
-    return { sourceType: 'rtsp', rtspUrl, enabled: true };
+  // For primary laundry, check for configured RTSP URLs
+  if (isPrimaryLaundry(agentId)) {
+    const raw = position === 'front'
+      ? PRIMARY_CAMERA_FRONT_RTSP_URL
+      : position === 'back'
+        ? PRIMARY_CAMERA_BACK_RTSP_URL
+        : '';
+    const rtspUrl = raw ? normalizeRtspUrl(raw) : null;
+    if (rtspUrl) {
+      return { sourceType: 'rtsp', rtspUrl, enabled: true };
+    }
   }
+  // For ALL laundries, enable cameras by default if the setting is on
   if (PRIMARY_CAMERAS_DEFAULT_ENABLED) {
     return { enabled: true };
   }
@@ -978,6 +986,14 @@ const requireAdmin: express.RequestHandler = (_req, res, next) => {
   return next();
 };
 
+// Blocks viewers from write operations (allows admin and user)
+const requireAdminOrUser: express.RequestHandler = (_req, res, next) => {
+  if (!REQUIRE_UI_AUTH) return next();
+  const session = res.locals.user as SessionPayload | undefined;
+  if (!session || session.role === 'viewer') return res.status(403).json({ error: 'forbidden' });
+  return next();
+};
+
 app.get('/auth/session', (req, res) => {
   const session = getSession(req);
   res.setHeader('Cache-Control', 'no-store');
@@ -993,6 +1009,10 @@ app.post('/auth/login', (req, res) => {
   const user = getUiUser(username);
   if (!user || !verifyPassword(password, user.passwordHash)) {
     return res.status(401).json({ error: 'invalid credentials' });
+  }
+  // Check if account has expired
+  if (user.expiresAt && Date.now() > user.expiresAt) {
+    return res.status(401).json({ error: 'account_expired' });
   }
   const role = normalizeRole(user.role);
   updateUiUserLastLogin(user.username, Date.now());
@@ -1125,8 +1145,11 @@ app.use(express.static(path.join(__dirname, '../../public')));
 
 // Apply authentication middleware to all /api routes
 app.use('/api', requireUiAuth);
-app.use('/api/revenue', requireAdmin);
+// Revenue: viewers can read (GET), but only admin can write (PUT/POST)
+// Note: app.use with requireAdmin would block all methods, so we apply it per-route below
 app.use('/api/expenditure', requireAdmin, expenditureRoutes);
+// Invite routes handle auth internally (some endpoints are public)
+app.use('/api/invites', inviteRoutes);
 
 // Protected leads endpoints (admin only)
 app.get('/api/leads', requireAdmin, (_req, res) => {
@@ -1250,7 +1273,7 @@ app.get('/api/revenue/:agentId', (req, res) => {
   res.json({ entry, audit });
 });
 
-app.put('/api/revenue/:agentId', (req, res) => {
+app.put('/api/revenue/:agentId', requireAdmin, (req, res) => {
   const agentId = req.params.agentId;
   if (!isKnownLaundry(agentId)) {
     return res.status(404).json({ error: 'agent not found' });
@@ -1374,12 +1397,12 @@ app.get('/api/inventory', (req, res) => {
   res.json({ inventory });
 });
 
-app.post('/api/inventory/:agentId/:detergentType', (req, res) => {
+app.post('/api/inventory/:agentId/:detergentType', requireAdminOrUser, (req, res) => {
   const session = getSession(req);
   if (REQUIRE_UI_AUTH && !session) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
-  const username = session?.username || 'admin';
+  const username = session?.sub || 'admin';
 
   const { agentId, detergentType } = req.params;
   const { quantity } = req.body;
@@ -1471,6 +1494,7 @@ app.get('/api/agents/:id/cameras', (req, res) => {
   res.json({ cameras });
 });
 
+// Camera updates: all authenticated users can toggle enabled, admin/user can change other settings
 app.put('/api/agents/:id/cameras/:cameraId', (req, res) => {
   const agentId = req.params.id;
   const cameraId = req.params.cameraId;
@@ -1616,7 +1640,7 @@ app.post('/api/agents', (req, res) => {
   res.json({ ok: true });
 });
 
-app.delete('/api/agents/:id', (req, res) => {
+app.delete('/api/agents/:id', requireAdminOrUser, (req, res) => {
   const agentId = req.params.id;
   if (!isKnownLaundry(agentId)) {
     return res.status(404).json({ error: 'agent not found' });
@@ -1630,7 +1654,7 @@ app.delete('/api/agents/:id', (req, res) => {
   res.json({ ok: true });
 });
 
-app.post('/api/agents/:id/relays/:relayId/toggle', (req, res) => {
+app.post('/api/agents/:id/relays/:relayId/toggle', requireAdminOrUser, (req, res) => {
   const { id, relayId } = req.params;
   const target = agents.get(id);
   if (!target || target.socket.readyState !== WebSocket.OPEN) {
@@ -1641,7 +1665,7 @@ app.post('/api/agents/:id/relays/:relayId/toggle', (req, res) => {
   res.json({ ok: true, sent: { relayId: Number(relayId), state } });
 });
 
-app.post('/api/agents/:id/relays/:relayId/state', (req, res) => {
+app.post('/api/agents/:id/relays/:relayId/state', requireAdminOrUser, (req, res) => {
   const { id, relayId } = req.params;
   const target = agents.get(id);
   if (!target || target.socket.readyState !== WebSocket.OPEN) {
@@ -1708,7 +1732,7 @@ app.get('/api/dashboard', (req, res) => {
   });
 });
 
-app.put('/api/agents/:id/relays/:relayId/meta', (req, res) => {
+app.put('/api/agents/:id/relays/:relayId/meta', requireAdminOrUser, (req, res) => {
   const { id, relayId } = req.params;
   const ok = updateRelayMeta(id, Number(relayId), req.body || {});
   if (!ok) return res.status(404).json({ error: 'agent or relay not found' });
@@ -1817,7 +1841,7 @@ app.get('/api/agents/:id/schedules', (req, res) => {
   res.json(list);
 });
 
-app.post('/api/agents/:id/schedules', (req, res) => {
+app.post('/api/agents/:id/schedules', requireAdminOrUser, (req, res) => {
   const agentId = req.params.id;
   const { relayId, days, from, to, active } = req.body || {};
   const id = req.body?.id || `${Date.now()}`;
@@ -1829,7 +1853,7 @@ app.post('/api/agents/:id/schedules', (req, res) => {
   res.json(payload);
 });
 
-app.put('/api/agents/:id/schedules/:sid', (req, res) => {
+app.put('/api/agents/:id/schedules/:sid', requireAdminOrUser, (req, res) => {
   const agentId = req.params.id;
   const sid = req.params.sid;
   const existing = listSchedules(agentId).find(s => s.id === sid);
@@ -1848,7 +1872,7 @@ app.put('/api/agents/:id/schedules/:sid', (req, res) => {
   res.json(payload);
 });
 
-app.delete('/api/agents/:id/schedules/:sid', (req, res) => {
+app.delete('/api/agents/:id/schedules/:sid', requireAdminOrUser, (req, res) => {
   deleteSchedule(req.params.id, req.params.sid);
   console.log(`[central] schedule deleted agent=${req.params.id} id=${req.params.sid}`);
   pushSchedulesToAgent(req.params.id);
@@ -1861,7 +1885,7 @@ app.get('/api/agents/:id/groups', (req, res) => {
   res.json(list);
 });
 
-app.post('/api/agents/:id/groups', (req, res) => {
+app.post('/api/agents/:id/groups', requireAdminOrUser, (req, res) => {
   const agentId = req.params.id;
   const { name, entries, relayIds, onTime, offTime, days, active } = req.body || {};
   const normalizedEntries = Array.isArray(entries) && entries.length
@@ -1888,7 +1912,7 @@ app.post('/api/agents/:id/groups', (req, res) => {
   res.json(payload);
 });
 
-app.put('/api/agents/:id/groups/:gid', (req, res) => {
+app.put('/api/agents/:id/groups/:gid', requireAdminOrUser, (req, res) => {
   const agentId = req.params.id;
   const gid = req.params.gid;
   const existing = getNormalizedGroups().find(g => g.id === gid);
@@ -1918,7 +1942,7 @@ app.put('/api/agents/:id/groups/:gid', (req, res) => {
   res.json(payload);
 });
 
-app.delete('/api/agents/:id/groups/:gid', (req, res) => {
+app.delete('/api/agents/:id/groups/:gid', requireAdminOrUser, (req, res) => {
   const { id: agentId, gid } = { id: req.params.id, gid: req.params.gid };
   const existing = getNormalizedGroups().find(g => g.id === gid);
   deleteGroup(agentId, gid);
@@ -1928,7 +1952,7 @@ app.delete('/api/agents/:id/groups/:gid', (req, res) => {
   res.json({ ok: true });
 });
 
-app.post('/api/agents/:id/groups/:gid/action', (req, res) => {
+app.post('/api/agents/:id/groups/:gid/action', requireAdminOrUser, (req, res) => {
   const gid = req.params.gid;
   const action = req.body?.action === 'ON' ? 'on' : 'off';
   const group = getNormalizedGroups().find(g => g.id === gid);

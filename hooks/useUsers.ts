@@ -1,6 +1,21 @@
 import { useState, useCallback } from 'react';
-import { UiUser } from '../types';
+import { UiUser, UserRole } from '../types';
 import { ApiService } from '../services/api';
+
+export interface InviteInfo {
+  token: string;
+  email: string;
+  role: string;
+  expiresAt: number;
+  createdBy: string;
+  createdAt: number;
+}
+
+export interface InviteResult {
+  ok: boolean;
+  invite: { email: string; expiryDays: number };
+  mockUrl?: string;
+}
 
 export interface UseUsersReturn {
   users: UiUser[];
@@ -10,11 +25,19 @@ export interface UseUsersReturn {
   userCreateLoading: boolean;
   newUserName: string;
   newUserPassword: string;
-  newUserRole: 'admin' | 'user';
-  userRoleDrafts: Record<string, 'admin' | 'user'>;
+  newUserRole: UserRole;
+  userRoleDrafts: Record<string, UserRole>;
   userPasswordDrafts: Record<string, string>;
   userSaving: Record<string, boolean>;
   userSaveErrors: Record<string, string | null>;
+  // Invite state
+  invites: InviteInfo[];
+  invitesLoading: boolean;
+  invitesError: string | null;
+  inviteEmail: string;
+  inviteSending: boolean;
+  inviteResult: InviteResult | null;
+  inviteError: string | null;
   setUsers: React.Dispatch<React.SetStateAction<UiUser[]>>;
   setUsersLoading: React.Dispatch<React.SetStateAction<boolean>>;
   setUsersError: React.Dispatch<React.SetStateAction<string | null>>;
@@ -22,15 +45,20 @@ export interface UseUsersReturn {
   setUserCreateLoading: React.Dispatch<React.SetStateAction<boolean>>;
   setNewUserName: React.Dispatch<React.SetStateAction<string>>;
   setNewUserPassword: React.Dispatch<React.SetStateAction<string>>;
-  setNewUserRole: React.Dispatch<React.SetStateAction<'admin' | 'user'>>;
-  setUserRoleDrafts: React.Dispatch<React.SetStateAction<Record<string, 'admin' | 'user'>>>;
+  setNewUserRole: React.Dispatch<React.SetStateAction<UserRole>>;
+  setUserRoleDrafts: React.Dispatch<React.SetStateAction<Record<string, UserRole>>>;
   setUserPasswordDrafts: React.Dispatch<React.SetStateAction<Record<string, string>>>;
   setUserSaving: React.Dispatch<React.SetStateAction<Record<string, boolean>>>;
   setUserSaveErrors: React.Dispatch<React.SetStateAction<Record<string, string | null>>>;
+  setInviteEmail: React.Dispatch<React.SetStateAction<string>>;
+  setInviteResult: React.Dispatch<React.SetStateAction<InviteResult | null>>;
   fetchUsers: (handleAuthFailure: (err: unknown) => boolean) => Promise<void>;
   handleCreateUser: (e: React.FormEvent, handleAuthFailure: (err: unknown) => boolean) => Promise<void>;
   handleRoleSave: (username: string, handleAuthFailure: (err: unknown) => boolean) => Promise<void>;
   handlePasswordSave: (username: string, handleAuthFailure: (err: unknown) => boolean) => Promise<void>;
+  fetchInvites: (handleAuthFailure: (err: unknown) => boolean) => Promise<void>;
+  handleSendInvite: (e: React.FormEvent, handleAuthFailure: (err: unknown) => boolean) => Promise<void>;
+  handleCancelInvite: (tokenPrefix: string, handleAuthFailure: (err: unknown) => boolean) => Promise<void>;
   resetUsersState: () => void;
 }
 
@@ -42,11 +70,20 @@ export function useUsers(): UseUsersReturn {
   const [userCreateLoading, setUserCreateLoading] = useState(false);
   const [newUserName, setNewUserName] = useState('');
   const [newUserPassword, setNewUserPassword] = useState('');
-  const [newUserRole, setNewUserRole] = useState<'admin' | 'user'>('user');
-  const [userRoleDrafts, setUserRoleDrafts] = useState<Record<string, 'admin' | 'user'>>({});
+  const [newUserRole, setNewUserRole] = useState<UserRole>('user');
+  const [userRoleDrafts, setUserRoleDrafts] = useState<Record<string, UserRole>>({});
   const [userPasswordDrafts, setUserPasswordDrafts] = useState<Record<string, string>>({});
   const [userSaving, setUserSaving] = useState<Record<string, boolean>>({});
   const [userSaveErrors, setUserSaveErrors] = useState<Record<string, string | null>>({});
+
+  // Invite state
+  const [invites, setInvites] = useState<InviteInfo[]>([]);
+  const [invitesLoading, setInvitesLoading] = useState(false);
+  const [invitesError, setInvitesError] = useState<string | null>(null);
+  const [inviteEmail, setInviteEmail] = useState('');
+  const [inviteSending, setInviteSending] = useState(false);
+  const [inviteResult, setInviteResult] = useState<InviteResult | null>(null);
+  const [inviteError, setInviteError] = useState<string | null>(null);
 
   const fetchUsers = useCallback(async (handleAuthFailure: (err: unknown) => boolean) => {
     setUsersLoading(true);
@@ -54,7 +91,7 @@ export function useUsers(): UseUsersReturn {
     try {
       const list = await ApiService.listUsers();
       setUsers(list);
-      const roleDrafts: Record<string, 'admin' | 'user'> = {};
+      const roleDrafts: Record<string, UserRole> = {};
       list.forEach(user => {
         roleDrafts[user.username] = user.role;
       });
@@ -138,6 +175,62 @@ export function useUsers(): UseUsersReturn {
     }
   }, [userPasswordDrafts, fetchUsers]);
 
+  // Invite functions
+  const fetchInvites = useCallback(async (handleAuthFailure: (err: unknown) => boolean) => {
+    setInvitesLoading(true);
+    setInvitesError(null);
+    try {
+      const list = await ApiService.listInvites();
+      setInvites(list);
+    } catch (err) {
+      if (handleAuthFailure(err)) return;
+      console.error('Invite list fetch failed', err);
+      setInvitesError('Unable to load invites.');
+    } finally {
+      setInvitesLoading(false);
+    }
+  }, []);
+
+  const handleSendInvite = useCallback(async (e: React.FormEvent, handleAuthFailure: (err: unknown) => boolean) => {
+    e.preventDefault();
+    const email = inviteEmail.trim().toLowerCase();
+    if (!email || !email.includes('@')) {
+      setInviteError('Please enter a valid email address.');
+      return;
+    }
+    setInviteError(null);
+    setInviteResult(null);
+    setInviteSending(true);
+    try {
+      const result = await ApiService.createInvite(email);
+      setInviteResult(result);
+      setInviteEmail('');
+      await fetchInvites(handleAuthFailure);
+    } catch (err) {
+      if (handleAuthFailure(err)) return;
+      console.error('Invite send failed', err);
+      const status = (err as any)?.status;
+      if (status === 409) {
+        setInviteError('User with this email already exists.');
+      } else {
+        setInviteError('Failed to send invite.');
+      }
+    } finally {
+      setInviteSending(false);
+    }
+  }, [inviteEmail, fetchInvites]);
+
+  const handleCancelInvite = useCallback(async (tokenPrefix: string, handleAuthFailure: (err: unknown) => boolean) => {
+    try {
+      await ApiService.cancelInvite(tokenPrefix);
+      await fetchInvites(handleAuthFailure);
+    } catch (err) {
+      if (handleAuthFailure(err)) return;
+      console.error('Invite cancel failed', err);
+      setInvitesError('Failed to cancel invite.');
+    }
+  }, [fetchInvites]);
+
   const resetUsersState = useCallback(() => {
     setUsers([]);
     setUsersLoading(false);
@@ -151,6 +244,14 @@ export function useUsers(): UseUsersReturn {
     setUserPasswordDrafts({});
     setUserSaving({});
     setUserSaveErrors({});
+    // Reset invite state
+    setInvites([]);
+    setInvitesLoading(false);
+    setInvitesError(null);
+    setInviteEmail('');
+    setInviteSending(false);
+    setInviteResult(null);
+    setInviteError(null);
   }, []);
 
   return {
@@ -166,6 +267,14 @@ export function useUsers(): UseUsersReturn {
     userPasswordDrafts,
     userSaving,
     userSaveErrors,
+    // Invite state
+    invites,
+    invitesLoading,
+    invitesError,
+    inviteEmail,
+    inviteSending,
+    inviteResult,
+    inviteError,
     setUsers,
     setUsersLoading,
     setUsersError,
@@ -178,10 +287,15 @@ export function useUsers(): UseUsersReturn {
     setUserPasswordDrafts,
     setUserSaving,
     setUserSaveErrors,
+    setInviteEmail,
+    setInviteResult,
     fetchUsers,
     handleCreateUser,
     handleRoleSave,
     handlePasswordSave,
+    fetchInvites,
+    handleSendInvite,
+    handleCancelInvite,
     resetUsersState,
   };
 }

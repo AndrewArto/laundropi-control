@@ -17,6 +17,7 @@ interface BankImportViewProps {
   error: string | null;
   pendingChanges: Map<string, PendingChange>;
   hasUnsavedChanges: boolean;
+  isReadOnly?: boolean;
 
   onUploadCsv: (file: File) => Promise<{ success: boolean; error?: string; warnings?: string[] }>;
   onLoadImport: (importId: string) => Promise<void>;
@@ -51,6 +52,7 @@ export const BankImportView: React.FC<BankImportViewProps> = ({
   error,
   pendingChanges,
   hasUnsavedChanges,
+  isReadOnly = false,
   onUploadCsv,
   onLoadImport,
   onAssignTransaction,
@@ -239,23 +241,25 @@ export const BankImportView: React.FC<BankImportViewProps> = ({
                 <span>Stripe Payments ({newStripeCredits.length})</span>
                 <span className="text-xs text-slate-400 font-normal ml-2 hidden sm:inline">Assign to laundry revenue</span>
               </button>
-              <button
-                onClick={() => {
-                  // Assign all to default laundry (second laundry for Stripe, or first if only one)
-                  const defaultIdx = allLaundries.length > 2 ? 1 : 0;
-                  const defaultLaundry = allLaundries[defaultIdx];
-                  if (defaultLaundry) {
-                    newStripeCredits.forEach(tx => {
-                      if (!pendingChanges.has(tx.id) && !assigningItems.has(tx.id)) {
-                        onAssignStripeCredit(tx.id, defaultLaundry.id);
-                      }
-                    });
-                  }
-                }}
-                className="w-full sm:w-auto px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded text-sm font-medium whitespace-nowrap"
-              >
-                Process All → {allLaundries[allLaundries.length > 2 ? 1 : 0]?.name || 'Default'}
-              </button>
+              {!isReadOnly && (
+                <button
+                  onClick={() => {
+                    // Assign all to default laundry (second laundry for Stripe, or first if only one)
+                    const defaultIdx = allLaundries.length > 2 ? 1 : 0;
+                    const defaultLaundry = allLaundries[defaultIdx];
+                    if (defaultLaundry) {
+                      newStripeCredits.forEach(tx => {
+                        if (!pendingChanges.has(tx.id) && !assigningItems.has(tx.id)) {
+                          onAssignStripeCredit(tx.id, defaultLaundry.id);
+                        }
+                      });
+                    }
+                  }}
+                  className="w-full sm:w-auto px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded text-sm font-medium whitespace-nowrap"
+                >
+                  Process All → {allLaundries[allLaundries.length > 2 ? 1 : 0]?.name || 'Default'}
+                </button>
+              )}
             </div>
             {showStripe && (
               <div className="space-y-2">
@@ -318,26 +322,28 @@ export const BankImportView: React.FC<BankImportViewProps> = ({
                                     <button
                                       key={l.id}
                                       onClick={() => handleAssignStripe(tx.id, l.id)}
-                                      disabled={!!assigning}
+                                      disabled={!!assigning || isReadOnly}
                                       className={`px-3 py-1.5 rounded text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-blue-400 ${
                                         isSelected
                                           ? 'bg-blue-600 text-white'
                                           : 'bg-slate-700 hover:bg-slate-600 text-slate-200'
-                                      } ${assigning ? 'cursor-not-allowed' : ''}`}
+                                      } ${assigning || isReadOnly ? 'cursor-not-allowed opacity-60' : ''}`}
                                     >
                                       {l.name}
                                     </button>
                                   );
                                 });
                               })()}
-                              <button
-                                onClick={() => onIgnoreTransaction(tx.id)}
-                                disabled={!!assigning}
-                                className="p-1.5 text-slate-400 hover:text-slate-200 hover:bg-slate-700 rounded disabled:cursor-not-allowed"
-                                title="Ignore"
-                              >
-                                <Ban className="w-4 h-4" />
-                              </button>
+                              {!isReadOnly && (
+                                <button
+                                  onClick={() => onIgnoreTransaction(tx.id)}
+                                  disabled={!!assigning}
+                                  className="p-1.5 text-slate-400 hover:text-slate-200 hover:bg-slate-700 rounded disabled:cursor-not-allowed"
+                                  title="Ignore"
+                                >
+                                  <Ban className="w-4 h-4" />
+                                </button>
+                              )}
                             </>
                           )}
                         </div>
@@ -375,26 +381,28 @@ export const BankImportView: React.FC<BankImportViewProps> = ({
                                   <button
                                     key={l.id}
                                     onClick={() => handleAssignStripe(tx.id, l.id)}
-                                    disabled={!!assigning}
+                                    disabled={!!assigning || isReadOnly}
                                     className={`flex-1 px-2 py-2 rounded text-xs font-medium transition-colors ${
                                       isSelected
                                         ? 'bg-blue-600 text-white'
                                         : 'bg-slate-700 text-slate-200'
-                                    } ${assigning ? 'cursor-not-allowed' : ''}`}
+                                    } ${assigning || isReadOnly ? 'cursor-not-allowed opacity-60' : ''}`}
                                   >
                                     {l.name}
                                   </button>
                                 );
                               });
                             })()}
-                            <button
-                              onClick={() => onIgnoreTransaction(tx.id)}
-                              disabled={!!assigning}
-                              className="p-2 text-slate-400 hover:text-slate-200 hover:bg-slate-700 rounded disabled:cursor-not-allowed"
-                              title="Ignore"
-                            >
-                              <Ban className="w-4 h-4" />
-                            </button>
+                            {!isReadOnly && (
+                              <button
+                                onClick={() => onIgnoreTransaction(tx.id)}
+                                disabled={!!assigning}
+                                className="p-2 text-slate-400 hover:text-slate-200 hover:bg-slate-700 rounded disabled:cursor-not-allowed"
+                                title="Ignore"
+                              >
+                                <Ban className="w-4 h-4" />
+                              </button>
+                            )}
                           </div>
                         )}
                       </div>
@@ -418,22 +426,24 @@ export const BankImportView: React.FC<BankImportViewProps> = ({
                 <span className="w-2 h-2 rounded-full bg-amber-400 flex-shrink-0"></span>
                 <span>New Expenses ({newExpenses.length})</span>
               </button>
-              <button
-                onClick={() => {
-                  // Assign all to default laundry (first laundry for expenses)
-                  const defaultLaundry = allLaundries[0];
-                  if (defaultLaundry) {
-                    newExpenses.forEach(tx => {
-                      if (!pendingChanges.has(tx.id) && !assigningItems.has(tx.id)) {
-                        onAssignTransaction(tx.id, defaultLaundry.id);
-                      }
-                    });
-                  }
-                }}
-                className="w-full sm:w-auto px-3 py-1.5 bg-purple-600 hover:bg-purple-500 text-white rounded text-sm font-medium whitespace-nowrap"
-              >
-                Process All → {allLaundries[0]?.name || 'Default'}
-              </button>
+              {!isReadOnly && (
+                <button
+                  onClick={() => {
+                    // Assign all to default laundry (first laundry for expenses)
+                    const defaultLaundry = allLaundries[0];
+                    if (defaultLaundry) {
+                      newExpenses.forEach(tx => {
+                        if (!pendingChanges.has(tx.id) && !assigningItems.has(tx.id)) {
+                          onAssignTransaction(tx.id, defaultLaundry.id);
+                        }
+                      });
+                    }
+                  }}
+                  className="w-full sm:w-auto px-3 py-1.5 bg-purple-600 hover:bg-purple-500 text-white rounded text-sm font-medium whitespace-nowrap"
+                >
+                  Process All → {allLaundries[0]?.name || 'Default'}
+                </button>
+              )}
             </div>
             {showExpenses && (
               <div className="space-y-2">
@@ -494,26 +504,28 @@ export const BankImportView: React.FC<BankImportViewProps> = ({
                                     <button
                                       key={l.id}
                                       onClick={() => handleAssignExpense(tx.id, l.id)}
-                                      disabled={!!assigning}
+                                      disabled={!!assigning || isReadOnly}
                                       className={`px-3 py-1.5 rounded text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-purple-400 ${
                                         isSelected
                                           ? 'bg-purple-600 text-white'
                                           : 'bg-slate-700 hover:bg-slate-600 text-slate-200'
-                                      } ${assigning ? 'cursor-not-allowed' : ''}`}
+                                      } ${assigning || isReadOnly ? 'cursor-not-allowed opacity-60' : ''}`}
                                     >
                                       {l.name}
                                     </button>
                                   );
                                 });
                               })()}
-                              <button
-                                onClick={() => onIgnoreTransaction(tx.id)}
-                                disabled={!!assigning}
-                                className="p-1.5 text-slate-400 hover:text-slate-200 hover:bg-slate-700 rounded disabled:cursor-not-allowed"
-                                title="Ignore"
-                              >
-                                <Ban className="w-4 h-4" />
-                              </button>
+                              {!isReadOnly && (
+                                <button
+                                  onClick={() => onIgnoreTransaction(tx.id)}
+                                  disabled={!!assigning}
+                                  className="p-1.5 text-slate-400 hover:text-slate-200 hover:bg-slate-700 rounded disabled:cursor-not-allowed"
+                                  title="Ignore"
+                                >
+                                  <Ban className="w-4 h-4" />
+                                </button>
+                              )}
                             </>
                           )}
                         </div>
@@ -547,26 +559,28 @@ export const BankImportView: React.FC<BankImportViewProps> = ({
                                   <button
                                     key={l.id}
                                     onClick={() => handleAssignExpense(tx.id, l.id)}
-                                    disabled={!!assigning}
+                                    disabled={!!assigning || isReadOnly}
                                     className={`flex-1 px-2 py-2 rounded text-xs font-medium transition-colors ${
                                       isSelected
                                         ? 'bg-purple-600 text-white'
                                         : 'bg-slate-700 text-slate-200'
-                                    } ${assigning ? 'cursor-not-allowed' : ''}`}
+                                    } ${assigning || isReadOnly ? 'cursor-not-allowed opacity-60' : ''}`}
                                   >
                                     {l.name}
                                   </button>
                                 );
                               });
                             })()}
-                            <button
-                              onClick={() => onIgnoreTransaction(tx.id)}
-                              disabled={!!assigning}
-                              className="p-2 text-slate-400 hover:text-slate-200 hover:bg-slate-700 rounded disabled:cursor-not-allowed"
-                              title="Ignore"
-                            >
-                              <Ban className="w-4 h-4" />
-                            </button>
+                            {!isReadOnly && (
+                              <button
+                                onClick={() => onIgnoreTransaction(tx.id)}
+                                disabled={!!assigning}
+                                className="p-2 text-slate-400 hover:text-slate-200 hover:bg-slate-700 rounded disabled:cursor-not-allowed"
+                                title="Ignore"
+                              >
+                                <Ban className="w-4 h-4" />
+                              </button>
+                            )}
                           </div>
                         )}
                       </div>
@@ -612,7 +626,7 @@ export const BankImportView: React.FC<BankImportViewProps> = ({
                         <span className="text-slate-500">→</span>
                         <span className="text-slate-300 text-sm">{laundryName}</span>
                         <span className="text-slate-500 text-sm truncate flex-1">{tx.description}</span>
-                        {hasPending && !isCompleted && !isCancelled && (
+                        {hasPending && !isCompleted && !isCancelled && !isReadOnly && (
                           <button
                             onClick={() => onUndoChange(tx.id)}
                             className="p-1 text-amber-400 hover:text-amber-300"
@@ -634,7 +648,7 @@ export const BankImportView: React.FC<BankImportViewProps> = ({
                             <span className={`text-sm ${isStripe ? 'text-green-400' : 'text-red-400'}`}>
                               {isStripe ? '+' : '-'}{formatMoney(tx.amount)}
                             </span>
-                            {hasPending && !isCompleted && !isCancelled && (
+                            {hasPending && !isCompleted && !isCancelled && !isReadOnly && (
                               <button
                                 onClick={() => onUndoChange(tx.id)}
                                 className="p-1 text-amber-400 hover:text-amber-300"
@@ -693,7 +707,7 @@ export const BankImportView: React.FC<BankImportViewProps> = ({
                         {tx.reconciliationNotes && (
                           <span className="text-xs text-slate-500 italic truncate max-w-[150px]">{tx.reconciliationNotes}</span>
                         )}
-                        {!isCompleted && !isCancelled && (
+                        {!isCompleted && !isCancelled && !isReadOnly && (
                           hasPending ? (
                             <button
                               onClick={() => onUndoChange(tx.id)}
@@ -724,7 +738,7 @@ export const BankImportView: React.FC<BankImportViewProps> = ({
                             <span className={`text-sm ${isOtherCredit ? 'text-green-400/50' : 'text-slate-400'}`}>
                               {isOtherCredit ? '+' : '-'}{formatMoney(tx.amount)}
                             </span>
-                            {!isCompleted && !isCancelled && (
+                            {!isCompleted && !isCancelled && !isReadOnly && (
                               hasPending ? (
                                 <button
                                   onClick={() => onUndoChange(tx.id)}
@@ -758,7 +772,7 @@ export const BankImportView: React.FC<BankImportViewProps> = ({
         )}
 
         {/* Action Buttons */}
-        {!isCompleted && !isCancelled && (
+        {!isCompleted && !isCancelled && !isReadOnly && (
           <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 mt-8">
             {hasUnsavedChanges && (
               <button
@@ -842,53 +856,65 @@ export const BankImportView: React.FC<BankImportViewProps> = ({
       )}
 
       {/* Upload Area */}
-      <div
-        className={`border-2 border-dashed rounded-lg p-8 text-center transition-colors ${
-          dragOver
-            ? 'border-purple-500 bg-purple-500/10'
-            : 'border-slate-600 hover:border-slate-500'
-        }`}
-        onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
-        onDragLeave={() => setDragOver(false)}
-        onDrop={handleDrop}
-      >
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept=".csv"
-          onChange={handleFileSelect}
-          className="hidden"
-        />
+      {isReadOnly ? (
+        <div className="border-2 border-dashed rounded-lg p-8 text-center border-slate-700 bg-slate-800/30">
+          <Upload className="w-12 h-12 text-slate-500 mx-auto mb-4" />
+          <h2 className="text-lg font-semibold text-slate-400 mb-2">
+            Bank Statement Upload
+          </h2>
+          <p className="text-slate-500">
+            View existing imports in the history below
+          </p>
+        </div>
+      ) : (
+        <div
+          className={`border-2 border-dashed rounded-lg p-8 text-center transition-colors ${
+            dragOver
+              ? 'border-purple-500 bg-purple-500/10'
+              : 'border-slate-600 hover:border-slate-500'
+          }`}
+          onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+          onDragLeave={() => setDragOver(false)}
+          onDrop={handleDrop}
+        >
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".csv"
+            onChange={handleFileSelect}
+            className="hidden"
+          />
 
-        {uploading ? (
-          <>
-            <Loader2 className="w-12 h-12 text-purple-400 mx-auto mb-4 animate-spin" />
-            <h2 className="text-lg font-semibold text-slate-200 mb-2">
-              Processing CSV...
-            </h2>
-            <p className="text-slate-400">
-              Parsing transactions, please wait
-            </p>
-          </>
-        ) : (
-          <>
-            <Upload className="w-12 h-12 text-slate-400 mx-auto mb-4" />
-            <h2 className="text-lg font-semibold text-slate-200 mb-2">
-              Upload CGD Bank Statement
-            </h2>
-            <p className="text-slate-400 mb-4">
-              Drag and drop a CSV file here, or click to select
-            </p>
-            <button
-              onClick={() => fileInputRef.current?.click()}
-              disabled={uploading}
-              className="px-6 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded-lg font-medium disabled:opacity-50"
-            >
-              Select File
-            </button>
-          </>
-        )}
-      </div>
+          {uploading ? (
+            <>
+              <Loader2 className="w-12 h-12 text-purple-400 mx-auto mb-4 animate-spin" />
+              <h2 className="text-lg font-semibold text-slate-200 mb-2">
+                Processing CSV...
+              </h2>
+              <p className="text-slate-400">
+                Parsing transactions, please wait
+              </p>
+            </>
+          ) : (
+            <>
+              <Upload className="w-12 h-12 text-slate-400 mx-auto mb-4" />
+              <h2 className="text-lg font-semibold text-slate-200 mb-2">
+                Upload CGD Bank Statement
+              </h2>
+              <p className="text-slate-400 mb-4">
+                Drag and drop a CSV file here, or click to select
+              </p>
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                disabled={uploading}
+                className="px-6 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded-lg font-medium disabled:opacity-50"
+              >
+                Select File
+              </button>
+            </>
+          )}
+        </div>
+      )}
 
       {/* Import History */}
       <div className="mt-8">
@@ -938,7 +964,7 @@ export const BankImportView: React.FC<BankImportViewProps> = ({
                       >
                         View
                       </button>
-                      {imp.status !== 'completed' && (
+                      {imp.status !== 'completed' && !isReadOnly && (
                         <button
                           onClick={() => onDeleteImport(imp.id)}
                           className="p-1.5 text-slate-400 hover:text-red-400 rounded"
@@ -978,7 +1004,7 @@ export const BankImportView: React.FC<BankImportViewProps> = ({
                         >
                           View
                         </button>
-                        {imp.status !== 'completed' && (
+                        {imp.status !== 'completed' && !isReadOnly && (
                           <button
                             onClick={() => onDeleteImport(imp.id)}
                             className="p-1.5 text-slate-400 hover:text-red-400 rounded"

@@ -5,6 +5,12 @@
 1. **Run full test suite before any commit:** Always run `npm test` and ensure all tests pass before committing changes.
 2. **Fix all failing tests:** If tests fail, fix them before proceeding with the commit. Do not commit with failing tests.
 3. **Version tagging:** After significant changes, create a new minor version tag (e.g., v1.11.0) with a descriptive annotation.
+4. **Use `npm test` not `vitest`:** Always use `npm test` (which runs `vitest run`) instead of `vitest` directly. The `vitest` command starts in watch mode and does not exit, causing processes to stack up and consume memory.
+5. **Database migrations for each release:** When making database schema changes, add migration logic to `src/server/db.ts` that handles existing databases. Use the pattern:
+   - Check existing columns with `PRAGMA table_info(table_name)`
+   - Add missing columns with `ALTER TABLE ... ADD COLUMN` wrapped in try/catch
+   - This ensures both fresh databases and existing production/local databases work correctly
+6. **Clean up after yourself:** Once a task is complete, stop all local dev processes (central server, agents, bundlers). Kill any background processes started during the session to prevent resource consumption.
 
 ## SSH Access
 

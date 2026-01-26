@@ -12,13 +12,27 @@ export type AgentRecord = {
   scheduleVersion: string | null;
 };
 
+export type UserRole = 'admin' | 'user' | 'viewer';
+
 export type UiUserRecord = {
   username: string;
-  role: 'admin' | 'user';
+  role: UserRole;
   passwordHash: string;
   createdAt: number;
   updatedAt: number;
   lastLoginAt: number | null;
+  expiresAt: number | null;
+  invitedBy: string | null;
+};
+
+export type InviteTokenRow = {
+  token: string;
+  email: string;
+  role: UserRole;
+  expiresAt: number;
+  createdBy: string;
+  createdAt: number;
+  usedAt: number | null;
 };
 
 export type ScheduleRow = {
@@ -195,8 +209,22 @@ CREATE TABLE IF NOT EXISTS ui_users (
   passwordHash TEXT NOT NULL,
   createdAt INTEGER NOT NULL,
   updatedAt INTEGER NOT NULL,
-  lastLoginAt INTEGER
+  lastLoginAt INTEGER,
+  expiresAt INTEGER,
+  invitedBy TEXT
 );
+
+CREATE TABLE IF NOT EXISTS invite_tokens (
+  token TEXT PRIMARY KEY,
+  email TEXT NOT NULL,
+  role TEXT NOT NULL DEFAULT 'viewer',
+  expiresAt INTEGER NOT NULL,
+  createdBy TEXT NOT NULL,
+  createdAt INTEGER NOT NULL,
+  usedAt INTEGER
+);
+
+CREATE INDEX IF NOT EXISTS invite_tokens_email_idx ON invite_tokens(email);
 
 CREATE TABLE IF NOT EXISTS leads (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -377,6 +405,16 @@ try {
   if (!agentColNames.has('scheduleVersion')) db.prepare('ALTER TABLE agents ADD COLUMN scheduleVersion TEXT').run();
 } catch (_) {
   // ignore migration errors; subsequent reads handle missing columns
+}
+
+// Best-effort migration: add expiresAt and invitedBy columns to ui_users for viewer role support
+const uiUsersColumns = db.prepare(`PRAGMA table_info(ui_users)`).all() as any[];
+const uiUsersColNames = new Set(uiUsersColumns.map(c => c.name));
+try {
+  if (!uiUsersColNames.has('expiresAt')) db.prepare('ALTER TABLE ui_users ADD COLUMN expiresAt INTEGER').run();
+  if (!uiUsersColNames.has('invitedBy')) db.prepare('ALTER TABLE ui_users ADD COLUMN invitedBy TEXT').run();
+} catch (_) {
+  // ignore migration errors
 }
 
 const upsertStmt = db.prepare(`
@@ -627,13 +665,13 @@ export function expireOldCommands(now = Date.now()) {
 
 // --- UI USERS ---
 const listUiUsersStmt = db.prepare(`
-  SELECT username, role, passwordHash, createdAt, updatedAt, lastLoginAt
+  SELECT username, role, passwordHash, createdAt, updatedAt, lastLoginAt, expiresAt, invitedBy
   FROM ui_users
   ORDER BY username
 `);
 
 const getUiUserStmt = db.prepare(`
-  SELECT username, role, passwordHash, createdAt, updatedAt, lastLoginAt
+  SELECT username, role, passwordHash, createdAt, updatedAt, lastLoginAt, expiresAt, invitedBy
   FROM ui_users
   WHERE username = ?
 `);
@@ -641,8 +679,8 @@ const getUiUserStmt = db.prepare(`
 const countUiUsersStmt = db.prepare('SELECT COUNT(*) as count FROM ui_users');
 
 const insertUiUserStmt = db.prepare(`
-  INSERT INTO ui_users(username, role, passwordHash, createdAt, updatedAt, lastLoginAt)
-  VALUES (@username, @role, @passwordHash, @createdAt, @updatedAt, @lastLoginAt)
+  INSERT INTO ui_users(username, role, passwordHash, createdAt, updatedAt, lastLoginAt, expiresAt, invitedBy)
+  VALUES (@username, @role, @passwordHash, @createdAt, @updatedAt, @lastLoginAt, @expiresAt, @invitedBy)
 `);
 
 const updateUiUserRoleStmt = db.prepare(`
@@ -657,13 +695,21 @@ const updateUiUserLastLoginStmt = db.prepare(`
   UPDATE ui_users SET lastLoginAt = @lastLoginAt, updatedAt = @updatedAt WHERE username = @username
 `);
 
+const normalizeRole = (role: string): UserRole => {
+  if (role === 'admin') return 'admin';
+  if (role === 'viewer') return 'viewer';
+  return 'user';
+};
+
 const toUiUser = (row: any): UiUserRecord => ({
   username: row.username,
-  role: row.role === 'admin' ? 'admin' : 'user',
+  role: normalizeRole(row.role),
   passwordHash: row.passwordHash,
   createdAt: Number(row.createdAt) || 0,
   updatedAt: Number(row.updatedAt) || 0,
   lastLoginAt: row.lastLoginAt ?? null,
+  expiresAt: row.expiresAt ?? null,
+  invitedBy: row.invitedBy ?? null,
 });
 
 export function listUiUsers(): UiUserRecord[] {
@@ -689,11 +735,13 @@ export function createUiUser(user: UiUserRecord): boolean {
     createdAt: user.createdAt,
     updatedAt: user.updatedAt,
     lastLoginAt: user.lastLoginAt ?? null,
+    expiresAt: user.expiresAt ?? null,
+    invitedBy: user.invitedBy ?? null,
   });
   return info.changes > 0;
 }
 
-export function updateUiUserRole(username: string, role: 'admin' | 'user', updatedAt = Date.now()): boolean {
+export function updateUiUserRole(username: string, role: UserRole, updatedAt = Date.now()): boolean {
   const info = updateUiUserRoleStmt.run({ username, role, updatedAt });
   return info.changes > 0;
 }
@@ -705,6 +753,76 @@ export function updateUiUserPassword(username: string, passwordHash: string, upd
 
 export function updateUiUserLastLogin(username: string, lastLoginAt: number, updatedAt = Date.now()) {
   updateUiUserLastLoginStmt.run({ username, lastLoginAt, updatedAt });
+}
+
+// --- INVITE TOKENS ---
+const insertInviteTokenStmt = db.prepare(`
+  INSERT INTO invite_tokens(token, email, role, expiresAt, createdBy, createdAt, usedAt)
+  VALUES (@token, @email, @role, @expiresAt, @createdBy, @createdAt, @usedAt)
+`);
+
+const getInviteTokenStmt = db.prepare(`
+  SELECT token, email, role, expiresAt, createdBy, createdAt, usedAt
+  FROM invite_tokens
+  WHERE token = ?
+`);
+
+const listPendingInvitesStmt = db.prepare(`
+  SELECT token, email, role, expiresAt, createdBy, createdAt, usedAt
+  FROM invite_tokens
+  WHERE usedAt IS NULL AND expiresAt > ?
+  ORDER BY createdAt DESC
+`);
+
+const markInviteTokenUsedStmt = db.prepare(`
+  UPDATE invite_tokens SET usedAt = @usedAt WHERE token = @token
+`);
+
+const deleteInviteTokenStmt = db.prepare(`
+  DELETE FROM invite_tokens WHERE token = ?
+`);
+
+const toInviteToken = (row: any): InviteTokenRow => ({
+  token: row.token,
+  email: row.email,
+  role: normalizeRole(row.role),
+  expiresAt: Number(row.expiresAt) || 0,
+  createdBy: row.createdBy,
+  createdAt: Number(row.createdAt) || 0,
+  usedAt: row.usedAt ?? null,
+});
+
+export function createInviteToken(invite: InviteTokenRow): boolean {
+  const info = insertInviteTokenStmt.run({
+    token: invite.token,
+    email: invite.email,
+    role: invite.role,
+    expiresAt: invite.expiresAt,
+    createdBy: invite.createdBy,
+    createdAt: invite.createdAt,
+    usedAt: invite.usedAt ?? null,
+  });
+  return info.changes > 0;
+}
+
+export function getInviteToken(token: string): InviteTokenRow | null {
+  const row = getInviteTokenStmt.get(token) as any;
+  return row ? toInviteToken(row) : null;
+}
+
+export function listPendingInvites(now = Date.now()): InviteTokenRow[] {
+  const rows = listPendingInvitesStmt.all(now) as any[];
+  return rows.map(toInviteToken);
+}
+
+export function markInviteTokenUsed(token: string, usedAt = Date.now()): boolean {
+  const info = markInviteTokenUsedStmt.run({ token, usedAt });
+  return info.changes > 0;
+}
+
+export function deleteInviteToken(token: string): boolean {
+  const info = deleteInviteTokenStmt.run(token);
+  return info.changes > 0;
 }
 
 // --- LEADS ---

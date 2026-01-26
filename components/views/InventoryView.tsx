@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
 import { Minus, Edit2, History, AlertTriangle } from 'lucide-react';
-import type { DetergentType, InventoryItem, InventoryAudit, Laundry } from '../../types';
+import type { DetergentType, InventoryItem, InventoryAudit, Laundry, UiUser } from '../../types';
 import { formatTimestamp } from '../../utils/formatting';
 
 interface InventoryViewProps {
+  authUser: UiUser | null;
   laundries: Laundry[];
   inventory: Map<string, Map<DetergentType, InventoryItem>>;
   lastChanges: Map<string, InventoryAudit | null>;
@@ -29,6 +30,7 @@ const DETERGENT_COLORS: Record<DetergentType, string> = {
 const LOW_STOCK_THRESHOLD = 5;
 
 export const InventoryView: React.FC<InventoryViewProps> = ({
+  authUser,
   laundries,
   inventory,
   lastChanges,
@@ -39,6 +41,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   onCloseAudit,
 }) => {
   const [editingItem, setEditingItem] = useState<{ agentId: string; detergentType: DetergentType } | null>(null);
+  const isViewer = authUser?.role === 'viewer';
   const [editValue, setEditValue] = useState('');
   const [loading, setLoading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -221,26 +224,30 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                         {item.quantity} <span className="text-lg text-slate-400">cans</span>
                       </div>
 
-                      <div className="mb-3">
-                        <button
-                          onClick={() => handleDecrease(laundry.id, detergentType, item.quantity)}
-                          disabled={item.quantity === 0 || isLoading}
-                          className="w-full px-4 py-3 bg-red-600 hover:bg-red-500 disabled:bg-slate-700 disabled:text-slate-500 text-white rounded-lg font-semibold flex items-center justify-center gap-2 transition-colors"
-                        >
-                          <Minus className="w-5 h-5" />
-                          Use 1
-                        </button>
-                      </div>
+                      {!isViewer && (
+                        <div className="mb-3">
+                          <button
+                            onClick={() => handleDecrease(laundry.id, detergentType, item.quantity)}
+                            disabled={item.quantity === 0 || isLoading}
+                            className="w-full px-4 py-3 bg-red-600 hover:bg-red-500 disabled:bg-slate-700 disabled:text-slate-500 text-white rounded-lg font-semibold flex items-center justify-center gap-2 transition-colors"
+                          >
+                            <Minus className="w-5 h-5" />
+                            Use 1
+                          </button>
+                        </div>
+                      )}
 
                       <div className="flex gap-2">
-                        <button
-                          onClick={() => handleStartEdit(laundry.id, detergentType, item.quantity)}
-                          disabled={isLoading}
-                          className="flex-1 px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded text-sm flex items-center justify-center gap-2 disabled:opacity-50"
-                        >
-                          <Edit2 className="w-3.5 h-3.5" />
-                          Set amount
-                        </button>
+                        {!isViewer && (
+                          <button
+                            onClick={() => handleStartEdit(laundry.id, detergentType, item.quantity)}
+                            disabled={isLoading}
+                            className="flex-1 px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded text-sm flex items-center justify-center gap-2 disabled:opacity-50"
+                          >
+                            <Edit2 className="w-3.5 h-3.5" />
+                            Set amount
+                          </button>
+                        )}
                         <button
                           onClick={() => onViewAudit(laundry.id, detergentType)}
                           disabled={isLoading}

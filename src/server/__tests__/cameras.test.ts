@@ -1,6 +1,9 @@
 import request from 'supertest';
 import { describe, it, expect, vi } from 'vitest';
 
+const TEST_ADMIN_PASSWORD = 'test-admin-123';
+const TEST_VIEWER_PASSWORD = 'viewer-pass-456';
+
 const setupApp = async (overrides: Record<string, string | undefined> = {}) => {
   vi.resetModules();
   process.env.NODE_ENV = 'test';
@@ -19,6 +22,25 @@ const setupApp = async (overrides: Record<string, string | undefined> = {}) => {
       process.env[key] = value;
     }
   });
+  const mod = await import('../index');
+  return mod.app as import('express').Express;
+};
+
+const setupAppWithAuth = async () => {
+  vi.resetModules();
+  process.env.NODE_ENV = 'test';
+  process.env.CENTRAL_DB_PATH = ':memory:';
+  process.env.CENTRAL_ENV_FILE = '/dev/null';
+  process.env.ALLOW_INSECURE = 'false';
+  process.env.REQUIRE_UI_AUTH = 'true';
+  process.env.SESSION_SECRET = 'test-secret';
+  process.env.SESSION_COOKIE_SECURE = 'false';
+  process.env.CORS_ORIGINS = 'http://localhost';
+  process.env.REQUIRE_CORS_ORIGINS = 'false';
+  process.env.ALLOW_DYNAMIC_AGENT_REGISTRATION = 'true';
+  process.env.AGENT_SECRETS = '';
+  process.env.LAUNDRY_IDS = '';
+  process.env.INITIAL_ADMIN_PASSWORD = TEST_ADMIN_PASSWORD;
   const mod = await import('../index');
   return mod.app as import('express').Express;
 };
@@ -89,5 +111,37 @@ describe('Camera API', () => {
       .expect(200);
 
     expect(updateRes.body.camera.rtspUrl).toBe('ffmpeg:device?video=TestCam');
+  });
+
+  it('allows viewers to toggle camera enabled state', async () => {
+    const app = await setupAppWithAuth();
+    const admin = request.agent(app);
+    const viewer = request.agent(app);
+    const agentId = 'test-agent';
+
+    // Login as admin and create a viewer user
+    await admin.post('/auth/login').send({ username: 'admin', password: TEST_ADMIN_PASSWORD }).expect(200);
+    await admin.post('/api/users').send({ username: 'viewer1', password: TEST_VIEWER_PASSWORD, role: 'viewer' }).expect(200);
+
+    // Get camera list as admin
+    const listRes = await admin.get(`/api/agents/${agentId}/cameras`).expect(200);
+    const cameraId = listRes.body.cameras[0].id;
+    const initialEnabled = listRes.body.cameras[0].enabled;
+
+    // Login as viewer
+    await viewer.post('/auth/login').send({ username: 'viewer1', password: TEST_VIEWER_PASSWORD }).expect(200);
+
+    // Viewer can toggle camera enabled state
+    const updateRes = await viewer
+      .put(`/api/agents/${agentId}/cameras/${cameraId}`)
+      .send({ enabled: !initialEnabled })
+      .expect(200);
+
+    expect(updateRes.body.camera.enabled).toBe(!initialEnabled);
+
+    // Verify the change persisted
+    const listRes2 = await viewer.get(`/api/agents/${agentId}/cameras`).expect(200);
+    const updated = listRes2.body.cameras.find((cam: any) => cam.id === cameraId);
+    expect(updated.enabled).toBe(!initialEnabled);
   });
 });

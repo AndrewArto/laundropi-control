@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Set Up Your Account - WashControl</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #0f172a;
+      color: #f1f5f9;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+    .container {
+      max-width: 400px;
+      width: 100%;
+    }
+    .card {
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 12px;
+      padding: 32px;
+    }
+    .logo {
+      display: block;
+      max-width: 180px;
+      margin: 0 auto 24px;
+    }
+    h1 {
+      font-size: 20px;
+      font-weight: 600;
+      text-align: center;
+      margin-bottom: 8px;
+    }
+    .subtitle {
+      font-size: 14px;
+      color: #94a3b8;
+      text-align: center;
+      margin-bottom: 24px;
+    }
+    .form-group {
+      margin-bottom: 16px;
+    }
+    label {
+      display: block;
+      font-size: 13px;
+      color: #94a3b8;
+      margin-bottom: 6px;
+    }
+    input {
+      width: 100%;
+      background: #0f172a;
+      border: 1px solid #334155;
+      border-radius: 8px;
+      padding: 12px 14px;
+      font-size: 14px;
+      color: #f1f5f9;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    input:focus {
+      border-color: #6366f1;
+    }
+    input:disabled {
+      opacity: 0.5;
+    }
+    .btn {
+      width: 100%;
+      background: #6366f1;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      padding: 12px 20px;
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    .btn:hover:not(:disabled) {
+      background: #4f46e5;
+    }
+    .btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    .error {
+      background: rgba(239, 68, 68, 0.1);
+      border: 1px solid rgba(239, 68, 68, 0.3);
+      color: #fca5a5;
+      padding: 12px;
+      border-radius: 8px;
+      font-size: 13px;
+      margin-bottom: 16px;
+    }
+    .success {
+      background: rgba(34, 197, 94, 0.1);
+      border: 1px solid rgba(34, 197, 94, 0.3);
+      color: #86efac;
+      padding: 12px;
+      border-radius: 8px;
+      font-size: 13px;
+      text-align: center;
+    }
+    .success a {
+      color: #86efac;
+      font-weight: 500;
+    }
+    .info {
+      font-size: 12px;
+      color: #64748b;
+      margin-top: 12px;
+      text-align: center;
+    }
+    .hidden { display: none; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="card">
+      <img src="/assets/washcontrol-logo.svg" alt="WashControl" class="logo" onerror="this.style.display='none'">
+
+      <div id="loading">
+        <h1>Verifying Invitation</h1>
+        <p class="subtitle">Please wait...</p>
+      </div>
+
+      <div id="invalid" class="hidden">
+        <h1>Invalid Invitation</h1>
+        <p class="subtitle" id="invalid-message">This invitation link is invalid or has expired.</p>
+      </div>
+
+      <div id="form-section" class="hidden">
+        <h1>Set Up Your Account</h1>
+        <p class="subtitle">Welcome! Create a password to access WashControl.</p>
+
+        <div id="error-message" class="error hidden"></div>
+
+        <form id="setup-form">
+          <div class="form-group">
+            <label>Email</label>
+            <input type="email" id="email" disabled>
+          </div>
+          <div class="form-group">
+            <label>Password (min. 8 characters)</label>
+            <input type="password" id="password" required minlength="8" placeholder="Enter your password">
+          </div>
+          <div class="form-group">
+            <label>Confirm Password</label>
+            <input type="password" id="confirm-password" required minlength="8" placeholder="Confirm your password">
+          </div>
+          <button type="submit" class="btn" id="submit-btn">Create Account</button>
+          <p class="info" id="expiry-info"></p>
+        </form>
+      </div>
+
+      <div id="success" class="hidden">
+        <h1>Account Created!</h1>
+        <div class="success">
+          Your account has been created successfully.<br><br>
+          <a href="https://ui.washcontrol.io">Go to WashControl</a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const API_BASE = '/api'; // Proxied to central server by Caddy
+
+    const token = new URLSearchParams(window.location.search).get('token');
+
+    const loadingEl = document.getElementById('loading');
+    const invalidEl = document.getElementById('invalid');
+    const invalidMsgEl = document.getElementById('invalid-message');
+    const formSectionEl = document.getElementById('form-section');
+    const successEl = document.getElementById('success');
+    const setupForm = document.getElementById('setup-form');
+    const emailInput = document.getElementById('email');
+    const passwordInput = document.getElementById('password');
+    const confirmInput = document.getElementById('confirm-password');
+    const errorEl = document.getElementById('error-message');
+    const submitBtn = document.getElementById('submit-btn');
+    const expiryInfo = document.getElementById('expiry-info');
+
+    function showError(msg) {
+      errorEl.textContent = msg;
+      errorEl.classList.remove('hidden');
+    }
+
+    function hideError() {
+      errorEl.classList.add('hidden');
+    }
+
+    function showInvalid(msg) {
+      loadingEl.classList.add('hidden');
+      invalidMsgEl.textContent = msg;
+      invalidEl.classList.remove('hidden');
+    }
+
+    async function validateToken() {
+      if (!token) {
+        showInvalid('No invitation token provided.');
+        return;
+      }
+
+      try {
+        const res = await fetch(`${API_BASE}/invites/validate/${token}`);
+        const data = await res.json();
+
+        if (!res.ok) {
+          const errorMessages = {
+            'invalid_token': 'This invitation link is invalid.',
+            'token_already_used': 'This invitation has already been used.',
+            'token_expired': 'This invitation has expired.',
+          };
+          showInvalid(errorMessages[data.error] || 'This invitation link is invalid.');
+          return;
+        }
+
+        // Show form
+        loadingEl.classList.add('hidden');
+        formSectionEl.classList.remove('hidden');
+        emailInput.value = data.email;
+        expiryInfo.textContent = 'Your access will be valid for 30 days after account creation.';
+      } catch (err) {
+        console.error('Validation error:', err);
+        showInvalid('Unable to verify invitation. Please try again.');
+      }
+    }
+
+    setupForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      hideError();
+
+      const password = passwordInput.value;
+      const confirm = confirmInput.value;
+
+      if (password.length < 8) {
+        showError('Password must be at least 8 characters.');
+        return;
+      }
+
+      if (password !== confirm) {
+        showError('Passwords do not match.');
+        return;
+      }
+
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Creating...';
+
+      try {
+        const res = await fetch(`${API_BASE}/invites/complete/${token}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password }),
+        });
+
+        const data = await res.json();
+
+        if (!res.ok) {
+          const errorMessages = {
+            'invalid_token': 'This invitation link is invalid.',
+            'token_already_used': 'This invitation has already been used.',
+            'token_expired': 'This invitation has expired.',
+            'password_min_8_chars': 'Password must be at least 8 characters.',
+            'failed_to_create_account': 'Failed to create account. Please try again.',
+          };
+          showError(errorMessages[data.error] || 'An error occurred. Please try again.');
+          submitBtn.disabled = false;
+          submitBtn.textContent = 'Create Account';
+          return;
+        }
+
+        // Success!
+        formSectionEl.classList.add('hidden');
+        successEl.classList.remove('hidden');
+      } catch (err) {
+        console.error('Setup error:', err);
+        showError('Network error. Please try again.');
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Create Account';
+      }
+    });
+
+    // Start validation
+    validateToken();
+  </script>
+</body>
+</html>

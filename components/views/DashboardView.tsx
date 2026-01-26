@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { LayoutDashboard, Server, Cpu, Pencil, Camera as CameraIcon, CameraOff as CameraOffIcon, ChevronDown, ChevronRight, WashingMachine, Wind } from 'lucide-react';
 import RelayCard from '../RelayCard';
-import { Relay, CameraConfig, LaundryMachine, LaundryMachineStatus } from '../../types';
+import { Relay, CameraConfig, LaundryMachine, LaundryMachineStatus, UiUser } from '../../types';
 
 interface Laundry {
   id: string;
@@ -13,6 +13,7 @@ interface Laundry {
 }
 
 interface DashboardViewProps {
+  authUser: UiUser | null;
   laundries: Laundry[];
   isRelayEditMode: boolean;
   setIsRelayEditMode: React.Dispatch<React.SetStateAction<boolean>>;
@@ -51,6 +52,7 @@ interface DashboardViewProps {
 
 export const DashboardView: React.FC<DashboardViewProps> = (props) => {
   const [expandedMachines, setExpandedMachines] = useState<Record<string, boolean>>({});
+  const isViewer = props.authUser?.role === 'viewer';
 
   const toggleMachines = (agentId: string) => {
     setExpandedMachines(prev => ({ ...prev, [agentId]: !prev[agentId] }));
@@ -113,22 +115,24 @@ export const DashboardView: React.FC<DashboardViewProps> = (props) => {
                 {mock ? <Server className="w-3 h-3" /> : <Cpu className="w-3 h-3" />}
                 {mock ? 'Mock mode' : 'Hardware'}
               </span>
-              <div className="flex gap-2 ml-auto">
-                <button
-                  onClick={() => props.handleBatchControl(batchRelayIds, 'ON', laundry.id)}
-                  disabled={!online || batchRelayIds.length === 0}
-                  className="px-3 py-2 rounded-md text-xs font-semibold border border-emerald-500 text-emerald-200 bg-emerald-500/10 disabled:opacity-50"
-                >
-                  ON
-                </button>
-                <button
-                  onClick={() => props.handleBatchControl(batchRelayIds, 'OFF', laundry.id)}
-                  disabled={!online || batchRelayIds.length === 0}
-                  className="px-3 py-2 rounded-md text-xs font-semibold border border-red-500 text-red-200 bg-red-500/10 disabled:opacity-50"
-                >
-                  OFF
-                </button>
-              </div>
+              {!isViewer && (
+                <div className="flex gap-2 ml-auto">
+                  <button
+                    onClick={() => props.handleBatchControl(batchRelayIds, 'ON', laundry.id)}
+                    disabled={!online || batchRelayIds.length === 0}
+                    className="px-3 py-2 rounded-md text-xs font-semibold border border-emerald-500 text-emerald-200 bg-emerald-500/10 disabled:opacity-50"
+                  >
+                    ON
+                  </button>
+                  <button
+                    onClick={() => props.handleBatchControl(batchRelayIds, 'OFF', laundry.id)}
+                    disabled={!online || batchRelayIds.length === 0}
+                    className="px-3 py-2 rounded-md text-xs font-semibold border border-red-500 text-red-200 bg-red-500/10 disabled:opacity-50"
+                  >
+                    OFF
+                  </button>
+                </div>
+              )}
             </div>
 
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -145,11 +149,11 @@ export const DashboardView: React.FC<DashboardViewProps> = (props) => {
                   isEditing={props.isRelayEditMode}
                   nameValue={props.relayNameDrafts[props.relayDraftKey(laundry.id, relay.id)] ?? relay.name}
                   onNameChange={(rid, name) => props.handleRelayNameInput(laundry.id, rid, name)}
-                  onNameSave={(rid) => props.handleRenameRelay(rid, laundry.id)}
+                  onNameSave={isViewer ? undefined : (rid) => props.handleRenameRelay(rid, laundry.id)}
                   isHidden={relay.isHidden}
-                  onToggleVisibility={(rid) => props.handleToggleVisibility(rid, laundry.id)}
-                  onIconChange={(rid, icon) => props.handleIconChange(rid, icon, laundry.id)}
-                  isDisabled={disabled}
+                  onToggleVisibility={isViewer ? undefined : (rid) => props.handleToggleVisibility(rid, laundry.id)}
+                  onIconChange={isViewer ? undefined : (rid, icon) => props.handleIconChange(rid, icon, laundry.id)}
+                  isDisabled={disabled || (isViewer && !props.isRelayEditMode)}
                 />
               ))}
             </div>

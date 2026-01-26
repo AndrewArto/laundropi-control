@@ -429,6 +429,9 @@ export const RevenueView: React.FC<RevenueViewProps> = (props) => {
   const [chartData, setChartData] = useState<LineChartDataPoint[]>([]);
   const [chartLoading, setChartLoading] = useState(false);
 
+  // Viewer role check - viewers can see data but not edit
+  const isViewer = props.authUser?.role === 'viewer';
+
   const toggleAgentExpanded = (agentId: string) => {
     setExpandedAgents(prev => {
       const next = new Set(prev);
@@ -861,12 +864,14 @@ export const RevenueView: React.FC<RevenueViewProps> = (props) => {
                   <div className="space-y-2 pt-4">
                     <div className="flex items-center justify-between">
                       <div className="text-sm text-slate-300">Costs (comment required)</div>
-                      <button
-                        onClick={() => addRevenueDeductionFromHook(laundry.id)}
-                        className="text-xs px-2 py-1 rounded-md border border-purple-500/50 text-purple-300 hover:border-purple-400 hover:text-purple-200 transition-colors"
-                      >
-                        Add cost
-                      </button>
+                      {!isViewer && (
+                        <button
+                          onClick={() => addRevenueDeductionFromHook(laundry.id)}
+                          className="text-xs px-2 py-1 rounded-md border border-purple-500/50 text-purple-300 hover:border-purple-400 hover:text-purple-200 transition-colors"
+                        >
+                          Add cost
+                        </button>
+                      )}
                     </div>
                     {deductionsAudit && prevDeductionSummary && (
                       <div className="text-[11px] text-amber-300">
@@ -882,6 +887,7 @@ export const RevenueView: React.FC<RevenueViewProps> = (props) => {
                           type="text"
                           inputMode="decimal"
                           value={item.amount}
+                          disabled={isViewer}
                           onChange={(e) => {
                             const nextValue = e.target.value;
                             if (!isRevenueNumericInput(nextValue)) return;
@@ -890,25 +896,28 @@ export const RevenueView: React.FC<RevenueViewProps> = (props) => {
                               deductions: d.deductions.map(row => row.id === item.id ? { ...row, amount: nextValue } : row),
                             }));
                           }}
-                          className="flex-1 min-w-0 w-full sm:w-auto sm:min-w-[120px] bg-slate-900/60 border border-slate-700 rounded-md px-3 py-2 text-sm text-slate-100 focus:outline-none focus:ring-1 focus:ring-purple-500"
+                          className="flex-1 min-w-0 w-full sm:w-auto sm:min-w-[120px] bg-slate-900/60 border border-slate-700 rounded-md px-3 py-2 text-sm text-slate-100 focus:outline-none focus:ring-1 focus:ring-purple-500 disabled:opacity-60 disabled:cursor-not-allowed"
                           placeholder="0.00"
                         />
                         <input
                           type="text"
                           value={item.comment}
+                          disabled={isViewer}
                           onChange={(e) => updateRevenueDraftFromHook(laundry.id, d => ({
                             ...d,
                             deductions: d.deductions.map(row => row.id === item.id ? { ...row, comment: e.target.value } : row),
                           }))}
-                          className="flex-[2] min-w-0 w-full sm:w-auto sm:min-w-[200px] bg-slate-900/60 border border-slate-700 rounded-md px-3 py-2 text-sm text-slate-100 focus:outline-none focus:ring-1 focus:ring-purple-500"
+                          className="flex-[2] min-w-0 w-full sm:w-auto sm:min-w-[200px] bg-slate-900/60 border border-slate-700 rounded-md px-3 py-2 text-sm text-slate-100 focus:outline-none focus:ring-1 focus:ring-purple-500 disabled:opacity-60 disabled:cursor-not-allowed"
                           placeholder="Reason"
                         />
-                        <button
-                          onClick={() => removeRevenueDeductionFromHook(laundry.id, item.id)}
-                          className="text-xs px-3 py-2 w-full sm:w-auto rounded-md border border-red-500/40 text-red-300 hover:text-red-200 hover:border-red-400 transition-colors"
-                        >
-                          Remove
-                        </button>
+                        {!isViewer && (
+                          <button
+                            onClick={() => removeRevenueDeductionFromHook(laundry.id, item.id)}
+                            className="text-xs px-3 py-2 w-full sm:w-auto rounded-md border border-red-500/40 text-red-300 hover:text-red-200 hover:border-red-400 transition-colors"
+                          >
+                            Remove
+                          </button>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -925,13 +934,15 @@ export const RevenueView: React.FC<RevenueViewProps> = (props) => {
                         ? `Updated ${formatTimestamp(entry.updatedAt)} by ${entry.updatedBy || 'unknown'}`
                         : 'No entry recorded for this date.'}
                     </div>
-                    <button
-                      onClick={() => handleRevenueSaveFromHook(laundry.id)}
-                      disabled={saving}
-                      className="px-4 py-2 rounded-md text-xs font-semibold border border-purple-500 text-purple-200 bg-purple-500/10 hover:bg-purple-500/20 disabled:opacity-50"
-                    >
-                      {saving ? 'Saving...' : 'Save costs'}
-                    </button>
+                    {!isViewer && (
+                      <button
+                        onClick={() => handleRevenueSaveFromHook(laundry.id)}
+                        disabled={saving}
+                        className="px-4 py-2 rounded-md text-xs font-semibold border border-purple-500 text-purple-200 bg-purple-500/10 hover:bg-purple-500/20 disabled:opacity-50"
+                      >
+                        {saving ? 'Saving...' : 'Save costs'}
+                      </button>
+                    )}
                   </div>
 
                   {entryAudit.length > 0 && (
@@ -1031,12 +1042,13 @@ export const RevenueView: React.FC<RevenueViewProps> = (props) => {
                   type="text"
                   inputMode="decimal"
                   value={draft.coinsTotal}
+                  disabled={isViewer}
                   onChange={(e) => {
                     const nextValue = e.target.value;
                     if (!isRevenueNumericInput(nextValue)) return;
                     updateRevenueDraftFromHook(laundry.id, d => ({ ...d, coinsTotal: nextValue }));
                   }}
-                  className={fieldClass(Boolean(coinsAudit))}
+                  className={`${fieldClass(Boolean(coinsAudit))} disabled:opacity-60 disabled:cursor-not-allowed`}
                   placeholder="0.00"
                 />
                 {coinsAudit && (
@@ -1051,12 +1063,13 @@ export const RevenueView: React.FC<RevenueViewProps> = (props) => {
                   type="text"
                   inputMode="decimal"
                   value={draft.euroCoinsCount}
+                  disabled={isViewer}
                   onChange={(e) => {
                     const nextValue = e.target.value;
                     if (!isRevenueNumericInput(nextValue)) return;
                     updateRevenueDraftFromHook(laundry.id, d => ({ ...d, euroCoinsCount: nextValue }));
                   }}
-                  className={fieldClass(Boolean(countAudit))}
+                  className={`${fieldClass(Boolean(countAudit))} disabled:opacity-60 disabled:cursor-not-allowed`}
                   placeholder="0"
                 />
                 {countAudit && (
@@ -1071,12 +1084,13 @@ export const RevenueView: React.FC<RevenueViewProps> = (props) => {
                   type="text"
                   inputMode="decimal"
                   value={draft.billsTotal}
+                  disabled={isViewer}
                   onChange={(e) => {
                     const nextValue = e.target.value;
                     if (!isRevenueNumericInput(nextValue)) return;
                     updateRevenueDraftFromHook(laundry.id, d => ({ ...d, billsTotal: nextValue }));
                   }}
-                  className={fieldClass(Boolean(billsAudit))}
+                  className={`${fieldClass(Boolean(billsAudit))} disabled:opacity-60 disabled:cursor-not-allowed`}
                   placeholder="0.00"
                 />
                 {billsAudit && (
@@ -1090,12 +1104,14 @@ export const RevenueView: React.FC<RevenueViewProps> = (props) => {
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <div className="text-sm text-slate-300">Deductions (comment required)</div>
-                <button
-                  onClick={() => addRevenueDeductionFromHook(laundry.id)}
-                  className="text-xs px-2 py-1 rounded-md border border-slate-600 text-slate-300 hover:border-slate-500 hover:text-white transition-colors"
-                >
-                  Add deduction
-                </button>
+                {!isViewer && (
+                  <button
+                    onClick={() => addRevenueDeductionFromHook(laundry.id)}
+                    className="text-xs px-2 py-1 rounded-md border border-slate-600 text-slate-300 hover:border-slate-500 hover:text-white transition-colors"
+                  >
+                    Add deduction
+                  </button>
+                )}
               </div>
               {deductionsAudit && prevDeductionSummary && (
                 <div className="text-[11px] text-amber-300">
@@ -1111,6 +1127,7 @@ export const RevenueView: React.FC<RevenueViewProps> = (props) => {
                     type="text"
                     inputMode="decimal"
                     value={item.amount}
+                    disabled={isViewer}
                     onChange={(e) => {
                       const nextValue = e.target.value;
                       if (!isRevenueNumericInput(nextValue)) return;
@@ -1119,25 +1136,28 @@ export const RevenueView: React.FC<RevenueViewProps> = (props) => {
                         deductions: d.deductions.map(row => row.id === item.id ? { ...row, amount: nextValue } : row),
                       }));
                     }}
-                    className="flex-1 min-w-0 w-full sm:w-auto sm:min-w-[120px] bg-slate-900/60 border border-slate-700 rounded-md px-3 py-2 text-sm text-slate-100 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                    className="flex-1 min-w-0 w-full sm:w-auto sm:min-w-[120px] bg-slate-900/60 border border-slate-700 rounded-md px-3 py-2 text-sm text-slate-100 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:opacity-60 disabled:cursor-not-allowed"
                     placeholder="0.00"
                   />
                   <input
                     type="text"
                     value={item.comment}
+                    disabled={isViewer}
                     onChange={(e) => updateRevenueDraftFromHook(laundry.id, d => ({
                       ...d,
                       deductions: d.deductions.map(row => row.id === item.id ? { ...row, comment: e.target.value } : row),
                     }))}
-                    className="flex-[2] min-w-0 w-full sm:w-auto sm:min-w-[200px] bg-slate-900/60 border border-slate-700 rounded-md px-3 py-2 text-sm text-slate-100 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                    className="flex-[2] min-w-0 w-full sm:w-auto sm:min-w-[200px] bg-slate-900/60 border border-slate-700 rounded-md px-3 py-2 text-sm text-slate-100 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:opacity-60 disabled:cursor-not-allowed"
                     placeholder="Reason"
                   />
-                  <button
-                    onClick={() => removeRevenueDeductionFromHook(laundry.id, item.id)}
-                    className="text-xs px-3 py-2 w-full sm:w-auto rounded-md border border-red-500/40 text-red-300 hover:text-red-200 hover:border-red-400 transition-colors"
-                  >
-                    Remove
-                  </button>
+                  {!isViewer && (
+                    <button
+                      onClick={() => removeRevenueDeductionFromHook(laundry.id, item.id)}
+                      className="text-xs px-3 py-2 w-full sm:w-auto rounded-md border border-red-500/40 text-red-300 hover:text-red-200 hover:border-red-400 transition-colors"
+                    >
+                      Remove
+                    </button>
+                  )}
                 </div>
               ))}
             </div>
@@ -1154,13 +1174,15 @@ export const RevenueView: React.FC<RevenueViewProps> = (props) => {
                   ? `Updated ${formatTimestamp(entry.updatedAt)} by ${entry.updatedBy || 'unknown'}`
                   : 'No entry recorded for this date.'}
               </div>
-              <button
-                onClick={() => handleRevenueSaveFromHook(laundry.id)}
-                disabled={saving}
-                className="px-4 py-2 rounded-md text-xs font-semibold border border-indigo-500 text-indigo-200 bg-indigo-500/10 hover:bg-indigo-500/20 disabled:opacity-50"
-              >
-                {saving ? 'Saving...' : 'Save entry'}
-              </button>
+              {!isViewer && (
+                <button
+                  onClick={() => handleRevenueSaveFromHook(laundry.id)}
+                  disabled={saving}
+                  className="px-4 py-2 rounded-md text-xs font-semibold border border-indigo-500 text-indigo-200 bg-indigo-500/10 hover:bg-indigo-500/20 disabled:opacity-50"
+                >
+                  {saving ? 'Saving...' : 'Save entry'}
+                </button>
+              )}
             </div>
 
             {entryAudit.length > 0 && (
@@ -1272,7 +1294,9 @@ export const RevenueView: React.FC<RevenueViewProps> = (props) => {
   };
 
   const renderRevenue = () => {
-    if (authUser?.role !== 'admin') {
+    // Viewers can see finance data but not edit
+    // Only block users who are neither admin nor viewer
+    if (authUser?.role !== 'admin' && authUser?.role !== 'viewer') {
       return (
         <div className="text-center py-16 text-slate-500">
           Finance management is available to admin users only.
@@ -1332,6 +1356,7 @@ export const RevenueView: React.FC<RevenueViewProps> = (props) => {
             error={bankError}
             pendingChanges={bankPendingChanges}
             hasUnsavedChanges={bankHasUnsavedChanges}
+            isReadOnly={isViewer}
             onUploadCsv={onBankUploadCsv}
             onLoadImport={onBankLoadImport}
             onAssignTransaction={onBankAssignTransaction}

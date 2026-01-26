@@ -1,9 +1,10 @@
 import express = require('express');
 import * as crypto from 'crypto';
+import type { UserRole } from '../../../types';
 
 export interface SessionPayload {
   sub: string;
-  role: 'admin' | 'user';
+  role: UserRole;
   exp: number;
 }
 
@@ -75,6 +76,16 @@ export const requireAdmin: express.RequestHandler = (_req, res, next) => {
   if (!REQUIRE_UI_AUTH) return next();
   const session = res.locals.user as SessionPayload | undefined;
   if (!session || session.role !== 'admin') {
+    return res.status(403).json({ error: 'forbidden' });
+  }
+  return next();
+};
+
+// Blocks viewers from write operations (allows admin and user)
+export const requireAdminOrUser: express.RequestHandler = (_req, res, next) => {
+  if (!REQUIRE_UI_AUTH) return next();
+  const session = res.locals.user as SessionPayload | undefined;
+  if (!session || session.role === 'viewer') {
     return res.status(403).json({ error: 'forbidden' });
   }
   return next();

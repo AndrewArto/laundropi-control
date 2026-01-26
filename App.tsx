@@ -145,6 +145,14 @@ const App: React.FC = () => {
     userPasswordDrafts,
     userSaving,
     userSaveErrors,
+    // Invite state
+    invites,
+    invitesLoading,
+    invitesError,
+    inviteEmail,
+    inviteSending,
+    inviteResult,
+    inviteError,
     setUsers,
     setUsersLoading,
     setUsersError,
@@ -157,10 +165,15 @@ const App: React.FC = () => {
     setUserPasswordDrafts,
     setUserSaving,
     setUserSaveErrors,
+    setInviteEmail,
+    setInviteResult,
     fetchUsers: fetchUsersFromHook,
     handleCreateUser: handleCreateUserFromHook,
     handleRoleSave: handleRoleSaveFromHook,
     handlePasswordSave: handlePasswordSaveFromHook,
+    fetchInvites: fetchInvitesFromHook,
+    handleSendInvite: handleSendInviteFromHook,
+    handleCancelInvite: handleCancelInviteFromHook,
     resetUsersState,
   } = useUsers();
 
@@ -849,21 +862,24 @@ const App: React.FC = () => {
     relayVisibilityRef.current = relayVisibility;
   }, [relayVisibility]);
 
-  useEffect(() => {
-    if (!isAuthenticated || authUser?.role !== 'admin') return;
-    if (activeTab !== Tab.REVENUE || revenueView !== 'daily') return;
-    fetchRevenueData();
-  }, [activeTab, revenueDate, laundryIdKey, isAuthenticated, authUser?.role, revenueView]);
+  const userRole = authUser?.role;
+  const canViewRevenue = userRole === 'admin' || userRole === 'viewer';
 
   useEffect(() => {
-    if (!isAuthenticated || authUser?.role !== 'admin') return;
+    if (!isAuthenticated || !canViewRevenue) return;
+    if (activeTab !== Tab.REVENUE || revenueView !== 'daily') return;
+    fetchRevenueData();
+  }, [activeTab, revenueDate, laundryIdKey, isAuthenticated, canViewRevenue, revenueView]);
+
+  useEffect(() => {
+    if (!isAuthenticated || !canViewRevenue) return;
     if (activeTab !== Tab.REVENUE || revenueView !== 'daily') return;
     fetchRevenueEntryDates();
-  }, [activeTab, revenueDate, laundryIdKey, isAuthenticated, authUser?.role, revenueView]);
+  }, [activeTab, revenueDate, laundryIdKey, isAuthenticated, canViewRevenue, revenueView]);
 
   // Poll for revenue updates when Finance tab is active (daily view)
   useEffect(() => {
-    if (!isAuthenticated || authUser?.role !== 'admin') return;
+    if (!isAuthenticated || !canViewRevenue) return;
     if (activeTab !== Tab.REVENUE || revenueView !== 'daily') return;
     const timer = setInterval(() => {
       // Skip polling if any entry is currently being saved
@@ -871,23 +887,23 @@ const App: React.FC = () => {
       fetchRevenueData({ silent: true });
     }, 10_000);
     return () => clearInterval(timer);
-  }, [activeTab, revenueView, isAuthenticated, authUser?.role, revenueSaving]);
+  }, [activeTab, revenueView, isAuthenticated, canViewRevenue, revenueSaving]);
 
   useEffect(() => {
-    if (!isAuthenticated || authUser?.role !== 'admin') return;
+    if (!isAuthenticated || !canViewRevenue) return;
     if (activeTab !== Tab.REVENUE || revenueView !== 'all') return;
     fetchAllRevenueEntries();
-  }, [activeTab, revenueView, isAuthenticated, authUser?.role]);
+  }, [activeTab, revenueView, isAuthenticated, canViewRevenue]);
 
   // Poll for all revenue entries when Finance tab is in "all" view
   useEffect(() => {
-    if (!isAuthenticated || authUser?.role !== 'admin') return;
+    if (!isAuthenticated || !canViewRevenue) return;
     if (activeTab !== Tab.REVENUE || revenueView !== 'all') return;
     const timer = setInterval(() => {
       fetchAllRevenueEntries({ silent: true });
     }, 10_000);
     return () => clearInterval(timer);
-  }, [activeTab, revenueView, isAuthenticated, authUser?.role]);
+  }, [activeTab, revenueView, isAuthenticated, canViewRevenue]);
 
   // Fetch bank imports when Bank Import tab is active
   useEffect(() => {
@@ -1246,6 +1262,7 @@ const App: React.FC = () => {
 
   const renderDashboard = () => (
     <DashboardView
+      authUser={authUser}
       laundries={laundries}
       isRelayEditMode={isRelayEditMode}
       setIsRelayEditMode={setIsRelayEditMode}
@@ -1403,15 +1420,27 @@ const App: React.FC = () => {
       userPasswordDrafts={userPasswordDrafts}
       userSaving={userSaving}
       userSaveErrors={userSaveErrors}
+      invites={invites}
+      invitesLoading={invitesLoading}
+      invitesError={invitesError}
+      inviteEmail={inviteEmail}
+      inviteSending={inviteSending}
+      inviteResult={inviteResult}
+      inviteError={inviteError}
       setNewUserName={setNewUserName}
       setNewUserPassword={setNewUserPassword}
       setNewUserRole={setNewUserRole}
       setUserRoleDrafts={setUserRoleDrafts}
       setUserPasswordDrafts={setUserPasswordDrafts}
+      setInviteEmail={setInviteEmail}
+      setInviteResult={setInviteResult}
       fetchUsers={() => fetchUsersFromHook(handleAuthFailure)}
+      fetchInvites={() => fetchInvitesFromHook(handleAuthFailure)}
       handleCreateUserFromHook={handleCreateUserFromHook}
       handleRoleSaveFromHook={handleRoleSaveFromHook}
       handlePasswordSaveFromHook={handlePasswordSaveFromHook}
+      handleSendInviteFromHook={handleSendInviteFromHook}
+      handleCancelInviteFromHook={handleCancelInviteFromHook}
       handleAuthFailure={handleAuthFailure}
       formatLastLogin={formatLastLogin}
     />
@@ -1460,6 +1489,7 @@ const App: React.FC = () => {
         {activeTab === Tab.REVENUE && renderRevenue()}
         {activeTab === Tab.INVENTORY && (
           <InventoryView
+            authUser={authUser}
             laundries={laundries}
             inventory={inventory}
             lastChanges={lastChanges}

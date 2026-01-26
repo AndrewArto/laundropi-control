@@ -3,7 +3,7 @@ import { ApiService } from '../services/api';
 
 export interface AuthUser {
   username: string;
-  role: 'admin' | 'user';
+  role: 'admin' | 'user' | 'viewer';
   lastLoginAt: number | null;
   createdAt: number;
   updatedAt: number;

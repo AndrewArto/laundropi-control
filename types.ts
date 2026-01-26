@@ -46,12 +46,15 @@ export interface RelayGroup {
   active: boolean;
 }
 
+export type UserRole = 'admin' | 'user' | 'viewer';
+
 export interface UiUser {
   username: string;
-  role: 'admin' | 'user';
+  role: UserRole;
   lastLoginAt: number | null;
   createdAt: number;
   updatedAt: number;
+  expiresAt?: number | null;
 }
 
 export interface RevenueDeduction {
