@@ -59,6 +59,7 @@ export interface UseUsersReturn {
   fetchInvites: (handleAuthFailure: (err: unknown) => boolean) => Promise<void>;
   handleSendInvite: (e: React.FormEvent, handleAuthFailure: (err: unknown) => boolean) => Promise<void>;
   handleCancelInvite: (tokenPrefix: string, handleAuthFailure: (err: unknown) => boolean) => Promise<void>;
+  handleDeleteUser: (username: string, handleAuthFailure: (err: unknown) => boolean) => Promise<void>;
   resetUsersState: () => void;
 }
 
@@ -231,6 +232,26 @@ export function useUsers(): UseUsersReturn {
     }
   }, [fetchInvites]);
 
+  const handleDeleteUser = useCallback(async (username: string, handleAuthFailure: (err: unknown) => boolean) => {
+    setUserSaving(prev => ({ ...prev, [username]: true }));
+    setUserSaveErrors(prev => ({ ...prev, [username]: null }));
+    try {
+      await ApiService.deleteUser(username);
+      await fetchUsers(handleAuthFailure);
+    } catch (err) {
+      if (handleAuthFailure(err)) return;
+      console.error('User delete failed', err);
+      const status = (err as any)?.status;
+      if (status === 400) {
+        setUserSaveErrors(prev => ({ ...prev, [username]: 'Cannot delete own account.' }));
+      } else {
+        setUserSaveErrors(prev => ({ ...prev, [username]: 'Failed to delete user.' }));
+      }
+    } finally {
+      setUserSaving(prev => ({ ...prev, [username]: false }));
+    }
+  }, [fetchUsers]);
+
   const resetUsersState = useCallback(() => {
     setUsers([]);
     setUsersLoading(false);
@@ -296,6 +317,7 @@ export function useUsers(): UseUsersReturn {
     fetchInvites,
     handleSendInvite,
     handleCancelInvite,
+    handleDeleteUser,
     resetUsersState,
   };
 }

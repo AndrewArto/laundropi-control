@@ -755,6 +755,13 @@ export function updateUiUserLastLogin(username: string, lastLoginAt: number, upd
   updateUiUserLastLoginStmt.run({ username, lastLoginAt, updatedAt });
 }
 
+const deleteUiUserStmt = db.prepare('DELETE FROM ui_users WHERE username = ?');
+
+export function deleteUiUser(username: string): boolean {
+  const info = deleteUiUserStmt.run(username);
+  return info.changes > 0;
+}
+
 // --- INVITE TOKENS ---
 const insertInviteTokenStmt = db.prepare(`
   INSERT INTO invite_tokens(token, email, role, expiresAt, createdBy, createdAt, usedAt)

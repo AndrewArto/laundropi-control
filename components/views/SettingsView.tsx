@@ -1,5 +1,5 @@
 import React from 'react';
-import { Settings, Plus, Mail, X } from 'lucide-react';
+import { Settings, Plus, Mail, X, Trash2 } from 'lucide-react';
 import { UiUser, UserRole } from '../../types';
 import type { InviteInfo, InviteResult } from '../../hooks/useUsers';
 
@@ -39,6 +39,7 @@ interface SettingsViewProps {
   handlePasswordSaveFromHook: (username: string, handleAuthFailure: (err: unknown) => boolean) => Promise<void>;
   handleSendInviteFromHook: (e: React.FormEvent, handleAuthFailure: (err: unknown) => boolean) => Promise<void>;
   handleCancelInviteFromHook: (tokenPrefix: string, handleAuthFailure: (err: unknown) => boolean) => Promise<void>;
+  handleDeleteUserFromHook: (username: string, handleAuthFailure: (err: unknown) => boolean) => Promise<void>;
   handleAuthFailure: (err: unknown) => boolean;
   formatLastLogin: (ts: number | null) => string;
 }
@@ -80,6 +81,7 @@ export const SettingsView: React.FC<SettingsViewProps> = (props) => {
     handlePasswordSaveFromHook,
     handleSendInviteFromHook,
     handleCancelInviteFromHook,
+    handleDeleteUserFromHook,
     handleAuthFailure,
     formatLastLogin,
   } = props;
@@ -182,6 +184,20 @@ export const SettingsView: React.FC<SettingsViewProps> = (props) => {
                       >
                         {saving ? 'Saving...' : 'Set password'}
                       </button>
+                      {user.username !== authUser?.username && (
+                        <button
+                          onClick={() => {
+                            if (confirm(`Delete user "${user.username}"? This cannot be undone.`)) {
+                              handleDeleteUserFromHook(user.username, handleAuthFailure);
+                            }
+                          }}
+                          disabled={saving}
+                          className="px-3 py-2 text-xs rounded-md border border-red-500 text-red-300 bg-red-500/10 hover:bg-red-500/20 disabled:opacity-50"
+                          title="Delete user"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      )}
                     </div>
 
                     {userSaveErrors[user.username] && (

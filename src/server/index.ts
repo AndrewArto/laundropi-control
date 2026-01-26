@@ -5,7 +5,7 @@ import cors = require('cors');
 import { WebSocketServer, WebSocket } from 'ws';
 import * as crypto from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
-import { listAgents, updateHeartbeat, saveMeta, getAgent, updateRelayMeta, listSchedules, upsertSchedule, deleteSchedule, listGroups, listGroupsForMembership, upsertGroup, deleteGroup, GroupRow, deleteAgent, upsertAgent, upsertCommand, listPendingCommands, deleteCommand, updateCommandsForRelay, expireOldCommands, insertLead, getLastLeadTimestampForIp, listLeads, getRevenueEntry, listRevenueEntriesBetween, listRevenueEntries, listRevenueEntryDatesBetween, listRevenueEntryDatesWithInfo, upsertRevenueEntry, insertRevenueAudit, listRevenueAudit, RevenueEntryRow, listUiUsers, getUiUser, createUiUser, updateUiUserRole, updateUiUserPassword, updateUiUserLastLogin, countUiUsers, listCameras, getCamera, upsertCamera, deleteCamera, upsertIntegrationSecret, getIntegrationSecret, deleteIntegrationSecret, CameraRow, listInventory, getInventory, updateInventory, getInventoryAudit, getLastInventoryChange, DetergentType } from './db';
+import { listAgents, updateHeartbeat, saveMeta, getAgent, updateRelayMeta, listSchedules, upsertSchedule, deleteSchedule, listGroups, listGroupsForMembership, upsertGroup, deleteGroup, GroupRow, deleteAgent, upsertAgent, upsertCommand, listPendingCommands, deleteCommand, updateCommandsForRelay, expireOldCommands, insertLead, getLastLeadTimestampForIp, listLeads, getRevenueEntry, listRevenueEntriesBetween, listRevenueEntries, listRevenueEntryDatesBetween, listRevenueEntryDatesWithInfo, upsertRevenueEntry, insertRevenueAudit, listRevenueAudit, RevenueEntryRow, listUiUsers, getUiUser, createUiUser, updateUiUserRole, updateUiUserPassword, updateUiUserLastLogin, deleteUiUser, countUiUsers, listCameras, getCamera, upsertCamera, deleteCamera, upsertIntegrationSecret, getIntegrationSecret, deleteIntegrationSecret, CameraRow, listInventory, getInventory, updateInventory, getInventoryAudit, getLastInventoryChange, DetergentType } from './db';
 import expenditureRoutes from './routes/expenditure';
 import inviteRoutes from './routes/invites';
 
@@ -1101,6 +1101,26 @@ app.put('/api/users/:username/password', requireUiAuth, requireAdmin, (req, res)
   }
   const updated = updateUiUserPassword(username, hashPassword(password));
   if (!updated) {
+    return res.status(404).json({ error: 'user not found' });
+  }
+  res.json({ ok: true });
+});
+
+app.delete('/api/users/:username', requireUiAuth, requireAdmin, (req, res) => {
+  const username = String(req.params.username || '').trim();
+  const session = res.locals.user as { sub: string } | undefined;
+
+  if (!isValidUsername(username)) {
+    return res.status(400).json({ error: 'invalid username' });
+  }
+
+  // Prevent admin from deleting their own account
+  if (session?.sub === username) {
+    return res.status(400).json({ error: 'cannot delete own account' });
+  }
+
+  const deleted = deleteUiUser(username);
+  if (!deleted) {
     return res.status(404).json({ error: 'user not found' });
   }
   res.json({ ok: true });

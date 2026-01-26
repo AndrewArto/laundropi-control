@@ -171,6 +171,7 @@ const App: React.FC = () => {
     handleCreateUser: handleCreateUserFromHook,
     handleRoleSave: handleRoleSaveFromHook,
     handlePasswordSave: handlePasswordSaveFromHook,
+    handleDeleteUser: handleDeleteUserFromHook,
     fetchInvites: fetchInvitesFromHook,
     handleSendInvite: handleSendInviteFromHook,
     handleCancelInvite: handleCancelInviteFromHook,
@@ -1441,6 +1442,7 @@ const App: React.FC = () => {
       handlePasswordSaveFromHook={handlePasswordSaveFromHook}
       handleSendInviteFromHook={handleSendInviteFromHook}
       handleCancelInviteFromHook={handleCancelInviteFromHook}
+      handleDeleteUserFromHook={handleDeleteUserFromHook}
       handleAuthFailure={handleAuthFailure}
       formatLastLogin={formatLastLogin}
     />

@@ -177,6 +177,12 @@ export const ApiService = {
     });
   },
 
+  async deleteUser(username: string): Promise<void> {
+    await request(`${API_BASE}/users/${encodeURIComponent(username)}`, {
+      method: 'DELETE'
+    });
+  },
+
   // Invite endpoints for viewer role
   async createInvite(email: string, expiryDays?: number): Promise<{ ok: boolean; invite: { email: string; expiryDays: number }; mockUrl?: string }> {
     const res = await request(`${API_BASE}/invites`, {
