@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { formatMoney, normalizeDecimalInput } from '../formatting';
-import { buildRevenueDraft, parseMoneyInput } from '../revenue';
+import { buildRevenueDraft, parseMoneyInput, getEntryRevenue, getEntryProfitLoss } from '../revenue';
 import type { RevenueEntry } from '../../types';
 
 describe('formatMoney', () => {
@@ -101,5 +101,83 @@ describe('normalizeDecimalInput', () => {
 
   it('should leave period unchanged', () => {
     expect(normalizeDecimalInput('100.50')).toBe('100.50');
+  });
+});
+
+describe('getEntryRevenue', () => {
+  it('should use only coinsTotal as revenue (not billsTotal)', () => {
+    // This test ensures chart data matches summary calculation
+    // coinsTotal is the main revenue field (includes cash + Stripe)
+    // billsTotal is legacy and should NOT be added
+    const entry: RevenueEntry = {
+      agentId: 'test-agent',
+      entryDate: '2026-01-15',
+      coinsTotal: 150,
+      euroCoinsCount: 50,
+      billsTotal: 200, // This should be IGNORED
+      deductions: [],
+      deductionsTotal: 0,
+      hasEdits: false,
+      createdBy: 'user1',
+      updatedBy: 'user1',
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+
+    // Revenue should be ONLY coinsTotal, NOT coinsTotal + billsTotal
+    expect(getEntryRevenue(entry)).toBe(150);
+    expect(getEntryRevenue(entry)).not.toBe(350); // Would be wrong if billsTotal was added
+  });
+
+  it('should handle zero coinsTotal', () => {
+    const entry = { coinsTotal: 0, billsTotal: 100 };
+    expect(getEntryRevenue(entry)).toBe(0);
+  });
+
+  it('should handle undefined coinsTotal', () => {
+    const entry = { billsTotal: 100 };
+    expect(getEntryRevenue(entry)).toBe(0);
+  });
+});
+
+describe('getEntryProfitLoss', () => {
+  it('should calculate profit/loss as revenue minus deductions', () => {
+    const entry: RevenueEntry = {
+      agentId: 'test-agent',
+      entryDate: '2026-01-15',
+      coinsTotal: 150,
+      euroCoinsCount: 50,
+      billsTotal: 200, // Should be ignored
+      deductions: [{ amount: 30, comment: 'Test' }],
+      deductionsTotal: 30,
+      hasEdits: false,
+      createdBy: 'user1',
+      updatedBy: 'user1',
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+
+    // P/L = coinsTotal - deductionsTotal = 150 - 30 = 120
+    expect(getEntryProfitLoss(entry)).toBe(120);
+  });
+
+  it('should handle negative profit (loss)', () => {
+    const entry: RevenueEntry = {
+      agentId: 'test-agent',
+      entryDate: '2026-01-15',
+      coinsTotal: 50,
+      euroCoinsCount: 10,
+      billsTotal: 0,
+      deductions: [{ amount: 100, comment: 'Big expense' }],
+      deductionsTotal: 100,
+      hasEdits: false,
+      createdBy: 'user1',
+      updatedBy: 'user1',
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+
+    // P/L = 50 - 100 = -50 (loss)
+    expect(getEntryProfitLoss(entry)).toBe(-50);
   });
 });

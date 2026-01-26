@@ -6,6 +6,7 @@ import { BankImportView } from './BankImportView';
 import type { ReconciliationSummary, PendingChange } from '../../hooks/useReconciliation';
 import { ApiService } from '../../services/api';
 import { formatShortDate } from '../../utils/dateTime';
+import { getEntryRevenue } from '../../utils/revenue';
 
 // Map field names to user-friendly labels
 const fieldLabels: Record<string, string> = {
@@ -461,7 +462,7 @@ export const RevenueView: React.FC<RevenueViewProps> = (props) => {
       // Aggregate entries per day (all agents' deductions are already included in each entry)
       for (const entry of entries) {
         const existing = dailyMap.get(entry.entryDate) || { revenue: 0, costs: 0, profitLoss: 0 };
-        const revenue = (entry.coinsTotal || 0) + (entry.billsTotal || 0);
+        const revenue = getEntryRevenue(entry);
         const costs = entry.deductionsTotal || 0;
         existing.revenue += revenue;
         existing.costs += costs;

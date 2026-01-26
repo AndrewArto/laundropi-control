@@ -72,3 +72,23 @@ export const getDeductionSummary = (raw: string | null) => {
     return null;
   }
 };
+
+/**
+ * Calculate revenue from a RevenueEntry.
+ * IMPORTANT: coinsTotal is the main revenue field (includes cash + Stripe).
+ * billsTotal is a legacy field and should NOT be added to revenue.
+ * This ensures consistency between chart data and summary calculations.
+ */
+export const getEntryRevenue = (entry: RevenueEntry | { coinsTotal?: number; billsTotal?: number }): number => {
+  return entry.coinsTotal || 0;
+};
+
+/**
+ * Calculate profit/loss from a RevenueEntry.
+ * Revenue minus deductions (costs).
+ */
+export const getEntryProfitLoss = (entry: RevenueEntry): number => {
+  const revenue = getEntryRevenue(entry);
+  const costs = entry.deductionsTotal || 0;
+  return revenue - costs;
+};

@@ -959,9 +959,13 @@ const clearSessionCookie = (res: express.Response) => {
 };
 
 const requireUiAuth: express.RequestHandler = (req, res, next) => {
-  if (!REQUIRE_UI_AUTH) return next();
   if (req.method === 'OPTIONS') return next();
   const session = getSession(req);
+  if (!REQUIRE_UI_AUTH) {
+    // When auth is disabled, set anonymous session for endpoints that need username tracking
+    res.locals.user = session || { sub: 'anonymous', role: 'admin', exp: Date.now() + 86400000 };
+    return next();
+  }
   if (!session) return res.status(401).json({ error: 'unauthorized' });
   res.locals.user = session;
   return next();

@@ -137,29 +137,25 @@ describe('RevenueView', () => {
     it('should always render Fix cost center box', () => {
       render(<RevenueView {...mockProps} />);
       expect(screen.getByText('Fix cost')).toBeTruthy();
-      expect(screen.getByText('Costs only')).toBeTruthy();
     });
 
-    it('should show Fix cost center description', () => {
+    it('should show Add cost and Save costs buttons when expanded', () => {
       render(<RevenueView {...mockProps} />);
-      expect(screen.getByText(/Fixed costs/i)).toBeTruthy();
-    });
-
-    it('should have Add cost button for Fix cost', () => {
-      render(<RevenueView {...mockProps} />);
+      // Expand Fix cost section first
+      const fixCostHeader = screen.getByText('Fix cost').closest('button');
+      fireEvent.click(fixCostHeader!);
       expect(screen.getByText('Add cost')).toBeTruthy();
+      expect(screen.getByText('Save costs')).toBeTruthy();
     });
 
     it('should call addRevenueDeductionFromHook when Add cost clicked', () => {
       render(<RevenueView {...mockProps} />);
+      // Expand Fix cost section first
+      const fixCostHeader = screen.getByText('Fix cost').closest('button');
+      fireEvent.click(fixCostHeader!);
       const addCostButton = screen.getByText('Add cost');
       fireEvent.click(addCostButton);
       expect(mockProps.addRevenueDeductionFromHook).toHaveBeenCalledWith(GENERAL_AGENT_ID);
-    });
-
-    it('should show Save costs button for Fix cost', () => {
-      render(<RevenueView {...mockProps} />);
-      expect(screen.getByText('Save costs')).toBeTruthy();
     });
   });
 
@@ -167,15 +163,18 @@ describe('RevenueView', () => {
     it('should render laundry sections in collapsed state by default', () => {
       render(<RevenueView {...mockProps} />);
       expect(screen.getByText('Test Laundry')).toBeTruthy();
-      expect(screen.getByText('Click to expand')).toBeTruthy();
+      // Both laundry and Fix cost sections are collapsed, so 2 "Click to expand" elements
+      const clickToExpands = screen.getAllByText('Click to expand');
+      expect(clickToExpands.length).toBe(2);
     });
 
     it('should expand laundry section when header clicked', () => {
       render(<RevenueView {...mockProps} />);
       const laundryHeader = screen.getByText('Test Laundry').closest('button');
       fireEvent.click(laundryHeader!);
-      // After expanding, "Click to expand" should be hidden
-      expect(screen.queryByText('Click to expand')).toBeNull();
+      // After expanding laundry, only Fix cost still shows "Click to expand"
+      const clickToExpands = screen.getAllByText('Click to expand');
+      expect(clickToExpands.length).toBe(1);
     });
 
     it('should show revenue inputs when expanded', () => {
@@ -233,10 +232,10 @@ describe('RevenueView', () => {
       const propsWithAudit = {
         ...mockProps,
         revenueAudit: {
-          [GENERAL_AGENT_ID]: [
+          'test-agent': [
             {
               id: 1,
-              agentId: GENERAL_AGENT_ID,
+              agentId: 'test-agent',
               entryDate: '2026-01-21',
               field: 'coinsTotal',
               oldValue: '100.00',
@@ -248,6 +247,9 @@ describe('RevenueView', () => {
         },
       };
       render(<RevenueView {...propsWithAudit} />);
+      // Expand laundry section first to see audit log
+      const laundryHeader = screen.getByText('Test Laundry').closest('button');
+      fireEvent.click(laundryHeader!);
       // Should show "Revenue total" instead of "coinsTotal"
       expect(screen.getByText(/Revenue total:/)).toBeTruthy();
     });

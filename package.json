@@ -3,12 +3,9 @@
   "version": "1.0.0",
   "private": true,
   "description": "UI + API control app for LaundroPi",
-  "main": "server.js",
   "scripts": {
     "dev": "npm run dev:ui",
     "dev:ui": "vite",
-    "dev:server": "nodemon server.js",
-    "dev:all": "concurrently \"npm:dev:ui\" \"npm:dev:server\"",
     "dev:central": "ts-node --transpile-only --compiler-options '{\"module\":\"CommonJS\",\"moduleResolution\":\"node\"}' src/server/index.ts",
     "dev:agent": "ts-node --transpile-only --compiler-options '{\"module\":\"CommonJS\",\"moduleResolution\":\"node\"}' src/device/agent.ts",
     "dev:local:ui": "VITE_API_TARGET=http://localhost:3001 vite",
@@ -24,8 +21,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "pretest": "npm rebuild better-sqlite3",
-    "test": "vitest run",
-    "start": "node server.js"
+    "test": "vitest run"
   },
   "dependencies": {
     "better-sqlite3": "^12.5.0",
@@ -53,7 +49,6 @@
     "@vitejs/plugin-react": "^4.3.2",
     "canvas": "^3.2.1",
     "concurrently": "^9.1.0",
-    "nodemon": "^3.1.7",
     "supertest": "^7.1.1",
     "ts-node": "^10.9.2",
     "typescript": "^5.6.3",
