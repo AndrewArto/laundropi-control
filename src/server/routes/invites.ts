@@ -22,11 +22,15 @@ export const publicRouter = express.Router();
 // Default viewer expiry in days (30 days)
 const VIEWER_DEFAULT_EXPIRY_DAYS = Number(process.env.VIEWER_DEFAULT_EXPIRY_DAYS || 30);
 
-// Password hashing using scrypt (same as main auth)
+// Password hashing using scrypt (same format as main auth in index.ts)
 const hashPassword = (password: string): string => {
-  const salt = crypto.randomBytes(16).toString('hex');
-  const hash = crypto.scryptSync(password, salt, 64).toString('hex');
-  return `${salt}:${hash}`;
+  const N = 16384;
+  const r = 8;
+  const p = 1;
+  const keylen = 64;
+  const salt = crypto.randomBytes(16);
+  const hash = crypto.scryptSync(password, salt, keylen, { N, r, p });
+  return `scrypt$${N}$${r}$${p}$${salt.toString('base64')}$${hash.toString('base64')}`;
 };
 
 /**
