@@ -1163,12 +1163,17 @@ app.post('/lead', (req, res) => {
 // Serve static assets from public directory (logo, etc.)
 app.use(express.static(path.join(__dirname, '../../public')));
 
+// Public invite endpoints (must be registered BEFORE global /api auth middleware)
+// These allow unauthenticated access for the setup page
+app.use('/api/invites/validate', inviteRoutes);
+app.use('/api/invites/complete', inviteRoutes);
+
 // Apply authentication middleware to all /api routes
 app.use('/api', requireUiAuth);
 // Revenue: viewers can read (GET), but only admin can write (PUT/POST)
 // Note: app.use with requireAdmin would block all methods, so we apply it per-route below
 app.use('/api/expenditure', requireAdmin, expenditureRoutes);
-// Invite routes handle auth internally (some endpoints are public)
+// Invite routes (admin-only endpoints like list/create/delete)
 app.use('/api/invites', inviteRoutes);
 
 // Protected leads endpoints (admin only)
