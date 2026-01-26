@@ -906,12 +906,12 @@ const App: React.FC = () => {
     return () => clearInterval(timer);
   }, [activeTab, revenueView, isAuthenticated, canViewRevenue]);
 
-  // Fetch bank imports when Bank Import tab is active
+  // Fetch bank imports when Bank Import tab is active (admin and viewer can view)
   useEffect(() => {
-    if (!isAuthenticated || authUser?.role !== 'admin') return;
+    if (!isAuthenticated || !canViewRevenue) return;
     if (activeTab !== Tab.REVENUE || revenueView !== 'bankImport') return;
     fetchBankImports();
-  }, [activeTab, revenueView, isAuthenticated, authUser?.role, fetchBankImports]);
+  }, [activeTab, revenueView, isAuthenticated, canViewRevenue, fetchBankImports]);
 
   useEffect(() => {
     if (!isAuthenticated || authUser?.role !== 'admin') return;

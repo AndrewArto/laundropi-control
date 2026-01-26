@@ -994,6 +994,17 @@ const requireAdminOrUser: express.RequestHandler = (_req, res, next) => {
   return next();
 };
 
+// Allows GET requests for all authenticated users (including viewers), but blocks non-GET for non-admins
+const requireAdminForWrites: express.RequestHandler = (req, res, next) => {
+  if (!REQUIRE_UI_AUTH) return next();
+  // GET requests allowed for all authenticated users (including viewers)
+  if (req.method === 'GET') return next();
+  // Non-GET requests require admin
+  const session = res.locals.user as SessionPayload | undefined;
+  if (!session || session.role !== 'admin') return res.status(403).json({ error: 'forbidden' });
+  return next();
+};
+
 app.get('/auth/session', (req, res) => {
   const session = getSession(req);
   res.setHeader('Cache-Control', 'no-store');
@@ -1169,9 +1180,8 @@ app.use('/api/invites', invitePublicRoutes);
 
 // Apply authentication middleware to all /api routes
 app.use('/api', requireUiAuth);
-// Revenue: viewers can read (GET), but only admin can write (PUT/POST)
-// Note: app.use with requireAdmin would block all methods, so we apply it per-route below
-app.use('/api/expenditure', requireAdmin, expenditureRoutes);
+// Expenditure: viewers can read (GET for import history), but only admin can write
+app.use('/api/expenditure', requireAdminForWrites, expenditureRoutes);
 // Invite routes (admin-only endpoints like list/create/delete)
 app.use('/api/invites', inviteRoutes);
 

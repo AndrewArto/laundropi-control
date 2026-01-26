@@ -91,4 +91,17 @@ export const requireAdminOrUser: express.RequestHandler = (_req, res, next) => {
   return next();
 };
 
+// Allows GET requests for all authenticated users, but blocks non-GET for non-admins
+export const requireAdminForWrites: express.RequestHandler = (req, res, next) => {
+  if (!REQUIRE_UI_AUTH) return next();
+  // GET requests allowed for all authenticated users (including viewers)
+  if (req.method === 'GET') return next();
+  // Non-GET requests require admin
+  const session = res.locals.user as SessionPayload | undefined;
+  if (!session || session.role !== 'admin') {
+    return res.status(403).json({ error: 'forbidden' });
+  }
+  return next();
+};
+
 export { signSession, verifySession };
