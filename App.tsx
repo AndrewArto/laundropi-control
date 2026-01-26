@@ -888,7 +888,7 @@ const App: React.FC = () => {
       fetchRevenueData({ silent: true });
     }, 10_000);
     return () => clearInterval(timer);
-  }, [activeTab, revenueView, isAuthenticated, canViewRevenue, revenueSaving]);
+  }, [activeTab, revenueView, isAuthenticated, canViewRevenue, revenueSaving, revenueDate, laundryIdKey]);
 
   useEffect(() => {
     if (!isAuthenticated || !canViewRevenue) return;
