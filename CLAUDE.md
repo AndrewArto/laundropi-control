@@ -1,5 +1,11 @@
 # Claude Context for WashControl / LaundroPi Control
 
+## Development Rules
+
+1. **Run full test suite before any commit:** Always run `npm test` and ensure all tests pass before committing changes.
+2. **Fix all failing tests:** If tests fail, fix them before proceeding with the commit. Do not commit with failing tests.
+3. **Version tagging:** After significant changes, create a new minor version tag (e.g., v1.11.0) with a descriptive annotation.
+
 ## SSH Access
 
 ### AWS Server (Central + UI + Landing Page)
