@@ -1045,6 +1045,11 @@ export const RevenueView: React.FC<RevenueViewProps> = (props) => {
                   inputMode="decimal"
                   value={draft.coinsTotal}
                   disabled={isViewer}
+                  onFocus={(e) => {
+                    if (e.target.value === '0.00' || e.target.value === '0') {
+                      updateRevenueDraftFromHook(laundry.id, d => ({ ...d, coinsTotal: '' }));
+                    }
+                  }}
                   onChange={(e) => {
                     const nextValue = e.target.value;
                     if (!isRevenueNumericInput(nextValue)) return;
@@ -1066,6 +1071,11 @@ export const RevenueView: React.FC<RevenueViewProps> = (props) => {
                   inputMode="decimal"
                   value={draft.euroCoinsCount}
                   disabled={isViewer}
+                  onFocus={(e) => {
+                    if (e.target.value === '0') {
+                      updateRevenueDraftFromHook(laundry.id, d => ({ ...d, euroCoinsCount: '' }));
+                    }
+                  }}
                   onChange={(e) => {
                     const nextValue = e.target.value;
                     if (!isRevenueNumericInput(nextValue)) return;
@@ -1087,6 +1097,11 @@ export const RevenueView: React.FC<RevenueViewProps> = (props) => {
                   inputMode="decimal"
                   value={draft.billsTotal}
                   disabled={isViewer}
+                  onFocus={(e) => {
+                    if (e.target.value === '0.00' || e.target.value === '0') {
+                      updateRevenueDraftFromHook(laundry.id, d => ({ ...d, billsTotal: '' }));
+                    }
+                  }}
                   onChange={(e) => {
                     const nextValue = e.target.value;
                     if (!isRevenueNumericInput(nextValue)) return;
@@ -1130,6 +1145,14 @@ export const RevenueView: React.FC<RevenueViewProps> = (props) => {
                     inputMode="decimal"
                     value={item.amount}
                     disabled={isViewer}
+                    onFocus={(e) => {
+                      if (e.target.value === '0.00' || e.target.value === '0') {
+                        updateRevenueDraftFromHook(laundry.id, d => ({
+                          ...d,
+                          deductions: d.deductions.map(row => row.id === item.id ? { ...row, amount: '' } : row),
+                        }));
+                      }
+                    }}
                     onChange={(e) => {
                       const nextValue = e.target.value;
                       if (!isRevenueNumericInput(nextValue)) return;
