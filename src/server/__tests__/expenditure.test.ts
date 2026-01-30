@@ -420,6 +420,134 @@ describe('Expenditure API', { timeout: 30000 }, () => {
     });
   });
 
+  describe('Auto-Match Previously Assigned Transactions', () => {
+    it('auto-marks transactions as existing when they match previously assigned ones by reference', async () => {
+      const app = await setupApp();
+
+      // First import: upload and assign a transaction
+      const csv1 = createCsvContent([
+        { date: '15/01/2026', description: 'Detergente', amount: '25,50', reference: 'REF-DET-001' },
+      ]);
+
+      const upload1 = await request(app)
+        .post('/api/expenditure/imports')
+        .set('Content-Type', 'text/csv')
+        .set('X-Filename', 'first-assigned.csv')
+        .send(csv1)
+        .expect(200);
+
+      const txId = upload1.body.transactions[0].id;
+
+      // Assign to a laundry
+      await request(app)
+        .post(`/api/expenditure/transactions/${txId}/assign`)
+        .send({ agentId: 'Laundry-1' })
+        .expect(200);
+
+      // Second import: same transaction appears again (same reference, different file)
+      const csv2 = createCsvContent([
+        { date: '15/01/2026', description: 'Detergente', amount: '25,50', reference: 'REF-DET-001' },
+        { date: '20/01/2026', description: 'New expense', amount: '100,00', reference: 'REF-NEW-001' },
+      ]);
+
+      const upload2 = await request(app)
+        .post('/api/expenditure/imports')
+        .set('Content-Type', 'text/csv')
+        .set('X-Filename', 'second-with-overlap.csv')
+        .send(csv2)
+        .expect(200);
+
+      const matchedTx = upload2.body.transactions.find((t: any) => t.bankReference === 'REF-DET-001');
+      const newTx = upload2.body.transactions.find((t: any) => t.bankReference === 'REF-NEW-001');
+
+      expect(matchedTx.reconciliationStatus).toBe('existing');
+      expect(matchedTx.assignedAgentId).toBe('Laundry-1');
+      expect(matchedTx.reconciliationNotes).toContain('Auto-matched');
+      expect(newTx.reconciliationStatus).toBe('new');
+      expect(upload2.body.autoExistingCount).toBe(1);
+    });
+
+    it('auto-marks transactions as existing by date+description+amount when no reference', async () => {
+      const app = await setupApp();
+
+      // First import: upload and assign
+      const csv1 = createCsvContent([
+        { date: '10/01/2026', description: 'Electricity bill', amount: '89,99' },
+      ]);
+
+      const upload1 = await request(app)
+        .post('/api/expenditure/imports')
+        .set('Content-Type', 'text/csv')
+        .set('X-Filename', 'assigned-no-ref.csv')
+        .send(csv1)
+        .expect(200);
+
+      await request(app)
+        .post(`/api/expenditure/transactions/${upload1.body.transactions[0].id}/assign`)
+        .send({ agentId: 'Laundry-2' })
+        .expect(200);
+
+      // Second import: same transaction by date+desc+amount
+      const csv2 = createCsvContent([
+        { date: '10/01/2026', description: 'Electricity bill', amount: '89,99' },
+        { date: '11/01/2026', description: 'Water bill', amount: '45,00' },
+      ]);
+
+      const upload2 = await request(app)
+        .post('/api/expenditure/imports')
+        .set('Content-Type', 'text/csv')
+        .set('X-Filename', 'overlap-no-ref.csv')
+        .send(csv2)
+        .expect(200);
+
+      const matchedTx = upload2.body.transactions.find((t: any) => t.description === 'Electricity bill');
+      const newTx = upload2.body.transactions.find((t: any) => t.description === 'Water bill');
+
+      expect(matchedTx.reconciliationStatus).toBe('existing');
+      expect(matchedTx.assignedAgentId).toBe('Laundry-2');
+      expect(newTx.reconciliationStatus).toBe('new');
+    });
+
+    it('prefers auto-ignore over auto-existing when both match', async () => {
+      const app = await setupApp();
+
+      // First import: upload, assign, then ignore
+      const csv1 = createCsvContent([
+        { date: '15/01/2026', description: 'Ambiguous fee', amount: '10,00', reference: 'REF-AMB' },
+      ]);
+
+      const upload1 = await request(app)
+        .post('/api/expenditure/imports')
+        .set('Content-Type', 'text/csv')
+        .set('X-Filename', 'ambiguous-1.csv')
+        .send(csv1)
+        .expect(200);
+
+      // Mark as ignored (this takes precedence)
+      await request(app)
+        .put(`/api/expenditure/transactions/${upload1.body.transactions[0].id}`)
+        .send({ reconciliationStatus: 'ignored', reconciliationNotes: 'Not relevant' })
+        .expect(200);
+
+      // Second import with same transaction
+      const csv2 = createCsvContent([
+        { date: '15/01/2026', description: 'Ambiguous fee', amount: '10,00', reference: 'REF-AMB' },
+        { date: '16/01/2026', description: 'Other tx', amount: '20,00' },
+      ]);
+
+      const upload2 = await request(app)
+        .post('/api/expenditure/imports')
+        .set('Content-Type', 'text/csv')
+        .set('X-Filename', 'ambiguous-2.csv')
+        .send(csv2)
+        .expect(200);
+
+      const matchedTx = upload2.body.transactions.find((t: any) => t.bankReference === 'REF-AMB');
+      // Auto-ignore check happens first, so it should be ignored, not existing
+      expect(matchedTx.reconciliationStatus).toBe('ignored');
+    });
+  });
+
   describe('Import Completion', () => {
     it('completes import and sets completedAt timestamp', async () => {
       const app = await setupApp();

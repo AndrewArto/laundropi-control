@@ -12,6 +12,7 @@ import {
   updateExpenditureTransaction,
   getExpenditureTransaction,
   listIgnoredExpenditureTransactions,
+  listAssignedExpenditureTransactions,
   insertExpenditureAudit,
   listExpenditureAudit,
   deleteExpenditureImport,
@@ -55,6 +56,30 @@ function matchesIgnoredTransaction(
     }
   }
   return false;
+}
+
+/**
+ * Check if a transaction matches any previously assigned (existing) transaction.
+ * Returns the matched transaction so we can copy its assignedAgentId.
+ */
+function findMatchingAssignedTransaction(
+  transaction: { transactionDate: string; description: string; amount: number; bankReference: string | null },
+  assignedList: ExpenditureTransactionRow[]
+): ExpenditureTransactionRow | null {
+  for (const assigned of assignedList) {
+    // Match by bank reference if both have it
+    if (transaction.bankReference && assigned.bankReference &&
+        transaction.bankReference === assigned.bankReference) {
+      return assigned;
+    }
+    // Match by date + description + amount
+    if (transaction.transactionDate === assigned.transactionDate &&
+        transaction.description === assigned.description &&
+        Math.abs(transaction.amount - assigned.amount) < 0.01) {
+      return assigned;
+    }
+  }
+  return null;
 }
 
 /**
@@ -105,6 +130,8 @@ router.post('/imports', express.text({ type: '*/*', limit: '5mb' }), (req, res) 
 
   // Get list of previously ignored transactions for auto-ignore
   const ignoredTransactions = listIgnoredExpenditureTransactions();
+  // Get list of previously assigned transactions for auto-matching
+  const assignedTransactions = listAssignedExpenditureTransactions();
 
   // Calculate date range and total
   const dates = parseResult.transactions.map(t => t.date).sort();
@@ -134,6 +161,7 @@ router.post('/imports', express.text({ type: '*/*', limit: '5mb' }), (req, res) 
   // Create transaction records
   const transactions: ExpenditureTransactionRow[] = [];
   let autoIgnoredCount = 0;
+  let autoExistingCount = 0;
   let otherCreditCount = 0;
   let stripeCreditCount = 0;
 
@@ -141,6 +169,14 @@ router.post('/imports', express.text({ type: '*/*', limit: '5mb' }), (req, res) 
     // Determine initial status based on transaction type
     let reconciliationStatus: ExpenditureTransactionRow['reconciliationStatus'] = 'new';
     let reconciliationNotes: string | null = null;
+    let assignedAgentId: string | null = null;
+
+    const txLookup = {
+      transactionDate: parsed.date,
+      description: parsed.description,
+      amount: parsed.amount,
+      bankReference: parsed.reference,
+    };
 
     if (parsed.transactionType === 'other_credit') {
       // Auto-ignore non-Stripe credits
@@ -149,25 +185,33 @@ router.post('/imports', express.text({ type: '*/*', limit: '5mb' }), (req, res) 
       otherCreditCount++;
     } else if (parsed.transactionType === 'expense') {
       // Check if this expense matches a previously ignored transaction
-      const isAutoIgnored = matchesIgnoredTransaction(
-        {
-          transactionDate: parsed.date,
-          description: parsed.description,
-          amount: parsed.amount,
-          bankReference: parsed.reference,
-        },
-        ignoredTransactions
-      );
+      const isAutoIgnored = matchesIgnoredTransaction(txLookup, ignoredTransactions);
 
       if (isAutoIgnored) {
         reconciliationStatus = 'ignored';
         reconciliationNotes = 'Auto-ignored (matches previously ignored transaction)';
         autoIgnoredCount++;
+      } else {
+        // Check if this expense matches a previously assigned transaction
+        const matchedAssigned = findMatchingAssignedTransaction(txLookup, assignedTransactions);
+        if (matchedAssigned) {
+          reconciliationStatus = 'existing';
+          assignedAgentId = matchedAssigned.assignedAgentId;
+          reconciliationNotes = 'Auto-matched (previously assigned transaction)';
+          autoExistingCount++;
+        }
       }
     } else if (parsed.transactionType === 'stripe_credit') {
-      // Stripe credits need user assignment to a laundry
-      reconciliationStatus = 'new';
-      reconciliationNotes = 'Stripe payment - assign to laundry revenue';
+      // Check if this Stripe credit matches a previously assigned transaction
+      const matchedAssigned = findMatchingAssignedTransaction(txLookup, assignedTransactions);
+      if (matchedAssigned) {
+        reconciliationStatus = 'existing';
+        assignedAgentId = matchedAssigned.assignedAgentId;
+        reconciliationNotes = 'Auto-matched (previously assigned Stripe credit)';
+        autoExistingCount++;
+      } else {
+        reconciliationNotes = 'Stripe payment - assign to laundry revenue';
+      }
       stripeCreditCount++;
     }
 
@@ -182,7 +226,7 @@ router.post('/imports', express.text({ type: '*/*', limit: '5mb' }), (req, res) 
       transactionType: parsed.transactionType,
       reconciliationStatus,
       matchedDeductionKey: null,
-      assignedAgentId: null,
+      assignedAgentId,
       reconciliationNotes,
       createdAt: now,
     };
@@ -200,6 +244,7 @@ router.post('/imports', express.text({ type: '*/*', limit: '5mb' }), (req, res) 
       fileName,
       totalTransactions: transactions.length,
       autoIgnored: autoIgnoredCount,
+      autoExisting: autoExistingCount,
       otherCreditsIgnored: otherCreditCount,
       stripeCredits: stripeCreditCount,
     }),
@@ -212,6 +257,7 @@ router.post('/imports', express.text({ type: '*/*', limit: '5mb' }), (req, res) 
     transactions,
     parseWarnings: parseResult.warnings,
     autoIgnoredCount,
+    autoExistingCount,
     otherCreditsIgnored: otherCreditCount,
     stripeCredits: stripeCreditCount,
   });

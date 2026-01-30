@@ -1588,6 +1588,29 @@ export function listIgnoredExpenditureTransactions(): ExpenditureTransactionRow[
   }));
 }
 
+export function listAssignedExpenditureTransactions(): ExpenditureTransactionRow[] {
+  const rows = db.prepare(`
+    SELECT * FROM expenditure_transactions
+    WHERE reconciliationStatus = 'existing'
+    ORDER BY transactionDate DESC
+  `).all() as any[];
+  return rows.map(row => ({
+    id: row.id,
+    importId: row.importId,
+    transactionDate: row.transactionDate,
+    description: row.description,
+    amount: row.amount,
+    bankReference: row.bankReference,
+    category: row.category,
+    transactionType: row.transactionType,
+    reconciliationStatus: row.reconciliationStatus,
+    matchedDeductionKey: row.matchedDeductionKey,
+    assignedAgentId: row.assignedAgentId,
+    reconciliationNotes: row.reconciliationNotes,
+    createdAt: row.createdAt,
+  }));
+}
+
 export function deleteExpenditureImport(id: string) {
   // Transactions are deleted via CASCADE
   db.prepare('DELETE FROM expenditure_imports WHERE id = ?').run(id);
