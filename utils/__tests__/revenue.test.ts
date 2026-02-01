@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { formatMoney, normalizeDecimalInput } from '../formatting';
-import { buildRevenueDraft, parseMoneyInput, getEntryRevenue, getEntryProfitLoss } from '../revenue';
+import { buildRevenueDraft, parseMoneyInput, getEntryRevenue, getEntryProfitLoss, filterRevenueEntries, sortRevenueEntries } from '../revenue';
 import type { RevenueEntry } from '../../types';
 
 describe('formatMoney', () => {
@@ -179,5 +179,123 @@ describe('getEntryProfitLoss', () => {
 
     // P/L = 50 - 100 = -50 (loss)
     expect(getEntryProfitLoss(entry)).toBe(-50);
+  });
+});
+
+// --- Sort & Filter tests ---
+
+const makeEntry = (overrides: Partial<RevenueEntry>): RevenueEntry => ({
+  agentId: 'agent-1',
+  entryDate: '2026-01-15',
+  createdAt: 1000,
+  updatedAt: 2000,
+  coinsTotal: 100,
+  euroCoinsCount: 50,
+  billsTotal: 30,
+  deductions: [],
+  deductionsTotal: 0,
+  createdBy: 'admin',
+  updatedBy: 'admin',
+  hasEdits: false,
+  ...overrides,
+});
+
+const testEntries: RevenueEntry[] = [
+  makeEntry({ agentId: 'agent-1', entryDate: '2026-01-15', coinsTotal: 200, euroCoinsCount: 100, billsTotal: 50, deductionsTotal: 10, updatedBy: 'admin', updatedAt: 2000 }),
+  makeEntry({ agentId: 'agent-2', entryDate: '2026-01-16', coinsTotal: 500, euroCoinsCount: 250, billsTotal: 100, deductionsTotal: 25, updatedBy: 'viewer1', updatedAt: 3000 }),
+  makeEntry({ agentId: 'agent-1', entryDate: '2026-01-17', coinsTotal: 150, euroCoinsCount: 75, billsTotal: 30, deductionsTotal: 5, updatedBy: 'admin', updatedAt: 4000 }),
+];
+
+describe('filterRevenueEntries', () => {
+  it('should return all entries when no filters', () => {
+    expect(filterRevenueEntries(testEntries, {})).toHaveLength(3);
+  });
+
+  it('should filter by agentId', () => {
+    const result = filterRevenueEntries(testEntries, { agentId: 'agent-2' });
+    expect(result).toHaveLength(1);
+    expect(result[0].entryDate).toBe('2026-01-16');
+  });
+
+  it('should filter by date substring', () => {
+    const result = filterRevenueEntries(testEntries, { entryDate: '01-15' });
+    expect(result).toHaveLength(1);
+    expect(result[0].entryDate).toBe('2026-01-15');
+  });
+
+  it('should filter by minimum coinsTotal', () => {
+    const result = filterRevenueEntries(testEntries, { coinsTotal: '200' });
+    expect(result).toHaveLength(2); // 200 and 500
+  });
+
+  it('should filter by minimum euroCoinsCount', () => {
+    const result = filterRevenueEntries(testEntries, { euroCoinsCount: '100' });
+    expect(result).toHaveLength(2); // 100 and 250
+  });
+
+  it('should filter by minimum billsTotal', () => {
+    const result = filterRevenueEntries(testEntries, { billsTotal: '50' });
+    expect(result).toHaveLength(2); // 50 and 100
+  });
+
+  it('should filter by minimum deductionsTotal', () => {
+    const result = filterRevenueEntries(testEntries, { deductionsTotal: '10' });
+    expect(result).toHaveLength(2); // 10 and 25
+  });
+
+  it('should filter by updatedBy (case-insensitive substring)', () => {
+    const result = filterRevenueEntries(testEntries, { updatedBy: 'viewer' });
+    expect(result).toHaveLength(1);
+    expect(result[0].updatedBy).toBe('viewer1');
+  });
+
+  it('should combine multiple filters', () => {
+    const result = filterRevenueEntries(testEntries, { agentId: 'agent-1', coinsTotal: '200' });
+    expect(result).toHaveLength(1);
+    expect(result[0].entryDate).toBe('2026-01-15');
+  });
+
+  it('should return empty when no entries match', () => {
+    const result = filterRevenueEntries(testEntries, { entryDate: 'nonexistent' });
+    expect(result).toHaveLength(0);
+  });
+});
+
+describe('sortRevenueEntries', () => {
+  it('should sort by entryDate ascending', () => {
+    const result = sortRevenueEntries(testEntries, { col: 'entryDate', dir: 'asc' });
+    expect(result.map(e => e.entryDate)).toEqual(['2026-01-15', '2026-01-16', '2026-01-17']);
+  });
+
+  it('should sort by entryDate descending', () => {
+    const result = sortRevenueEntries(testEntries, { col: 'entryDate', dir: 'desc' });
+    expect(result.map(e => e.entryDate)).toEqual(['2026-01-17', '2026-01-16', '2026-01-15']);
+  });
+
+  it('should sort by coinsTotal ascending', () => {
+    const result = sortRevenueEntries(testEntries, { col: 'coinsTotal', dir: 'asc' });
+    expect(result.map(e => e.coinsTotal)).toEqual([150, 200, 500]);
+  });
+
+  it('should sort by coinsTotal descending', () => {
+    const result = sortRevenueEntries(testEntries, { col: 'coinsTotal', dir: 'desc' });
+    expect(result.map(e => e.coinsTotal)).toEqual([500, 200, 150]);
+  });
+
+  it('should sort by updatedAt (numeric) descending', () => {
+    const result = sortRevenueEntries(testEntries, { col: 'updatedAt', dir: 'desc' });
+    expect(result.map(e => e.updatedAt)).toEqual([4000, 3000, 2000]);
+  });
+
+  it('should sort by agentId (string) ascending', () => {
+    const result = sortRevenueEntries(testEntries, { col: 'agentId', dir: 'asc' });
+    expect(result[0].agentId).toBe('agent-1');
+    expect(result[2].agentId).toBe('agent-2');
+  });
+
+  it('should not mutate the original array', () => {
+    const original = [...testEntries];
+    sortRevenueEntries(testEntries, { col: 'coinsTotal', dir: 'asc' });
+    expect(testEntries.map(e => e.coinsTotal)).toEqual(original.map(e => e.coinsTotal));
   });
 });

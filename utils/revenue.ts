@@ -92,3 +92,42 @@ export const getEntryProfitLoss = (entry: RevenueEntry): number => {
   const costs = entry.deductionsTotal || 0;
   return revenue - costs;
 };
+
+// --- Sort & Filter for "All entries" table ---
+
+export interface AllEntriesSort {
+  col: string;
+  dir: 'asc' | 'desc';
+}
+
+export type AllEntriesFilters = Record<string, string>;
+
+const NUMERIC_COLS = new Set(['coinsTotal', 'euroCoinsCount', 'billsTotal', 'deductionsTotal', 'updatedAt']);
+
+export const filterRevenueEntries = (entries: RevenueEntry[], filters: AllEntriesFilters): RevenueEntry[] => {
+  return entries.filter(entry => {
+    if (filters.entryDate && !entry.entryDate.includes(filters.entryDate)) return false;
+    if (filters.agentId && entry.agentId !== filters.agentId) return false;
+    if (filters.coinsTotal && entry.coinsTotal < Number(filters.coinsTotal)) return false;
+    if (filters.euroCoinsCount && entry.euroCoinsCount < Number(filters.euroCoinsCount)) return false;
+    if (filters.billsTotal && entry.billsTotal < Number(filters.billsTotal)) return false;
+    if (filters.deductionsTotal && entry.deductionsTotal < Number(filters.deductionsTotal)) return false;
+    if (filters.updatedBy && !(entry.updatedBy || '').toLowerCase().includes(filters.updatedBy.toLowerCase())) return false;
+    return true;
+  });
+};
+
+export const sortRevenueEntries = (entries: RevenueEntry[], sort: AllEntriesSort): RevenueEntry[] => {
+  return [...entries].sort((a, b) => {
+    const col = sort.col as keyof typeof a;
+    const av = a[col];
+    const bv = b[col];
+    let cmp: number;
+    if (NUMERIC_COLS.has(sort.col)) {
+      cmp = (Number(av) || 0) - (Number(bv) || 0);
+    } else {
+      cmp = String(av ?? '').localeCompare(String(bv ?? ''));
+    }
+    return sort.dir === 'asc' ? cmp : -cmp;
+  });
+};

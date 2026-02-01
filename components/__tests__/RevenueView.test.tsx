@@ -305,4 +305,5 @@ describe('RevenueView', () => {
       expect(screen.getByText('Failed to load revenue data')).toBeTruthy();
     });
   });
+
 });
