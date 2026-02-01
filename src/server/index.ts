@@ -5,7 +5,7 @@ import cors = require('cors');
 import { WebSocketServer, WebSocket } from 'ws';
 import * as crypto from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
-import { listAgents, updateHeartbeat, saveMeta, getAgent, updateRelayMeta, listSchedules, upsertSchedule, deleteSchedule, listGroups, listGroupsForMembership, upsertGroup, deleteGroup, GroupRow, deleteAgent, upsertAgent, upsertCommand, listPendingCommands, deleteCommand, updateCommandsForRelay, expireOldCommands, insertLead, getLastLeadTimestampForIp, listLeads, getRevenueEntry, listRevenueEntriesBetween, listRevenueEntries, listRevenueEntryDatesBetween, listRevenueEntryDatesWithInfo, upsertRevenueEntry, insertRevenueAudit, listRevenueAudit, RevenueEntryRow, listUiUsers, getUiUser, createUiUser, updateUiUserRole, updateUiUserPassword, updateUiUserLastLogin, deleteUiUser, countUiUsers, listCameras, getCamera, upsertCamera, deleteCamera, upsertIntegrationSecret, getIntegrationSecret, deleteIntegrationSecret, CameraRow, listInventory, getInventory, updateInventory, getInventoryAudit, getLastInventoryChange, DetergentType } from './db';
+import { listAgents, updateHeartbeat, saveMeta, getAgent, updateRelayMeta, listSchedules, upsertSchedule, deleteSchedule, listGroups, listGroupsForMembership, upsertGroup, deleteGroup, GroupRow, deleteAgent, upsertAgent, upsertCommand, listPendingCommands, deleteCommand, updateCommandsForRelay, expireOldCommands, insertLead, getLastLeadTimestampForIp, listLeads, getRevenueEntry, listRevenueEntriesBetween, listRevenueEntries, listRevenueEntryDatesBetween, listRevenueEntryDatesWithInfo, getStripeDates, upsertRevenueEntry, insertRevenueAudit, listRevenueAudit, RevenueEntryRow, listUiUsers, getUiUser, createUiUser, updateUiUserRole, updateUiUserPassword, updateUiUserLastLogin, deleteUiUser, countUiUsers, listCameras, getCamera, upsertCamera, deleteCamera, upsertIntegrationSecret, getIntegrationSecret, deleteIntegrationSecret, CameraRow, listInventory, getInventory, updateInventory, getInventoryAudit, getLastInventoryChange, DetergentType } from './db';
 import expenditureRoutes from './routes/expenditure';
 import inviteRoutes, { publicRouter as invitePublicRoutes } from './routes/invites';
 
@@ -1261,15 +1261,17 @@ app.get('/api/revenue/dates', (req, res) => {
   }
 
   // Collect date info across all relevant agents
-  const dateInfoMap = new Map<string, { hasRevenue: boolean; hasExpenses: boolean }>();
+  const dateInfoMap = new Map<string, { hasRevenue: boolean; hasExpenses: boolean; hasStripeRevenue: boolean; hasManualRevenue: boolean }>();
 
-  const mergeInfo = (info: { date: string; hasRevenue: boolean; hasExpenses: boolean }) => {
+  const mergeInfo = (info: { date: string; hasRevenue: boolean; hasExpenses: boolean; hasStripeRevenue: boolean; hasManualRevenue: boolean }) => {
     const existing = dateInfoMap.get(info.date);
     if (existing) {
       existing.hasRevenue = existing.hasRevenue || info.hasRevenue;
       existing.hasExpenses = existing.hasExpenses || info.hasExpenses;
+      existing.hasStripeRevenue = existing.hasStripeRevenue || info.hasStripeRevenue;
+      existing.hasManualRevenue = existing.hasManualRevenue || info.hasManualRevenue;
     } else {
-      dateInfoMap.set(info.date, { hasRevenue: info.hasRevenue, hasExpenses: info.hasExpenses });
+      dateInfoMap.set(info.date, { hasRevenue: info.hasRevenue, hasExpenses: info.hasExpenses, hasStripeRevenue: info.hasStripeRevenue, hasManualRevenue: info.hasManualRevenue });
     }
   };
 
@@ -1284,6 +1286,15 @@ app.get('/api/revenue/dates', (req, res) => {
     listRevenueEntryDatesWithInfo(startDate, endDate, GENERAL_AGENT_ID).forEach(mergeInfo);
   } else {
     listRevenueEntryDatesWithInfo(startDate, endDate).forEach(mergeInfo);
+  }
+
+  // Mark dates that have Stripe revenue assigned
+  const stripeDates = getStripeDates(startDate, endDate, agentId || undefined);
+  for (const date of stripeDates) {
+    const info = dateInfoMap.get(date);
+    if (info) {
+      info.hasStripeRevenue = true;
+    }
   }
 
   // Return both the simple dates array (for backwards compatibility) and detailed info

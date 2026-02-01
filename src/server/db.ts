@@ -1013,6 +1013,8 @@ export interface DateEntryInfo {
   date: string;
   hasRevenue: boolean;
   hasExpenses: boolean;
+  hasStripeRevenue: boolean;
+  hasManualRevenue: boolean;
 }
 
 export function listRevenueEntryDatesWithInfo(startDate: string, endDate: string, agentId?: string): DateEntryInfo[] {
@@ -1022,14 +1024,16 @@ export function listRevenueEntryDatesWithInfo(startDate: string, endDate: string
   const query = agentId
     ? `SELECT entryDate,
          MAX(CASE WHEN (coinsTotal > 0 OR billsTotal > 0) AND agentId != 'FixCost' THEN 1 ELSE 0 END) as hasRevenue,
-         MAX(CASE WHEN deductionsTotal > 0 THEN 1 ELSE 0 END) as hasExpenses
+         MAX(CASE WHEN deductionsTotal > 0 THEN 1 ELSE 0 END) as hasExpenses,
+         MAX(CASE WHEN euroCoinsCount > 0 AND agentId != 'FixCost' THEN 1 ELSE 0 END) as hasManualRevenue
        FROM revenue_entries
        WHERE agentId = ? AND entryDate BETWEEN ? AND ?
        GROUP BY entryDate
        ORDER BY entryDate`
     : `SELECT entryDate,
          MAX(CASE WHEN (coinsTotal > 0 OR billsTotal > 0) AND agentId != 'FixCost' THEN 1 ELSE 0 END) as hasRevenue,
-         MAX(CASE WHEN deductionsTotal > 0 THEN 1 ELSE 0 END) as hasExpenses
+         MAX(CASE WHEN deductionsTotal > 0 THEN 1 ELSE 0 END) as hasExpenses,
+         MAX(CASE WHEN euroCoinsCount > 0 AND agentId != 'FixCost' THEN 1 ELSE 0 END) as hasManualRevenue
        FROM revenue_entries
        WHERE entryDate BETWEEN ? AND ?
        GROUP BY entryDate
@@ -1043,7 +1047,37 @@ export function listRevenueEntryDatesWithInfo(startDate: string, endDate: string
     date: row.entryDate,
     hasRevenue: row.hasRevenue === 1,
     hasExpenses: row.hasExpenses === 1,
+    hasStripeRevenue: false, // filled in by caller using getStripeDates
+    hasManualRevenue: row.hasManualRevenue === 1,
   }));
+}
+
+/**
+ * Returns a set of dates (YYYY-MM-DD) that have Stripe credit assigned to revenue
+ * in the given date range. Detected via matchedDeductionKey format 'stripe:{agentId}:{date}'.
+ */
+export function getStripeDates(startDate: string, endDate: string, agentId?: string): Set<string> {
+  const query = `SELECT DISTINCT matchedDeductionKey
+     FROM expenditure_transactions
+     WHERE transactionType = 'stripe_credit'
+       AND reconciliationStatus = 'existing'
+       AND matchedDeductionKey IS NOT NULL
+       AND matchedDeductionKey LIKE 'stripe:%'`;
+
+  const rows = db.prepare(query).all() as any[];
+  const dates = new Set<string>();
+  for (const row of rows) {
+    // matchedDeductionKey format: stripe:{agentId}:{date}
+    const parts = (row.matchedDeductionKey as string).split(':');
+    if (parts.length < 3) continue;
+    const keyAgentId = parts[1];
+    const date = parts[2];
+    if (agentId && keyAgentId !== agentId) continue;
+    if (date >= startDate && date <= endDate) {
+      dates.add(date);
+    }
+  }
+  return dates;
 }
 
 export function upsertRevenueEntry(row: RevenueEntryRow) {

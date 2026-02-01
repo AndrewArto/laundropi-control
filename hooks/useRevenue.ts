@@ -10,7 +10,7 @@ type RevenueDraft = {
   billsTotal: string;
   deductions: RevenueDraftDeduction[];
 };
-export type DateEntryInfo = { date: string; hasRevenue: boolean; hasExpenses: boolean };
+export type DateEntryInfo = { date: string; hasRevenue: boolean; hasExpenses: boolean; hasStripeRevenue: boolean; hasManualRevenue: boolean };
 
 export interface UseRevenueReturn {
   revenueDate: string;

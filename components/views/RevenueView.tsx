@@ -642,6 +642,10 @@ export const RevenueView: React.FC<RevenueViewProps> = (props) => {
             const dateInfo = dateInfoMap.get(dateStr);
             const hasRevenue = dateInfo?.hasRevenue ?? false;
             const hasExpenses = dateInfo?.hasExpenses ?? false;
+            const hasStripe = dateInfo?.hasStripeRevenue ?? false;
+            const hasManual = dateInfo?.hasManualRevenue ?? false;
+            // Green = manual incassation, Blue = stripe only, manual takes priority
+            const revenueDotColor = hasManual ? 'bg-emerald-400' : hasStripe ? 'bg-blue-400' : 'bg-emerald-400';
             return (
               <button
                 key={dateStr}
@@ -657,7 +661,7 @@ export const RevenueView: React.FC<RevenueViewProps> = (props) => {
                 <span>{day}</span>
                 {(hasRevenue || hasExpenses) && (
                   <div className="mt-0.5 flex gap-0.5">
-                    {hasRevenue && <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />}
+                    {hasRevenue && <span className={`w-1.5 h-1.5 rounded-full ${revenueDotColor}`} />}
                     {hasExpenses && <span className="w-1.5 h-1.5 rounded-full bg-red-400" />}
                   </div>
                 )}
@@ -665,10 +669,14 @@ export const RevenueView: React.FC<RevenueViewProps> = (props) => {
             );
           })}
         </div>
-        <div className="text-[11px] text-slate-500 flex items-center gap-4">
+        <div className="text-[11px] text-slate-500 flex items-center gap-4 flex-wrap">
           <div className="flex items-center gap-1.5">
             <span className="w-2 h-2 rounded-full bg-emerald-400" />
-            Revenue
+            Manual
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="w-2 h-2 rounded-full bg-blue-400" />
+            Stripe
           </div>
           <div className="flex items-center gap-1.5">
             <span className="w-2 h-2 rounded-full bg-red-400" />

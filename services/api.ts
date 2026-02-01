@@ -395,7 +395,7 @@ export const ApiService = {
 
   async listRevenueEntryDates(startDate: string, endDate: string, agentId?: string): Promise<{
     dates: string[];
-    dateInfo: Array<{ date: string; hasRevenue: boolean; hasExpenses: boolean }>;
+    dateInfo: Array<{ date: string; hasRevenue: boolean; hasExpenses: boolean; hasStripeRevenue: boolean; hasManualRevenue: boolean }>;
   }> {
     const query = new URLSearchParams({ startDate, endDate });
     if (agentId) query.set('agentId', agentId);
