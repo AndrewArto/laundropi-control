@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { formatMoney, normalizeDecimalInput } from '../formatting';
-import { buildRevenueDraft, parseMoneyInput, getEntryRevenue, getEntryProfitLoss, filterRevenueEntries, sortRevenueEntries } from '../revenue';
+import { buildRevenueDraft, parseMoneyInput, getEntryRevenue, getEntryProfitLoss, filterRevenueEntries, filterRevenueByType, sortRevenueEntries } from '../revenue';
 import type { RevenueEntry } from '../../types';
 
 describe('formatMoney', () => {
@@ -297,5 +297,34 @@ describe('sortRevenueEntries', () => {
     const original = [...testEntries];
     sortRevenueEntries(testEntries, { col: 'coinsTotal', dir: 'asc' });
     expect(testEntries.map(e => e.coinsTotal)).toEqual(original.map(e => e.coinsTotal));
+  });
+});
+
+describe('filterRevenueByType', () => {
+  const entries: RevenueEntry[] = [
+    makeEntry({ coinsTotal: 200, billsTotal: 50, deductionsTotal: 0 }),   // income only
+    makeEntry({ coinsTotal: 0, billsTotal: 0, deductionsTotal: 30 }),     // deductions only
+    makeEntry({ coinsTotal: 100, billsTotal: 0, deductionsTotal: 10 }),   // both
+  ];
+
+  it('should return all entries when filter is "all"', () => {
+    expect(filterRevenueByType(entries, 'all')).toHaveLength(3);
+  });
+
+  it('should return only entries with income when filter is "income"', () => {
+    const result = filterRevenueByType(entries, 'income');
+    expect(result).toHaveLength(2);
+    expect(result.every(e => e.coinsTotal > 0 || e.billsTotal > 0)).toBe(true);
+  });
+
+  it('should return only entries with deductions when filter is "deductions"', () => {
+    const result = filterRevenueByType(entries, 'deductions');
+    expect(result).toHaveLength(2);
+    expect(result.every(e => e.deductionsTotal > 0)).toBe(true);
+  });
+
+  it('should return empty when no entries match the type', () => {
+    const incomeOnly = [makeEntry({ coinsTotal: 100, billsTotal: 0, deductionsTotal: 0 })];
+    expect(filterRevenueByType(incomeOnly, 'deductions')).toHaveLength(0);
   });
 });

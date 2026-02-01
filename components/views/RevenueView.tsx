@@ -6,7 +6,7 @@ import { BankImportView } from './BankImportView';
 import type { ReconciliationSummary, PendingChange } from '../../hooks/useReconciliation';
 import { ApiService } from '../../services/api';
 import { formatShortDate } from '../../utils/dateTime';
-import { getEntryRevenue, filterRevenueEntries, sortRevenueEntries } from '../../utils/revenue';
+import { getEntryRevenue, filterRevenueEntries, filterRevenueByType, sortRevenueEntries } from '../../utils/revenue';
 
 // Map field names to user-friendly labels
 const fieldLabels: Record<string, string> = {
@@ -432,6 +432,24 @@ export const RevenueView: React.FC<RevenueViewProps> = (props) => {
   // All-entries sort & filter state
   const [allSort, setAllSort] = useState<{ col: string; dir: 'asc' | 'desc' }>({ col: 'entryDate', dir: 'desc' });
   const [allFilters, setAllFilters] = useState<Record<string, string>>({});
+
+  // Column visibility
+  const ALL_COLUMNS = [
+    { key: 'entryDate', label: 'Date', align: 'left' as const, defaultVisible: true },
+    { key: 'agentId', label: 'Laundry', align: 'left' as const, defaultVisible: true },
+    { key: 'coinsTotal', label: 'Revenue (€)', align: 'right' as const, defaultVisible: true },
+    { key: 'euroCoinsCount', label: '€1 count', align: 'right' as const, defaultVisible: true },
+    { key: 'billsTotal', label: 'Bills (€)', align: 'right' as const, defaultVisible: false },
+    { key: 'deductionsTotal', label: 'Deductions (€)', align: 'right' as const, defaultVisible: true },
+    { key: 'updatedBy', label: 'Updated by', align: 'left' as const, defaultVisible: true },
+    { key: 'updatedAt', label: 'Updated at', align: 'left' as const, defaultVisible: true },
+  ] as const;
+
+  const [visibleCols, setVisibleCols] = useState<Set<string>>(
+    () => new Set(ALL_COLUMNS.filter(c => c.defaultVisible).map(c => c.key))
+  );
+  const [colPickerOpen, setColPickerOpen] = useState(false);
+  const [entryTypeFilter, setEntryTypeFilter] = useState<'all' | 'income' | 'deductions'>('all');
 
   // Viewer role check - viewers can see data but not edit
   const isViewer = props.authUser?.role === 'viewer';
@@ -1237,7 +1255,7 @@ export const RevenueView: React.FC<RevenueViewProps> = (props) => {
     const laundryNameMap = new Map(laundries.map(l => [l.id, l.name]));
 
     // Filter and sort entries using extracted utility functions
-    const filtered = filterRevenueEntries(revenueAllEntries, allFilters);
+    const filtered = filterRevenueByType(filterRevenueEntries(revenueAllEntries, allFilters), entryTypeFilter);
     const sorted = sortRevenueEntries(filtered, allSort);
 
     const handleSort = (col: string) => {
@@ -1251,25 +1269,72 @@ export const RevenueView: React.FC<RevenueViewProps> = (props) => {
 
     const filterInputClass = 'w-full bg-slate-900/80 border border-slate-600 rounded px-2 py-1 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-indigo-500';
 
-    const hasActiveFilters = Object.values(allFilters).some(v => v !== '');
+    const hasActiveFilters = Object.values(allFilters).some(v => v !== '') || entryTypeFilter !== 'all';
 
     return (
       <div className="space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="text-xs text-slate-400">
-            {filtered.length === revenueAllEntries.length
-              ? `${revenueAllEntries.length} entries`
-              : `${filtered.length} of ${revenueAllEntries.length} entries`}
+          <div className="flex items-center gap-3">
+            <div className="text-xs text-slate-400">
+              {filtered.length === revenueAllEntries.length
+                ? `${revenueAllEntries.length} entries`
+                : `${filtered.length} of ${revenueAllEntries.length} entries`}
+            </div>
+            <div className="inline-flex items-center gap-0.5 rounded-md border border-slate-700 bg-slate-900/60 p-0.5">
+              {([['all', 'All'], ['income', 'Income'], ['deductions', 'Costs']] as const).map(([val, lbl]) => (
+                <button
+                  key={val}
+                  onClick={() => setEntryTypeFilter(val)}
+                  className={`px-2 py-1 text-xs rounded ${entryTypeFilter === val ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-slate-200'}`}
+                >
+                  {lbl}
+                </button>
+              ))}
+            </div>
           </div>
           <div className="flex items-center gap-2">
             {hasActiveFilters && (
               <button
-                onClick={() => setAllFilters({})}
+                onClick={() => { setAllFilters({}); setEntryTypeFilter('all'); }}
                 className="px-2 py-1.5 text-xs rounded-md border border-amber-500/40 text-amber-300 hover:border-amber-400 hover:text-amber-200"
               >
                 Clear filters
               </button>
             )}
+            <div className="relative">
+              <button
+                onClick={() => setColPickerOpen(prev => !prev)}
+                className="flex items-center gap-1 px-3 py-2 text-xs rounded-md border border-slate-600 text-slate-300 hover:border-slate-500 hover:text-white"
+              >
+                Columns
+                <ChevronDown className={`w-3 h-3 transition-transform ${colPickerOpen ? 'rotate-180' : ''}`} />
+              </button>
+              {colPickerOpen && (
+                <div className="absolute right-0 top-full mt-1 z-50 bg-slate-800 border border-slate-600 rounded-lg shadow-xl p-2 min-w-[160px]">
+                  {ALL_COLUMNS.map(col => (
+                    <label key={col.key} className="flex items-center gap-2 px-2 py-1.5 text-xs text-slate-300 hover:bg-slate-700/50 rounded cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={visibleCols.has(col.key)}
+                        onChange={() => {
+                          setVisibleCols(prev => {
+                            const next = new Set(prev);
+                            if (next.has(col.key)) {
+                              if (next.size > 1) next.delete(col.key);
+                            } else {
+                              next.add(col.key);
+                            }
+                            return next;
+                          });
+                        }}
+                        className="rounded border-slate-500 bg-slate-900 text-indigo-500 focus:ring-indigo-500 focus:ring-offset-0"
+                      />
+                      {col.label}
+                    </label>
+                  ))}
+                </div>
+              )}
+            </div>
             <button
               onClick={handleExportRevenueCsv}
               disabled={revenueAllLoading || revenueAllEntries.length === 0}
@@ -1323,67 +1388,78 @@ export const RevenueView: React.FC<RevenueViewProps> = (props) => {
                 {sorted.map(entry => (
                   <div key={`${entry.agentId}-${entry.entryDate}`} className="bg-slate-800 border border-slate-700 rounded-lg p-3">
                     <div className="flex items-center justify-between gap-2">
-                      <div className="text-sm font-semibold text-white">{entry.entryDate}</div>
-                      <div className="text-[11px] text-slate-400">{laundryNameMap.get(entry.agentId) || entry.agentId}</div>
+                      {visibleCols.has('entryDate') && <div className="text-sm font-semibold text-white">{entry.entryDate}</div>}
+                      {visibleCols.has('agentId') && <div className="text-[11px] text-slate-400">{laundryNameMap.get(entry.agentId) || entry.agentId}</div>}
                     </div>
                     <div className="grid grid-cols-2 gap-2 text-xs text-slate-300 mt-2">
-                      <div>Revenue: €{formatMoney(entry.coinsTotal)}</div>
-                      <div>€1 count: {entry.euroCoinsCount}</div>
-                      <div>Bills: €{formatMoney(entry.billsTotal)}</div>
-                      <div>Deductions: €{formatMoney(entry.deductionsTotal)}</div>
+                      {visibleCols.has('coinsTotal') && <div>Revenue: €{formatMoney(entry.coinsTotal)}</div>}
+                      {visibleCols.has('euroCoinsCount') && <div>€1 count: {entry.euroCoinsCount}</div>}
+                      {visibleCols.has('billsTotal') && <div>Bills: €{formatMoney(entry.billsTotal)}</div>}
+                      {visibleCols.has('deductionsTotal') && <div>Deductions: €{formatMoney(entry.deductionsTotal)}</div>}
                     </div>
-                    <div className="text-[11px] text-slate-500 mt-2">
-                      Updated {formatTimestamp(entry.updatedAt)} · {entry.updatedBy || 'unknown'}
-                    </div>
+                    {(visibleCols.has('updatedAt') || visibleCols.has('updatedBy')) && (
+                      <div className="text-[11px] text-slate-500 mt-2">
+                        {visibleCols.has('updatedAt') && <>Updated {formatTimestamp(entry.updatedAt)}</>}
+                        {visibleCols.has('updatedAt') && visibleCols.has('updatedBy') && ' · '}
+                        {visibleCols.has('updatedBy') && <>{entry.updatedBy || 'unknown'}</>}
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
             </div>
             {/* Desktop table */}
             <div className="hidden md:block overflow-x-auto border border-slate-700 rounded-xl">
-              <table className="min-w-[900px] w-full text-xs text-slate-200">
+              <table className="min-w-[600px] w-full text-xs text-slate-200">
                 <thead className="bg-slate-900/60">
                   <tr className="text-slate-400 uppercase tracking-wide">
-                    <th className="px-3 py-2 text-left cursor-pointer select-none hover:text-slate-200" onClick={() => handleSort('entryDate')}>Date{sortIcon('entryDate')}</th>
-                    <th className="px-3 py-2 text-left cursor-pointer select-none hover:text-slate-200" onClick={() => handleSort('agentId')}>Laundry{sortIcon('agentId')}</th>
-                    <th className="px-3 py-2 text-right cursor-pointer select-none hover:text-slate-200" onClick={() => handleSort('coinsTotal')}>Revenue (€){sortIcon('coinsTotal')}</th>
-                    <th className="px-3 py-2 text-right cursor-pointer select-none hover:text-slate-200" onClick={() => handleSort('euroCoinsCount')}>€1 count{sortIcon('euroCoinsCount')}</th>
-                    <th className="px-3 py-2 text-right cursor-pointer select-none hover:text-slate-200" onClick={() => handleSort('billsTotal')}>Bills (€){sortIcon('billsTotal')}</th>
-                    <th className="px-3 py-2 text-right cursor-pointer select-none hover:text-slate-200" onClick={() => handleSort('deductionsTotal')}>Deductions (€){sortIcon('deductionsTotal')}</th>
-                    <th className="px-3 py-2 text-left cursor-pointer select-none hover:text-slate-200" onClick={() => handleSort('updatedBy')}>Updated by{sortIcon('updatedBy')}</th>
-                    <th className="px-3 py-2 text-left cursor-pointer select-none hover:text-slate-200" onClick={() => handleSort('updatedAt')}>Updated at{sortIcon('updatedAt')}</th>
+                    {ALL_COLUMNS.filter(c => visibleCols.has(c.key)).map(col => (
+                      <th key={col.key} className={`px-3 py-2 text-${col.align} cursor-pointer select-none hover:text-slate-200`} onClick={() => handleSort(col.key)}>
+                        {col.label}{sortIcon(col.key)}
+                      </th>
+                    ))}
                   </tr>
                   <tr className="border-t border-slate-700">
-                    <th className="px-2 py-1"><input type="text" placeholder="Filter..." value={allFilters.entryDate || ''} onChange={e => setAllFilters(f => ({ ...f, entryDate: e.target.value }))} className={filterInputClass} /></th>
-                    <th className="px-2 py-1">
-                      <select value={allFilters.agentId || ''} onChange={e => setAllFilters(f => ({ ...f, agentId: e.target.value }))} className={filterInputClass}>
-                        <option value="">All</option>
-                        {laundries.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
-                      </select>
-                    </th>
-                    <th className="px-2 py-1"><input type="text" inputMode="decimal" placeholder="Min" value={allFilters.coinsTotal || ''} onChange={e => setAllFilters(f => ({ ...f, coinsTotal: e.target.value }))} className={filterInputClass + ' text-right'} /></th>
-                    <th className="px-2 py-1"><input type="text" inputMode="decimal" placeholder="Min" value={allFilters.euroCoinsCount || ''} onChange={e => setAllFilters(f => ({ ...f, euroCoinsCount: e.target.value }))} className={filterInputClass + ' text-right'} /></th>
-                    <th className="px-2 py-1"><input type="text" inputMode="decimal" placeholder="Min" value={allFilters.billsTotal || ''} onChange={e => setAllFilters(f => ({ ...f, billsTotal: e.target.value }))} className={filterInputClass + ' text-right'} /></th>
-                    <th className="px-2 py-1"><input type="text" inputMode="decimal" placeholder="Min" value={allFilters.deductionsTotal || ''} onChange={e => setAllFilters(f => ({ ...f, deductionsTotal: e.target.value }))} className={filterInputClass + ' text-right'} /></th>
-                    <th className="px-2 py-1"><input type="text" placeholder="Filter..." value={allFilters.updatedBy || ''} onChange={e => setAllFilters(f => ({ ...f, updatedBy: e.target.value }))} className={filterInputClass} /></th>
-                    <th className="px-2 py-1"></th>
+                    {ALL_COLUMNS.filter(c => visibleCols.has(c.key)).map(col => (
+                      <th key={col.key} className="px-2 py-1">
+                        {col.key === 'agentId' ? (
+                          <select value={allFilters.agentId || ''} onChange={e => setAllFilters(f => ({ ...f, agentId: e.target.value }))} className={filterInputClass}>
+                            <option value="">All</option>
+                            {laundries.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
+                          </select>
+                        ) : col.key === 'updatedAt' ? null : (
+                          col.align === 'right' ? (
+                            <input type="text" inputMode="decimal" placeholder="Min" value={allFilters[col.key] || ''} onChange={e => setAllFilters(f => ({ ...f, [col.key]: e.target.value }))} className={filterInputClass + ' text-right'} />
+                          ) : (
+                            <input type="text" placeholder="Filter..." value={allFilters[col.key] || ''} onChange={e => setAllFilters(f => ({ ...f, [col.key]: e.target.value }))} className={filterInputClass} />
+                          )
+                        )}
+                      </th>
+                    ))}
                   </tr>
                 </thead>
                 <tbody>
-                  {sorted.map(entry => (
-                    <tr key={`${entry.agentId}-${entry.entryDate}`} className="border-t border-slate-700">
-                      <td className="px-3 py-2">{entry.entryDate}</td>
-                      <td className="px-3 py-2">{laundryNameMap.get(entry.agentId) || entry.agentId}</td>
-                      <td className="px-3 py-2 text-right">€{formatMoney(entry.coinsTotal)}</td>
-                      <td className="px-3 py-2 text-right">{entry.euroCoinsCount}</td>
-                      <td className="px-3 py-2 text-right">€{formatMoney(entry.billsTotal)}</td>
-                      <td className="px-3 py-2 text-right">€{formatMoney(entry.deductionsTotal)}</td>
-                      <td className="px-3 py-2">{entry.updatedBy || 'unknown'}</td>
-                      <td className="px-3 py-2">{formatTimestamp(entry.updatedAt)}</td>
-                    </tr>
-                  ))}
+                  {sorted.map(entry => {
+                    const cellValues: Record<string, React.ReactNode> = {
+                      entryDate: entry.entryDate,
+                      agentId: laundryNameMap.get(entry.agentId) || entry.agentId,
+                      coinsTotal: `€${formatMoney(entry.coinsTotal)}`,
+                      euroCoinsCount: entry.euroCoinsCount,
+                      billsTotal: `€${formatMoney(entry.billsTotal)}`,
+                      deductionsTotal: `€${formatMoney(entry.deductionsTotal)}`,
+                      updatedBy: entry.updatedBy || 'unknown',
+                      updatedAt: formatTimestamp(entry.updatedAt),
+                    };
+                    return (
+                      <tr key={`${entry.agentId}-${entry.entryDate}`} className="border-t border-slate-700">
+                        {ALL_COLUMNS.filter(c => visibleCols.has(c.key)).map(col => (
+                          <td key={col.key} className={`px-3 py-2 text-${col.align}`}>{cellValues[col.key]}</td>
+                        ))}
+                      </tr>
+                    );
+                  })}
                   {sorted.length === 0 && (
-                    <tr><td colSpan={8} className="px-3 py-4 text-center text-slate-500">No entries match filters.</td></tr>
+                    <tr><td colSpan={visibleCols.size} className="px-3 py-4 text-center text-slate-500">No entries match filters.</td></tr>
                   )}
                 </tbody>
               </table>

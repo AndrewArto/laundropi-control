@@ -117,6 +117,14 @@ export const filterRevenueEntries = (entries: RevenueEntry[], filters: AllEntrie
   });
 };
 
+export type EntryTypeFilter = 'all' | 'income' | 'deductions';
+
+export const filterRevenueByType = (entries: RevenueEntry[], typeFilter: EntryTypeFilter): RevenueEntry[] => {
+  if (typeFilter === 'income') return entries.filter(e => e.coinsTotal > 0 || e.billsTotal > 0);
+  if (typeFilter === 'deductions') return entries.filter(e => e.deductionsTotal > 0);
+  return entries;
+};
+
 export const sortRevenueEntries = (entries: RevenueEntry[], sort: AllEntriesSort): RevenueEntry[] => {
   return [...entries].sort((a, b) => {
     const col = sort.col as keyof typeof a;
