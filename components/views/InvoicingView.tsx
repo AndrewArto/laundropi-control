@@ -24,7 +24,11 @@ interface LogEntry {
 const apiFetch = (url: string, init?: RequestInit) =>
   fetch(url, { ...init, credentials: 'include' });
 
-export const InvoicingView: React.FC = () => {
+interface InvoicingViewProps {
+  readOnly?: boolean;
+}
+
+export const InvoicingView: React.FC<InvoicingViewProps> = ({ readOnly = false }) => {
   const [connected, setConnected] = useState<boolean | null>(null);
   const [totalDocuments, setTotalDocuments] = useState(0);
   const [paymentTypes, setPaymentTypes] = useState<PaymentType[]>([]);
@@ -234,7 +238,7 @@ export const InvoicingView: React.FC = () => {
 
         <button
           onClick={handleCalculate}
-          disabled={!stripeRevenue || !stripePercent || !connected}
+          disabled={!stripeRevenue || !stripePercent || !connected || readOnly}
           className="px-4 py-2 bg-amber-600 hover:bg-amber-500 disabled:bg-slate-700 disabled:text-slate-500 text-white text-sm font-medium rounded-lg transition-colors"
         >
           Посчитать

@@ -1524,7 +1524,6 @@ export const RevenueView: React.FC<RevenueViewProps> = (props) => {
                 <Upload className="w-3 h-3" />
                 Bank Import
               </button>
-              {!isViewer && (
               <button
                 onClick={() => setRevenueView('invoicing')}
                 className={`px-3 py-1.5 text-xs font-semibold rounded-md flex-1 sm:flex-none flex items-center gap-1 ${
@@ -1534,7 +1533,6 @@ export const RevenueView: React.FC<RevenueViewProps> = (props) => {
                 <FileText className="w-3 h-3" />
                 Faturas
               </button>
-              )}
             </div>
           </div>
         </div>
@@ -1569,7 +1567,7 @@ export const RevenueView: React.FC<RevenueViewProps> = (props) => {
           />
         )}
         {revenueView === 'invoicing' && (
-          <InvoicingView />
+          <InvoicingView readOnly={isViewer} />
         )}
       </div>
     );
