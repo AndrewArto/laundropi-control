@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Coins, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ChevronDown, ChevronUp, Download, CalendarClock, Upload, Building2, TrendingUp, WashingMachine } from 'lucide-react';
+import { Coins, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ChevronDown, ChevronUp, Download, CalendarClock, Upload, Building2, TrendingUp, WashingMachine, FileText } from 'lucide-react';
 import { RevenueEntry, RevenueAuditEntry, RevenueSummary, UiUser, ExpenditureImport, ExpenditureTransaction, GENERAL_AGENT_ID, GENERAL_LAUNDRY } from '../../types';
 import type { DateEntryInfo } from '../../hooks/useRevenue';
 import { BankImportView } from './BankImportView';
+import { InvoicingView } from './InvoicingView';
 import type { ReconciliationSummary, PendingChange } from '../../hooks/useReconciliation';
 import { ApiService } from '../../services/api';
 import { formatShortDate } from '../../utils/dateTime';
@@ -361,8 +362,8 @@ type RevenueDraft = {
 interface RevenueViewProps {
   authUser: UiUser | null;
   laundries: Laundry[];
-  revenueView: 'daily' | 'all' | 'bankImport';
-  setRevenueView: React.Dispatch<React.SetStateAction<'daily' | 'all' | 'bankImport'>>;
+  revenueView: 'daily' | 'all' | 'bankImport' | 'invoicing';
+  setRevenueView: React.Dispatch<React.SetStateAction<'daily' | 'all' | 'bankImport' | 'invoicing'>>;
   revenueDate: string;
   setRevenueDate: React.Dispatch<React.SetStateAction<string>>;
   isRevenueCalendarOpen: boolean;
@@ -1523,6 +1524,15 @@ export const RevenueView: React.FC<RevenueViewProps> = (props) => {
                 <Upload className="w-3 h-3" />
                 Bank Import
               </button>
+              <button
+                onClick={() => setRevenueView('invoicing')}
+                className={`px-3 py-1.5 text-xs font-semibold rounded-md flex-1 sm:flex-none flex items-center gap-1 ${
+                  revenueView === 'invoicing' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <FileText className="w-3 h-3" />
+                Faturas
+              </button>
             </div>
           </div>
         </div>
@@ -1555,6 +1565,9 @@ export const RevenueView: React.FC<RevenueViewProps> = (props) => {
             onDeleteImport={onBankDeleteImport}
             onClearActiveImport={onBankClearActiveImport}
           />
+        )}
+        {revenueView === 'invoicing' && (
+          <InvoicingView />
         )}
       </div>
     );

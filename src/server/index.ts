@@ -8,6 +8,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { listAgents, updateHeartbeat, saveMeta, getAgent, updateRelayMeta, listSchedules, upsertSchedule, deleteSchedule, listGroups, listGroupsForMembership, upsertGroup, deleteGroup, GroupRow, deleteAgent, upsertAgent, upsertCommand, listPendingCommands, deleteCommand, updateCommandsForRelay, expireOldCommands, insertLead, getLastLeadTimestampForIp, listLeads, getRevenueEntry, listRevenueEntriesBetween, listRevenueEntries, listRevenueEntryDatesBetween, listRevenueEntryDatesWithInfo, getStripeDates, upsertRevenueEntry, insertRevenueAudit, listRevenueAudit, RevenueEntryRow, listUiUsers, getUiUser, createUiUser, updateUiUserRole, updateUiUserPassword, updateUiUserLastLogin, deleteUiUser, countUiUsers, listCameras, getCamera, upsertCamera, deleteCamera, upsertIntegrationSecret, getIntegrationSecret, deleteIntegrationSecret, CameraRow, listInventory, getInventory, updateInventory, getInventoryAudit, getLastInventoryChange, DetergentType } from './db';
 import expenditureRoutes from './routes/expenditure';
 import inviteRoutes, { publicRouter as invitePublicRoutes } from './routes/invites';
+import invoicingRoutes from './routes/invoicing';
 
 
 const asBool = (val: string | undefined, fallback = false) => {
@@ -1182,6 +1183,7 @@ app.use('/api/invites', invitePublicRoutes);
 app.use('/api', requireUiAuth);
 // Expenditure: viewers can read (GET for import history), but only admin can write
 app.use('/api/expenditure', requireAdminForWrites, expenditureRoutes);
+app.use('/api/invoicing', requireAdmin, invoicingRoutes);
 // Invite routes (admin-only endpoints like list/create/delete)
 app.use('/api/invites', inviteRoutes);
 
