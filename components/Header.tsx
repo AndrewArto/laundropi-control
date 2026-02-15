@@ -2,6 +2,9 @@ import React from 'react';
 import { Lock, AlertTriangle } from 'lucide-react';
 import type { Laundry, UiUser, DetergentType, InventoryItem } from '../types';
 
+declare const __APP_VERSION__: string;
+declare const __APP_BUILD_DATE__: string;
+
 interface HeaderProps {
   brandLogoUrl: string;
   laundries: Laundry[];
@@ -47,6 +50,9 @@ export const Header: React.FC<HeaderProps> = ({
               height={78}
             />
             <span className="sr-only">WashControl</span>
+            <span className="text-[9px] text-slate-600 ml-1 self-end mb-1 hidden sm:inline">
+              {__APP_VERSION__} · {__APP_BUILD_DATE__}
+            </span>
           </div>
           <div className="flex items-center justify-center min-w-0">
             {laundries.length > 0 && (
