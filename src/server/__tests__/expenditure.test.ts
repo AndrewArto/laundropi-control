@@ -329,6 +329,81 @@ describe('Expenditure API', { timeout: 30000 }, () => {
       expect(response.body.revenueEntry.entryDate).toBe(customDate);
       expect(response.body.revenueEntry.deductions[0].comment).toBe(customComment);
     });
+
+    it('rejects duplicate assignment of the same expense transaction', async () => {
+      const app = await setupApp();
+
+      const csvContent = createCsvContent([
+        { date: '15/01/2026', description: 'Duplicate assignment expense', amount: '50,00' },
+      ]);
+
+      const uploadResponse = await request(app)
+        .post('/api/expenditure/imports')
+        .set('Content-Type', 'text/csv')
+        .set('X-Filename', 'duplicate-assign-expense.csv')
+        .send(csvContent)
+        .expect(200);
+
+      const transactionId = uploadResponse.body.transactions[0].id;
+      const agentId = 'Laundry-1';
+
+      await request(app)
+        .post(`/api/expenditure/transactions/${transactionId}/assign`)
+        .send({ agentId })
+        .expect(200);
+
+      await request(app)
+        .post(`/api/expenditure/transactions/${transactionId}/assign`)
+        .send({ agentId })
+        .expect(409);
+
+      const revenue = await request(app)
+        .get('/api/revenue/Laundry-1')
+        .query({ date: '2026-01-15' })
+        .expect(200);
+
+      expect(revenue.body.entry.deductions).toHaveLength(1);
+      expect(revenue.body.entry.deductions[0].amount).toBe(50);
+    });
+
+    it('rejects duplicate assignment of the same stripe credit transaction', async () => {
+      const app = await setupApp();
+
+      const stripeCsv = [
+        'Data;Descrição;Débito;Crédito;Referência',
+        '15/01/2026;Stripe payout;;120,00;STRIPE-001',
+      ].join('\n');
+
+      const uploadResponse = await request(app)
+        .post('/api/expenditure/imports')
+        .set('Content-Type', 'text/csv')
+        .set('X-Filename', 'duplicate-assign-stripe.csv')
+        .send(stripeCsv)
+        .expect(200);
+
+      const stripeTx = uploadResponse.body.transactions.find((t: any) => t.transactionType === 'stripe_credit');
+      expect(stripeTx).toBeDefined();
+
+      const transactionId = stripeTx.id;
+      const agentId = 'Laundry-1';
+
+      await request(app)
+        .post(`/api/expenditure/transactions/${transactionId}/assign-stripe`)
+        .send({ agentId, entryDate: '2026-01-15' })
+        .expect(200);
+
+      await request(app)
+        .post(`/api/expenditure/transactions/${transactionId}/assign-stripe`)
+        .send({ agentId, entryDate: '2026-01-15' })
+        .expect(409);
+
+      const revenue = await request(app)
+        .get('/api/revenue/Laundry-1')
+        .query({ date: '2026-01-15' })
+        .expect(200);
+
+      expect(revenue.body.entry.coinsTotal).toBe(120);
+    });
   });
 
   describe('Auto-Ignore Previously Ignored Transactions', () => {

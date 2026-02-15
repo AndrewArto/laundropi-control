@@ -30,6 +30,7 @@ export type InviteTokenRow = {
   email: string;
   role: UserRole;
   expiresAt: number;
+  accountExpiresAt: number | null;
   createdBy: string;
   createdAt: number;
   usedAt: number | null;
@@ -219,6 +220,7 @@ CREATE TABLE IF NOT EXISTS invite_tokens (
   email TEXT NOT NULL,
   role TEXT NOT NULL DEFAULT 'viewer',
   expiresAt INTEGER NOT NULL,
+  accountExpiresAt INTEGER,
   createdBy TEXT NOT NULL,
   createdAt INTEGER NOT NULL,
   usedAt INTEGER
@@ -385,6 +387,13 @@ try {
 // Best-effort migration: add transactionType column to expenditure_transactions
 try {
   db.prepare("ALTER TABLE expenditure_transactions ADD COLUMN transactionType TEXT NOT NULL DEFAULT 'expense'").run();
+} catch (_) {
+  // column already exists
+}
+
+// Best-effort migration: add accountExpiresAt column to invite_tokens
+try {
+  db.prepare('ALTER TABLE invite_tokens ADD COLUMN accountExpiresAt INTEGER').run();
 } catch (_) {
   // column already exists
 }
@@ -764,18 +773,18 @@ export function deleteUiUser(username: string): boolean {
 
 // --- INVITE TOKENS ---
 const insertInviteTokenStmt = db.prepare(`
-  INSERT INTO invite_tokens(token, email, role, expiresAt, createdBy, createdAt, usedAt)
-  VALUES (@token, @email, @role, @expiresAt, @createdBy, @createdAt, @usedAt)
+  INSERT INTO invite_tokens(token, email, role, expiresAt, accountExpiresAt, createdBy, createdAt, usedAt)
+  VALUES (@token, @email, @role, @expiresAt, @accountExpiresAt, @createdBy, @createdAt, @usedAt)
 `);
 
 const getInviteTokenStmt = db.prepare(`
-  SELECT token, email, role, expiresAt, createdBy, createdAt, usedAt
+  SELECT token, email, role, expiresAt, accountExpiresAt, createdBy, createdAt, usedAt
   FROM invite_tokens
   WHERE token = ?
 `);
 
 const listPendingInvitesStmt = db.prepare(`
-  SELECT token, email, role, expiresAt, createdBy, createdAt, usedAt
+  SELECT token, email, role, expiresAt, accountExpiresAt, createdBy, createdAt, usedAt
   FROM invite_tokens
   WHERE usedAt IS NULL AND expiresAt > ?
   ORDER BY createdAt DESC
@@ -794,6 +803,7 @@ const toInviteToken = (row: any): InviteTokenRow => ({
   email: row.email,
   role: normalizeRole(row.role),
   expiresAt: Number(row.expiresAt) || 0,
+  accountExpiresAt: row.accountExpiresAt ? Number(row.accountExpiresAt) : null,
   createdBy: row.createdBy,
   createdAt: Number(row.createdAt) || 0,
   usedAt: row.usedAt ?? null,
@@ -805,6 +815,7 @@ export function createInviteToken(invite: InviteTokenRow): boolean {
     email: invite.email,
     role: invite.role,
     expiresAt: invite.expiresAt,
+    accountExpiresAt: invite.accountExpiresAt ?? null,
     createdBy: invite.createdBy,
     createdAt: invite.createdAt,
     usedAt: invite.usedAt ?? null,

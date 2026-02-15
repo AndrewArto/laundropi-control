@@ -22,11 +22,22 @@ import {
   upsertRevenueEntry,
   insertRevenueAudit,
   listRevenueEntriesBetween,
+  UserRole,
 } from '../db';
 import { parseCSV } from '../services/csv-parser';
-import { getSession } from '../middleware/auth';
 
 const router = express.Router();
+
+type SessionUser = {
+  sub: string;
+  role: UserRole;
+};
+
+const getSessionUser = (res: express.Response): SessionUser | null => {
+  const user = res.locals.user as SessionUser | undefined;
+  if (!user?.sub) return null;
+  return user;
+};
 
 /**
  * Compute SHA-256 hash of file content for duplicate detection
@@ -87,7 +98,7 @@ function findMatchingAssignedTransaction(
  * Upload a CSV file
  */
 router.post('/imports', express.text({ type: '*/*', limit: '5mb' }), (req, res) => {
-  const session = getSession(req);
+  const session = getSessionUser(res);
   if (!session?.sub || session.sub === 'unknown') {
     return res.status(401).json({ error: 'authentication required' });
   }
@@ -313,7 +324,7 @@ router.get('/imports/:id', (req, res) => {
  * Delete an import and all its transactions
  */
 router.delete('/imports/:id', (req, res) => {
-  const session = getSession(req);
+  const session = getSessionUser(res);
   if (!session?.sub || session.sub === 'unknown') {
     return res.status(401).json({ error: 'authentication required' });
   }
@@ -339,7 +350,7 @@ router.delete('/imports/:id', (req, res) => {
  * Update import status (complete or cancel)
  */
 router.put('/imports/:id', (req, res) => {
-  const session = getSession(req);
+  const session = getSessionUser(res);
   if (!session?.sub || session.sub === 'unknown') {
     return res.status(401).json({ error: 'authentication required' });
   }
@@ -377,7 +388,7 @@ router.put('/imports/:id', (req, res) => {
  * Update a transaction's reconciliation status
  */
 router.put('/transactions/:id', (req, res) => {
-  const session = getSession(req);
+  const session = getSessionUser(res);
   if (!session?.sub || session.sub === 'unknown') {
     return res.status(401).json({ error: 'authentication required' });
   }
@@ -425,7 +436,7 @@ router.put('/transactions/:id', (req, res) => {
  * Assign a transaction to a laundry by creating a deduction entry
  */
 router.post('/transactions/:id/assign', (req, res) => {
-  const session = getSession(req);
+  const session = getSessionUser(res);
   if (!session?.sub || session.sub === 'unknown') {
     return res.status(401).json({ error: 'authentication required' });
   }
@@ -434,6 +445,12 @@ router.post('/transactions/:id/assign', (req, res) => {
   const transaction = getExpenditureTransaction(req.params.id);
   if (!transaction) {
     return res.status(404).json({ error: 'Transaction not found' });
+  }
+  if (transaction.matchedDeductionKey) {
+    return res.status(409).json({
+      error: 'transaction_already_assigned',
+      transaction,
+    });
   }
 
   const { agentId, entryDate, comment } = req.body;
@@ -529,7 +546,7 @@ router.post('/transactions/:id/assign', (req, res) => {
  * This adds the amount to the laundry's coinsTotal (main revenue field)
  */
 router.post('/transactions/:id/assign-stripe', (req, res) => {
-  const session = getSession(req);
+  const session = getSessionUser(res);
   if (!session?.sub || session.sub === 'unknown') {
     return res.status(401).json({ error: 'authentication required' });
   }
@@ -538,6 +555,12 @@ router.post('/transactions/:id/assign-stripe', (req, res) => {
   const transaction = getExpenditureTransaction(req.params.id);
   if (!transaction) {
     return res.status(404).json({ error: 'Transaction not found' });
+  }
+  if (transaction.matchedDeductionKey) {
+    return res.status(409).json({
+      error: 'transaction_already_assigned',
+      transaction,
+    });
   }
 
   if (transaction.transactionType !== 'stripe_credit') {

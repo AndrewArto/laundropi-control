@@ -22,13 +22,24 @@ const AGENT_SECRET = (import.meta as any).env?.VITE_AGENT_SECRET || 'secret';
 const request = async (input: RequestInfo | URL, init?: RequestInit & { timeout?: number }) => {
   const headers = new Headers(init?.headers || {});
   const { timeout, ...fetchInit } = init || {};
-
-  // Create abort controller for timeout
-  const controller = new AbortController();
+  const timeoutController = new AbortController();
+  const externalSignal = fetchInit.signal;
   let timeoutId: ReturnType<typeof setTimeout> | null = null;
+  let didTimeout = false;
 
   if (timeout) {
-    timeoutId = setTimeout(() => controller.abort(), timeout);
+    timeoutId = setTimeout(() => {
+      didTimeout = true;
+      timeoutController.abort();
+    }, timeout);
+  }
+
+  if (externalSignal) {
+    if (externalSignal.aborted) {
+      timeoutController.abort();
+    } else {
+      externalSignal.addEventListener('abort', () => timeoutController.abort(), { once: true });
+    }
   }
 
   try {
@@ -36,7 +47,7 @@ const request = async (input: RequestInfo | URL, init?: RequestInit & { timeout?
       ...fetchInit,
       headers,
       credentials: 'include',
-      signal: controller.signal,
+      signal: timeout || externalSignal ? timeoutController.signal : undefined,
     });
 
     if (!res.ok) {
@@ -59,7 +70,9 @@ const request = async (input: RequestInfo | URL, init?: RequestInit & { timeout?
     return res;
   } catch (err: any) {
     if (err.name === 'AbortError') {
-      throw new Error('Request timed out. Please try again.');
+      if (didTimeout) {
+        throw new Error('Request timed out. Please try again.');
+      }
     }
     throw err;
   } finally {
@@ -222,11 +235,8 @@ export const ApiService = {
   },
 
   async getStatus(agentId?: string): Promise<{ relays: Relay[], schedules: Schedule[], groups: RelayGroup[], isMock: boolean, agentId?: string, lastHeartbeat?: number | null }> {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 2000);
     const id = agentId || AGENT_ID;
-    const res = await request(`${API_BASE}/dashboard?agentId=${encodeURIComponent(id)}`, { signal: controller.signal });
-    clearTimeout(timeoutId);
+    const res = await request(`${API_BASE}/dashboard?agentId=${encodeURIComponent(id)}`, { timeout: 2000 });
     return await res.json();
   },
 

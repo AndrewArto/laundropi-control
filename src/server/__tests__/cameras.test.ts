@@ -144,4 +144,45 @@ describe('Camera API', () => {
     const updated = listRes2.body.cameras.find((cam: any) => cam.id === cameraId);
     expect(updated.enabled).toBe(!initialEnabled);
   });
+
+  it('blocks viewers from changing camera settings other than enabled', async () => {
+    const app = await setupAppWithAuth();
+    const admin = request.agent(app);
+    const viewer = request.agent(app);
+    const agentId = 'test-agent';
+
+    await admin.post('/auth/login').send({ username: 'admin', password: TEST_ADMIN_PASSWORD }).expect(200);
+    await admin.post('/api/users').send({ username: 'viewer1', password: TEST_VIEWER_PASSWORD, role: 'viewer' }).expect(200);
+
+    const listRes = await admin.get(`/api/agents/${agentId}/cameras`).expect(200);
+    const cameraId = listRes.body.cameras[0].id;
+
+    await viewer.post('/auth/login').send({ username: 'viewer1', password: TEST_VIEWER_PASSWORD }).expect(200);
+
+    await viewer
+      .put(`/api/agents/${agentId}/cameras/${cameraId}`)
+      .send({ name: 'Viewer Rename Attempt' })
+      .expect(403);
+  });
+
+  it('blocks viewers from posting machine status updates', async () => {
+    const app = await setupAppWithAuth();
+    const admin = request.agent(app);
+    const viewer = request.agent(app);
+    const agentId = 'test-agent';
+
+    await admin.post('/auth/login').send({ username: 'admin', password: TEST_ADMIN_PASSWORD }).expect(200);
+    await admin.post('/api/users').send({ username: 'viewer1', password: TEST_VIEWER_PASSWORD, role: 'viewer' }).expect(200);
+    await viewer.post('/auth/login').send({ username: 'viewer1', password: TEST_VIEWER_PASSWORD }).expect(200);
+
+    await viewer
+      .post(`/api/agents/${agentId}/machines`)
+      .send({ machines: [{ id: 'w1', label: 'Washer 1', type: 'washer', status: 'running' }] })
+      .expect(403);
+
+    await admin
+      .post(`/api/agents/${agentId}/machines`)
+      .send({ machines: [{ id: 'w1', label: 'Washer 1', type: 'washer', status: 'running' }] })
+      .expect(200);
+  });
 });

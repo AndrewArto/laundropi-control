@@ -1545,6 +1545,18 @@ app.get('/api/agents/:id/cameras', (req, res) => {
 app.put('/api/agents/:id/cameras/:cameraId', (req, res) => {
   const agentId = req.params.id;
   const cameraId = req.params.cameraId;
+  const session = res.locals.user as SessionPayload | undefined;
+  const body = (req.body && typeof req.body === 'object') ? (req.body as Record<string, unknown>) : {};
+
+  // Viewers can only toggle enabled state.
+  if (session?.role === 'viewer') {
+    const providedKeys = Object.keys(body).filter((key) => body[key] !== undefined);
+    const hasDisallowedUpdate = providedKeys.some((key) => key !== 'enabled');
+    if (hasDisallowedUpdate) {
+      return res.status(403).json({ error: 'viewers can only toggle camera enabled state' });
+    }
+  }
+
   if (!isKnownLaundry(agentId)) {
     return res.status(404).json({ error: 'agent not found' });
   }
@@ -1857,7 +1869,7 @@ app.get('/api/agents/:id/machines', (req, res) => {
 });
 
 // Endpoint to update machine status (called by agent after frame analysis)
-app.post('/api/agents/:id/machines', (req, res) => {
+app.post('/api/agents/:id/machines', requireAdminOrUser, (req, res) => {
   const { id } = req.params;
   if (!isKnownLaundry(id)) {
     return res.status(404).json({ error: 'agent not found' });

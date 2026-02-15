@@ -156,4 +156,35 @@ describe('Scheduler', () => {
 
     expect(actions).toEqual([{ id: 1, state: 'on' }]);
   });
+
+  it('does not throw in debug mode when a boundary transition is logged', () => {
+    const previousDebug = process.env.SCHEDULE_DEBUG;
+    process.env.SCHEDULE_DEBUG = '1';
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    try {
+      const actions: Array<{ id: number; state: string }> = [];
+      const scheduler = createScheduler(
+        (id, state) => actions.push({ id, state }),
+        () => [{ id: 1, state: 'off' as const }],
+        null
+      );
+
+      scheduler.setSchedule(makeSchedule(1, '07:00', '08:00'));
+      scheduler.startScheduler();
+
+      vi.setSystemTime(new Date('2025-01-06T07:00:00Z'));
+      expect(() => vi.advanceTimersByTime(1000)).not.toThrow();
+      expect(actions.at(-1)).toEqual({ id: 1, state: 'on' });
+
+      scheduler.stopScheduler();
+    } finally {
+      logSpy.mockRestore();
+      if (previousDebug === undefined) {
+        delete process.env.SCHEDULE_DEBUG;
+      } else {
+        process.env.SCHEDULE_DEBUG = previousDebug;
+      }
+    }
+  });
 });

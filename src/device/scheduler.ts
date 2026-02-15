@@ -79,6 +79,7 @@ class Scheduler {
     this.lastTick = nowTs;
 
     const now = new Date();
+    const currentTime = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
 
     this.schedule.forEach(rule => {
       const shouldBeOn = this.computeShouldBeOn(rule, now);
@@ -99,7 +100,7 @@ class Scheduler {
       const prevState = this.lastStates.get(rule.relayId);
       if (boundary) {
         if (this.debug) {
-          console.log('[scheduler] transition', { relayId: rule.relayId, from: prevState, to: nextState, current, rule: rule.entries });
+          console.log('[scheduler] transition', { relayId: rule.relayId, from: prevState, to: nextState, currentTime, rule: rule.entries });
         }
         this.applyFn(rule.relayId, nextState);
         this.lastStates.set(rule.relayId, nextState);

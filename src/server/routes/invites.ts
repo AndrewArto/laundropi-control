@@ -12,12 +12,22 @@ import {
   InviteTokenRow,
   UserRole,
 } from '../db';
-import { getSession } from '../middleware/auth';
 import { sendInviteEmail } from '../services/email';
 
 const router = express.Router();
 // Public router for unauthenticated endpoints (validate/complete)
 export const publicRouter = express.Router();
+
+type SessionUser = {
+  sub: string;
+  role: UserRole;
+};
+
+const getSessionUser = (res: express.Response): SessionUser | null => {
+  const user = res.locals.user as SessionUser | undefined;
+  if (!user?.sub) return null;
+  return user;
+};
 
 // Default viewer expiry in days (30 days)
 const VIEWER_DEFAULT_EXPIRY_DAYS = Number(process.env.VIEWER_DEFAULT_EXPIRY_DAYS || 30);
@@ -38,7 +48,7 @@ const hashPassword = (password: string): string => {
  * Create invite and send email (admin only)
  */
 router.post('/', async (req, res) => {
-  const session = getSession(req);
+  const session = getSessionUser(res);
   if (!session?.sub || session.role !== 'admin') {
     return res.status(403).json({ error: 'admin_required' });
   }
@@ -67,6 +77,7 @@ router.post('/', async (req, res) => {
     email,
     role,
     expiresAt: tokenExpiresAt,
+    accountExpiresAt,
     createdBy: session.sub,
     createdAt: now,
     usedAt: null,
@@ -97,7 +108,7 @@ router.post('/', async (req, res) => {
  * List pending invites (admin only)
  */
 router.get('/', (req, res) => {
-  const session = getSession(req);
+  const session = getSessionUser(res);
   if (!session?.sub || session.role !== 'admin') {
     return res.status(403).json({ error: 'admin_required' });
   }
@@ -108,6 +119,7 @@ router.get('/', (req, res) => {
     email: inv.email,
     role: inv.role,
     expiresAt: inv.expiresAt,
+    accountExpiresAt: inv.accountExpiresAt ?? null,
     createdBy: inv.createdBy,
     createdAt: inv.createdAt,
   })));
@@ -119,7 +131,7 @@ router.get('/', (req, res) => {
  * Note: We only need first 8 chars of token to match
  */
 router.delete('/:tokenPrefix', (req, res) => {
-  const session = getSession(req);
+  const session = getSessionUser(res);
   if (!session?.sub || session.role !== 'admin') {
     return res.status(403).json({ error: 'admin_required' });
   }
@@ -189,8 +201,8 @@ publicRouter.post('/complete/:token', (req, res) => {
     return res.status(410).json({ error: 'token_expired' });
   }
 
-  // Calculate account expiry based on the configured expiry days
-  const accountExpiresAt = Date.now() + (VIEWER_DEFAULT_EXPIRY_DAYS * 24 * 60 * 60 * 1000);
+  // Use the per-invite account expiry when available.
+  const accountExpiresAt = invite.accountExpiresAt || (Date.now() + (VIEWER_DEFAULT_EXPIRY_DAYS * 24 * 60 * 60 * 1000));
   const now = Date.now();
 
   // Create user account with email as username
