@@ -41,7 +41,7 @@ export const Header: React.FC<HeaderProps> = ({
     <header className="bg-slate-900/80 backdrop-blur-md sticky top-0 z-50 border-b border-slate-800 overflow-hidden">
       <div className="max-w-full sm:max-w-3xl mx-auto px-3 sm:px-4">
         <div className="grid grid-cols-[auto,minmax(0,1fr),auto] items-center gap-3 sm:gap-5 h-20 sm:h-24 lg:h-28">
-          <div className="flex items-center h-full">
+          <div className="flex flex-col justify-center h-full">
             <img
               src={brandLogoUrl}
               alt="WashControl"
@@ -50,7 +50,7 @@ export const Header: React.FC<HeaderProps> = ({
               height={78}
             />
             <span className="sr-only">WashControl</span>
-            <span className="text-[9px] text-slate-600 ml-1 self-end mb-1 hidden sm:inline">
+            <span className="text-[9px] text-slate-600 leading-none">
               {__APP_VERSION__} · {__APP_BUILD_DATE__}
             </span>
           </div>
