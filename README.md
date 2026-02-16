@@ -24,3 +24,9 @@ Templates: `.env.central.example`, `.env.agent.example`.
 
 ## Production security
 See `deploy/security/README.md` for recommended TLS, auth, and agent secret setup.
+
+## License
+
+This project is licensed under the [GNU Affero General Public License v3.0](LICENSE).
+
+Copyright © 2025-2026 Andrey Artamonov / TripleA Digital
