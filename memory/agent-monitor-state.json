@@ -1,0 +1,20 @@
+{
+  "agent": "sq-fixes",
+  "state": "DONE",
+  "agentHeartbeat": "2026-02-16T23:58:00Z",
+  "task": "Fix 8 issues from Codex code review",
+  "branch": "fix/codex-review-sq-8issues",
+  "commit": "f6c161f",
+  "issuesFixed": 8,
+  "testsAdded": 16,
+  "totalTestsPassing": 56,
+  "buildClean": true,
+  "filesChanged": [
+    "src/server/services/speedqueen.ts",
+    "src/server/index.ts",
+    "components/MachineDetailPanel.tsx",
+    "components/views/DashboardView.tsx",
+    "src/server/__tests__/speedqueen.test.ts",
+    "src/server/__tests__/speedqueen-lazy.test.ts"
+  ]
+}
