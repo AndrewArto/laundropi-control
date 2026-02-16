@@ -182,6 +182,8 @@ const PRIMARY_CAMERA_BACK_RTSP_URL = (process.env.PRIMARY_CAMERA_BACK_RTSP_URL |
 // Speed Queen Insights API configuration
 const SPEEDQUEEN_API_KEY = (process.env.SPEEDQUEEN_API_KEY || '').trim();
 const SPEEDQUEEN_LOCATIONS = (process.env.SPEEDQUEEN_LOCATIONS || '').trim();
+// Note: SPEEDQUEEN_POLL_INTERVAL_MS is no longer used (service uses lazy WS + on-demand REST).
+// Kept for backward compat with .env files but has no effect at runtime.
 const SPEEDQUEEN_POLL_INTERVAL_MS = parseDurationMs(process.env.SPEEDQUEEN_POLL_INTERVAL_MS, 60_000);
 const SPEEDQUEEN_MOCK = asBool(process.env.SPEEDQUEEN_MOCK, false);
 const SPEEDQUEEN_ENABLED = Boolean(SPEEDQUEEN_MOCK || (SPEEDQUEEN_API_KEY && SPEEDQUEEN_LOCATIONS));
@@ -2006,7 +2008,7 @@ app.get('/api/agents/:id/machines/:machineId/detail', async (req, res) => {
     });
   } catch (err: any) {
     console.error(`[speedqueen] Failed to get detail for ${agentId}/${machineId}:`, err);
-    res.status(500).json({ error: err.message || 'Failed to fetch machine detail' });
+    res.status(500).json({ error: 'Failed to fetch machine detail' });
   }
 });
 
@@ -2040,7 +2042,7 @@ app.post('/api/agents/:id/machines/:machineId/command', requireAdminOrUser, asyn
     res.json({ ok: true, command: result });
   } catch (err: any) {
     console.error(`[speedqueen] Command failed for ${agentId}/${machineId}:`, err);
-    res.status(500).json({ error: err.message || 'Command failed' });
+    res.status(500).json({ error: 'Command failed' });
   }
 });
 
@@ -2055,7 +2057,8 @@ app.get('/api/agents/:id/machines/:machineId/command/:commandId', async (req, re
     const result = await speedQueenService.getCommandStatus(agentId, machineId, commandId);
     res.json(result);
   } catch (err: any) {
-    res.status(500).json({ error: err.message || 'Failed to get command status' });
+    console.error(`[speedqueen] Command status failed for ${agentId}/${machineId}/${commandId}:`, err);
+    res.status(500).json({ error: 'Failed to get command status' });
   }
 });
 

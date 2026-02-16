@@ -183,8 +183,10 @@ export class SpeedQueenRestClient {
 
     const res = await fetch(url, options);
     if (!res.ok) {
+      // Log the full error server-side but don't include raw vendor response in thrown error
       const text = await res.text().catch(() => '');
-      throw new Error(`Speed Queen API ${method} ${path} failed: ${res.status} ${text}`);
+      console.error(`[speedqueen-rest] ${method} ${path} failed: ${res.status} ${text}`);
+      throw new Error(`Speed Queen API request failed: ${res.status}`);
     }
 
     const contentType = res.headers.get('content-type') || '';
@@ -334,9 +336,10 @@ export class SpeedQueenWSClient {
       this.sqIdToMapping.set(m.speedqueenId, m);
     }
 
+    // Build locationToAgent from actual machineMappings (respects custom loc:agent pairs)
     this.locationToAgent = new Map();
-    for (const [locId, agentId] of Object.entries(LOCATION_TO_AGENT)) {
-      this.locationToAgent.set(locId, agentId);
+    for (const m of machineMappings) {
+      this.locationToAgent.set(m.locationId, m.agentId);
     }
   }
 
@@ -557,8 +560,7 @@ export class SpeedQueenService {
   private wsClient: SpeedQueenWSClient | null = null;
   private locationIds: string[];
   private machineMappings: MachineMapping[];
-  private pollingTimer: ReturnType<typeof setInterval> | null = null;
-  private pollIntervalMs: number;
+  private locationToAgent: Map<string, string>;
   private onStatusUpdate: StatusUpdateCallback;
   private started = false;
 
@@ -569,6 +571,9 @@ export class SpeedQueenService {
   // Cache timestamps for TTL
   private lastPollByAgent = new Map<string, number>();
 
+  // In-flight poll deduplication
+  private pollInFlight = new Map<string, Promise<void>>();
+
   // Lazy WebSocket bookkeeping
   private lastUiActivity = 0;
   private wsIdleTimer: ReturnType<typeof setInterval> | null = null;
@@ -578,11 +583,10 @@ export class SpeedQueenService {
     apiKey: string,
     locationConfig: string, // comma-separated "loc_id:agentId" pairs or just loc_ids
     onStatusUpdate: StatusUpdateCallback,
-    pollIntervalMs = 60_000,
+    _pollIntervalMs?: number, // kept for backward compat but unused (lazy WS + on-demand REST)
   ) {
     this.restClient = new SpeedQueenRestClient(apiKey);
     this.onStatusUpdate = onStatusUpdate;
-    this.pollIntervalMs = pollIntervalMs;
 
     // Parse location config
     const mappings = parseLocationConfig(locationConfig);
@@ -590,6 +594,12 @@ export class SpeedQueenService {
 
     // Build machine mappings from hardcoded data
     this.machineMappings = buildMachineMappings(mappings);
+
+    // Build locationId → agentId from parsed config (supports custom mappings)
+    this.locationToAgent = new Map();
+    for (const m of this.machineMappings) {
+      this.locationToAgent.set(m.locationId, m.agentId);
+    }
   }
 
   async start(): Promise<void> {
@@ -610,10 +620,6 @@ export class SpeedQueenService {
   stop(): void {
     this.started = false;
     this.disconnectWs();
-    if (this.pollingTimer) {
-      clearInterval(this.pollingTimer);
-      this.pollingTimer = null;
-    }
     if (this.wsIdleTimer) {
       clearInterval(this.wsIdleTimer);
       this.wsIdleTimer = null;
@@ -637,17 +643,23 @@ export class SpeedQueenService {
     this.wsConnecting = true;
     console.log('[speedqueen] UI activity detected — connecting WebSocket…');
 
-    this.wsClient = new SpeedQueenWSClient(
+    // Destroy any stale WS client before creating a new one (prevents leaks)
+    if (this.wsClient) {
+      this.wsClient.destroy();
+      this.wsClient = null;
+    }
+
+    const wsClient = new SpeedQueenWSClient(
       this.restClient,
       this.locationIds,
       this.machineMappings,
     );
 
-    this.wsClient.onMachineStatus = (agentId, updatedMachines) => {
+    wsClient.onMachineStatus = (agentId, updatedMachines) => {
       this.mergeStatus(agentId, updatedMachines);
     };
 
-    this.wsClient.onMachineError = (agentId, error) => {
+    wsClient.onMachineError = (agentId, error) => {
       console.log(`[speedqueen] Error for ${agentId}: ${error.name} (code=${error.code})`);
       const mapping = this.machineMappings.find(m => m.speedqueenId === error.machine?.id);
       if (mapping) {
@@ -668,16 +680,26 @@ export class SpeedQueenService {
       }
     };
 
-    this.wsClient.onMachineEvent = (agentId, event) => {
+    wsClient.onMachineEvent = (agentId, event) => {
       console.log(`[speedqueen] Event for ${agentId}:`, JSON.stringify(event).slice(0, 200));
     };
 
     try {
-      await this.wsClient.connect();
+      await wsClient.connect();
     } catch (err) {
       console.error('[speedqueen] Failed to connect WebSocket:', err);
     }
-    this.wsConnecting = false;
+
+    // Only assign if we're still the active connection attempt
+    // (another call may have run disconnectWs() while we were awaiting)
+    if (this.wsConnecting) {
+      this.wsClient = wsClient;
+      this.wsConnecting = false;
+    } else {
+      // We were cancelled during the await — clean up
+      wsClient.destroy();
+      return;
+    }
 
     // Also do an initial REST poll to fill the cache
     this.pollAllLocations().catch(err => {
@@ -716,11 +738,20 @@ export class SpeedQueenService {
       return cached;
     }
 
-    // Stale or missing — poll this agent's location
+    // Stale or missing — poll this agent's location (with in-flight deduplication)
     const locationId = this.getLocationIdForAgent(agentId);
     if (locationId) {
+      // If a poll is already in-flight for this location, join it instead of creating another
+      let inflight = this.pollInFlight.get(locationId);
+      if (!inflight) {
+        inflight = this.pollLocation(locationId).finally(() => {
+          this.pollInFlight.delete(locationId);
+        });
+        this.pollInFlight.set(locationId, inflight);
+      }
+
       try {
-        await this.pollLocation(locationId);
+        await inflight;
       } catch (err) {
         console.error(`[speedqueen] On-demand poll failed for ${agentId}:`, err);
       }
@@ -741,7 +772,7 @@ export class SpeedQueenService {
   }
 
   private async pollLocation(locationId: string): Promise<void> {
-    const agentId = LOCATION_TO_AGENT[locationId];
+    const agentId = this.locationToAgent.get(locationId);
     if (!agentId) return;
 
     const sqMachines = await this.restClient.getMachines(locationId);
@@ -807,7 +838,7 @@ export class SpeedQueenService {
   }
 
   getLocationIdForAgent(agentId: string): string | undefined {
-    return Object.entries(LOCATION_TO_AGENT).find(([, aid]) => aid === agentId)?.[0];
+    return this.machineMappings.find(m => m.agentId === agentId)?.locationId;
   }
 
   // Get all machine mappings for an agent

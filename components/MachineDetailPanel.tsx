@@ -36,6 +36,12 @@ export const MachineDetailPanel: React.FC<MachineDetailPanelProps> = ({
   const [commandFeedback, setCommandFeedback] = useState<CommandFeedback | null>(null);
   const [remainingSeconds, setRemainingSeconds] = useState(machine.remainingSeconds ?? 0);
 
+  // Reset cycle selection when machine changes
+  useEffect(() => {
+    setSelectedCycleId('');
+    setCycles([]);
+  }, [agentId, machine.id]);
+
   // Fetch machine detail & cycles when panel opens
   useEffect(() => {
     if (!isSpeedQueen) return;
@@ -43,7 +49,7 @@ export const MachineDetailPanel: React.FC<MachineDetailPanelProps> = ({
     ApiService.getMachineDetail(agentId, machine.id)
       .then((data) => {
         setCycles(data.cycles || []);
-        if (data.cycles?.length > 0 && !selectedCycleId) {
+        if (data.cycles?.length > 0) {
           setSelectedCycleId(data.cycles[0].id);
         }
       })
@@ -237,7 +243,9 @@ export const MachineDetailPanel: React.FC<MachineDetailPanelProps> = ({
 
             {/* Any state: Out of Order toggle */}
             <button
-              onClick={() => sendCommand('set_out_of_order')}
+              onClick={() => sendCommand('set_out_of_order', {
+                outOfOrder: machine.status !== 'out_of_order',
+              })}
               disabled={commandFeedback?.status === 'pending'}
               className="w-full flex items-center justify-center gap-2 px-4 py-2 rounded-lg border border-slate-600 text-slate-300 hover:border-slate-500 hover:text-white text-sm disabled:opacity-50"
             >

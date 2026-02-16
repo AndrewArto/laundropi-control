@@ -194,4 +194,62 @@ describe('SpeedQueenService — lazy WebSocket & caching', () => {
       expect(service.isActive()).toBe(false);
     });
   });
+
+  // -------------------------------------------------------------------
+  // Fix #2: Repeated notifyUiActivity() during connection setup
+  // -------------------------------------------------------------------
+  describe('duplicate WS prevention', () => {
+    it('does not create multiple WS clients from rapid notifyUiActivity calls', async () => {
+      let tokenCallCount = 0;
+      mockFetch.mockImplementation(async (url: string) => {
+        if (url.includes('/v1/realtime/auth')) {
+          tokenCallCount++;
+          // Simulate slow token fetch
+          await new Promise(r => setTimeout(r, 100));
+          return {
+            ok: true,
+            json: () => Promise.resolve({ token: 'mock-ws-token' }),
+          };
+        }
+        if (url.includes('/machines')) {
+          return {
+            ok: true,
+            headers: new Headers({ 'content-type': 'application/json' }),
+            json: () => Promise.resolve([]),
+          };
+        }
+        return { ok: true, headers: new Headers(), json: () => Promise.resolve({}) };
+      });
+
+      await service.start();
+
+      // Rapidly call notifyUiActivity multiple times
+      service.notifyUiActivity();
+      service.notifyUiActivity();
+      service.notifyUiActivity();
+      service.notifyUiActivity();
+
+      // Wait for async connection to complete
+      await new Promise(r => setTimeout(r, 300));
+
+      // Should only have requested 1 token (1 WS connection), not 4
+      expect(tokenCallCount).toBe(1);
+    });
+  });
+
+  // -------------------------------------------------------------------
+  // Fix #8: pollIntervalMs is unused (backward compat)
+  // -------------------------------------------------------------------
+  describe('pollIntervalMs parameter', () => {
+    it('accepts pollIntervalMs for backward compat without error', () => {
+      const svc = new SpeedQueenService(
+        'test-key',
+        'loc_d23f6c',
+        () => {},
+        30_000, // backward compat param
+      );
+      expect(svc.isActive()).toBe(false);
+      svc.stop();
+    });
+  });
 });

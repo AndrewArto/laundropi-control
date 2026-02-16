@@ -267,7 +267,7 @@ describe('Speed Queen Service', () => {
         text: () => Promise.resolve('Unauthorized'),
       });
 
-      await expect(client.getLocations()).rejects.toThrow('Speed Queen API GET /v1/locations failed: 401');
+      await expect(client.getLocations()).rejects.toThrow('Speed Queen API request failed: 401');
     });
 
     it('gets realtime token', async () => {
@@ -405,6 +405,123 @@ describe('Speed Queen Service', () => {
       await expect(
         service.sendMachineCommand('Brandoa1', 'w99', 'remote_start'),
       ).rejects.toThrow('No Speed Queen mapping');
+    });
+
+    // --- Fix #1: Custom locationId:agentId mappings at runtime ---
+    it('resolves custom agent ID from loc_xxx:CustomAgent config', () => {
+      const service = new SpeedQueenService('test-key', 'loc_d23f6c:CustomAgent', () => {});
+      expect(service.getLocationIdForAgent('CustomAgent')).toBe('loc_d23f6c');
+      expect(service.getLocationIdForAgent('Brandoa1')).toBeUndefined();
+    });
+
+    it('getMachinesOnDemand uses custom agent mapping for polling', async () => {
+      mockFetch.mockImplementation(async (url: string) => {
+        if (url.includes('/machines')) {
+          return {
+            ok: true,
+            headers: new Headers({ 'content-type': 'application/json' }),
+            json: () => Promise.resolve([
+              {
+                id: 'mac_1096b5',
+                status: { status: 'AVAILABLE', remainingSeconds: 0 },
+              },
+            ]),
+          };
+        }
+        return {
+          ok: true,
+          headers: new Headers({ 'content-type': 'application/json' }),
+          json: () => Promise.resolve({}),
+        };
+      });
+
+      const service = new SpeedQueenService('test-key', 'loc_d23f6c:CustomAgent', () => {});
+      await service.start();
+      const machines = await service.getMachinesOnDemand('CustomAgent');
+      expect(machines.length).toBeGreaterThan(0);
+      expect(machines[0].status).toBe('idle');
+      service.stop();
+    });
+
+    it('getMachineMapping works with custom agent ID', () => {
+      const service = new SpeedQueenService('test-key', 'loc_d23f6c:MyLaundry', () => {});
+      const mapping = service.getMachineMapping('MyLaundry', 'w1');
+      expect(mapping).toBeDefined();
+      expect(mapping?.speedqueenId).toBe('mac_1096b5');
+      expect(mapping?.agentId).toBe('MyLaundry');
+    });
+  });
+
+  // -------------------------------------------------------------------
+  // Fix #6: Error message sanitization
+  // -------------------------------------------------------------------
+  describe('REST client error sanitization', () => {
+    it('does not include raw vendor response in error message', async () => {
+      const client = new SpeedQueenRestClient('test-api-key');
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 500,
+        text: () => Promise.resolve('Internal vendor error with sensitive details: API key xxx'),
+      });
+
+      try {
+        await client.getLocations();
+        expect.fail('Should have thrown');
+      } catch (err: any) {
+        // Error message should contain status code but NOT raw response body
+        expect(err.message).toContain('500');
+        expect(err.message).not.toContain('sensitive');
+        expect(err.message).not.toContain('vendor');
+        expect(err.message).not.toContain('API key');
+      }
+    });
+  });
+
+  // -------------------------------------------------------------------
+  // Fix #7: In-flight poll deduplication
+  // -------------------------------------------------------------------
+  describe('poll deduplication', () => {
+    it('deduplicates concurrent getMachinesOnDemand calls', async () => {
+      let pollCount = 0;
+      mockFetch.mockImplementation(async (url: string) => {
+        if (url.includes('/machines')) {
+          pollCount++;
+          // Simulate network delay
+          await new Promise(r => setTimeout(r, 50));
+          return {
+            ok: true,
+            headers: new Headers({ 'content-type': 'application/json' }),
+            json: () => Promise.resolve([
+              {
+                id: 'mac_1096b5',
+                status: { status: 'AVAILABLE', remainingSeconds: 0 },
+              },
+            ]),
+          };
+        }
+        return {
+          ok: true,
+          headers: new Headers({ 'content-type': 'application/json' }),
+          json: () => Promise.resolve({}),
+        };
+      });
+
+      const service = new SpeedQueenService('test-key', 'loc_d23f6c', () => {});
+      await service.start();
+
+      // Fire multiple concurrent requests
+      const [m1, m2, m3] = await Promise.all([
+        service.getMachinesOnDemand('Brandoa1'),
+        service.getMachinesOnDemand('Brandoa1'),
+        service.getMachinesOnDemand('Brandoa1'),
+      ]);
+
+      // Should only have made 1 REST call, not 3
+      expect(pollCount).toBe(1);
+      expect(m1.length).toBeGreaterThan(0);
+      expect(m2.length).toBeGreaterThan(0);
+      expect(m3.length).toBeGreaterThan(0);
+      service.stop();
     });
   });
 });

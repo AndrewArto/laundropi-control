@@ -431,15 +431,20 @@ export const DashboardView: React.FC<DashboardViewProps> = (props) => {
     </div>
 
     {/* Machine Detail Panel */}
-    {selectedMachine && (
-      <MachineDetailPanel
-        agentId={selectedMachine.agentId}
-        machine={selectedMachine.machine}
-        onClose={() => setSelectedMachine(null)}
-        isSpeedQueen={props.machineStatus[selectedMachine.agentId]?.source === 'speedqueen'}
-        isViewer={isViewer}
-      />
-    )}
+    {selectedMachine && (() => {
+      // Look up live machine data from status instead of using stale snapshot
+      const liveStatus = props.machineStatus[selectedMachine.agentId];
+      const liveMachine = liveStatus?.machines?.find(m => m.id === selectedMachine.machine.id) || selectedMachine.machine;
+      return (
+        <MachineDetailPanel
+          agentId={selectedMachine.agentId}
+          machine={liveMachine}
+          onClose={() => setSelectedMachine(null)}
+          isSpeedQueen={liveStatus?.source === 'speedqueen'}
+          isViewer={isViewer}
+        />
+      );
+    })()}
   </div>
   );
 };
