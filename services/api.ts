@@ -1,5 +1,5 @@
 
-import { Relay, Schedule, RelayType, RelayGroup, RevenueEntry, RevenueAuditEntry, RevenueSummary, RevenueDeduction, UiUser, CameraConfig, ExpenditureImport, ExpenditureTransaction, ExpenditureAudit, LaundryMachineStatus } from '../types';
+import { Relay, Schedule, RelayType, RelayGroup, RevenueEntry, RevenueAuditEntry, RevenueSummary, RevenueDeduction, UiUser, CameraConfig, ExpenditureImport, ExpenditureTransaction, ExpenditureAudit, LaundryMachineStatus, SpeedQueenMachineDetail, SpeedQueenMachineCycle, SpeedQueenCommandType } from '../types';
 
 type LocationLike = { hostname: string; port: string; protocol: string };
 
@@ -518,6 +518,41 @@ export const ApiService = {
   }> {
     const query = new URLSearchParams({ startDate, endDate });
     const res = await request(`${API_BASE}/expenditure/deductions?${query.toString()}`);
+    return await res.json();
+  },
+
+  // ========== Speed Queen Integration ==========
+
+  async getSpeedQueenStatus(): Promise<{ enabled: boolean; active: boolean; locations: string[] }> {
+    const res = await request(`${API_BASE}/speedqueen/status`);
+    return await res.json();
+  },
+
+  async getMachineDetail(agentId: string, machineId: string): Promise<{
+    machine: SpeedQueenMachineDetail;
+    cycles: SpeedQueenMachineCycle[];
+    locationId: string;
+    speedqueenId: string;
+    model: string;
+  }> {
+    const res = await request(`${API_BASE}/agents/${encodeURIComponent(agentId)}/machines/${encodeURIComponent(machineId)}/detail`);
+    return await res.json();
+  },
+
+  async sendMachineCommand(agentId: string, machineId: string, commandType: SpeedQueenCommandType, params?: Record<string, unknown>): Promise<{
+    ok: boolean;
+    command: { id: string; status?: string };
+  }> {
+    const res = await request(`${API_BASE}/agents/${encodeURIComponent(agentId)}/machines/${encodeURIComponent(machineId)}/command`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ commandType, params }),
+    });
+    return await res.json();
+  },
+
+  async getMachineCommandStatus(agentId: string, machineId: string, commandId: string): Promise<{ id: string; status?: string }> {
+    const res = await request(`${API_BASE}/agents/${encodeURIComponent(agentId)}/machines/${encodeURIComponent(machineId)}/command/${encodeURIComponent(commandId)}`);
     return await res.json();
   },
 };
