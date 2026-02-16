@@ -541,8 +541,16 @@ export class SpeedQueenWSClient {
 
 // ---------------------------------------------------------------------------
 // SpeedQueenService — orchestrates REST + WS, manages state
+//
+// Lazy connection: WebSocket connects ONLY when UI clients are actively
+// viewing machines.  After 60 s with no UI interest the WS disconnects.
+// REST calls happen on-demand only (no automatic polling interval).
+// Cache TTL: 30 s — stale data triggers a fresh REST fetch on next request.
 // ---------------------------------------------------------------------------
 export type StatusUpdateCallback = (agentId: string, machines: LaundryMachine[]) => void;
+
+const STATUS_CACHE_TTL_MS = 30_000;   // 30 s
+const WS_IDLE_TIMEOUT_MS  = 60_000;   // disconnect WS after 60 s idle
 
 export class SpeedQueenService {
   private restClient: SpeedQueenRestClient;
@@ -557,6 +565,14 @@ export class SpeedQueenService {
   // Caches
   private machinesByAgent = new Map<string, LaundryMachine[]>();
   private cyclesByMachine = new Map<string, SpeedQueenMachineCycle[]>();
+
+  // Cache timestamps for TTL
+  private lastPollByAgent = new Map<string, number>();
+
+  // Lazy WebSocket bookkeeping
+  private lastUiActivity = 0;
+  private wsIdleTimer: ReturnType<typeof setInterval> | null = null;
+  private wsConnecting = false;
 
   constructor(
     apiKey: string,
@@ -581,11 +597,46 @@ export class SpeedQueenService {
     this.started = true;
 
     console.log(`[speedqueen] Starting service for locations: ${this.locationIds.join(', ')}`);
+    console.log('[speedqueen] WebSocket will connect lazily when UI clients request machine data');
 
-    // Initial REST poll
-    await this.pollAllLocations();
+    // Do NOT connect WebSocket or poll on startup.
+    // WebSocket connects on first notifyUiActivity().
+    // REST polls happen on-demand in getMachinesOnDemand().
 
-    // Start WebSocket connection
+    // Start idle-check timer that disconnects WS after inactivity
+    this.wsIdleTimer = setInterval(() => this.checkWsIdle(), 15_000);
+  }
+
+  stop(): void {
+    this.started = false;
+    this.disconnectWs();
+    if (this.pollingTimer) {
+      clearInterval(this.pollingTimer);
+      this.pollingTimer = null;
+    }
+    if (this.wsIdleTimer) {
+      clearInterval(this.wsIdleTimer);
+      this.wsIdleTimer = null;
+    }
+    console.log('[speedqueen] Service stopped');
+  }
+
+  // ------------------------------------------------------------------
+  // Lazy WebSocket: connect / disconnect based on UI activity
+  // ------------------------------------------------------------------
+
+  /** Call this whenever a UI client requests machine data. */
+  notifyUiActivity(): void {
+    this.lastUiActivity = Date.now();
+    this.ensureWsConnected();
+  }
+
+  private async ensureWsConnected(): Promise<void> {
+    if (this.wsClient?.isConnected() || this.wsConnecting || !this.started) return;
+
+    this.wsConnecting = true;
+    console.log('[speedqueen] UI activity detected — connecting WebSocket…');
+
     this.wsClient = new SpeedQueenWSClient(
       this.restClient,
       this.locationIds,
@@ -598,7 +649,6 @@ export class SpeedQueenService {
 
     this.wsClient.onMachineError = (agentId, error) => {
       console.log(`[speedqueen] Error for ${agentId}: ${error.name} (code=${error.code})`);
-      // Update machine status to error
       const mapping = this.machineMappings.find(m => m.speedqueenId === error.machine?.id);
       if (mapping) {
         const errorMachine: LaundryMachine = {
@@ -622,31 +672,64 @@ export class SpeedQueenService {
       console.log(`[speedqueen] Event for ${agentId}:`, JSON.stringify(event).slice(0, 200));
     };
 
-    await this.wsClient.connect();
+    try {
+      await this.wsClient.connect();
+    } catch (err) {
+      console.error('[speedqueen] Failed to connect WebSocket:', err);
+    }
+    this.wsConnecting = false;
 
-    // Start polling fallback
-    this.pollingTimer = setInterval(() => {
-      if (!this.wsClient?.isConnected()) {
-        console.log('[speedqueen] WS disconnected, polling via REST...');
-        this.pollAllLocations();
-      }
-    }, this.pollIntervalMs);
+    // Also do an initial REST poll to fill the cache
+    this.pollAllLocations().catch(err => {
+      console.error('[speedqueen] Initial poll after WS connect failed:', err);
+    });
   }
 
-  stop(): void {
-    this.started = false;
+  private disconnectWs(): void {
     if (this.wsClient) {
+      console.log('[speedqueen] Disconnecting WebSocket (idle)');
       this.wsClient.destroy();
       this.wsClient = null;
     }
-    if (this.pollingTimer) {
-      clearInterval(this.pollingTimer);
-      this.pollingTimer = null;
-    }
-    console.log('[speedqueen] Service stopped');
+    this.wsConnecting = false;
   }
 
-  // Manual poll (used on startup and as fallback)
+  private checkWsIdle(): void {
+    if (!this.wsClient) return;
+    const idle = Date.now() - this.lastUiActivity;
+    if (idle > WS_IDLE_TIMEOUT_MS) {
+      this.disconnectWs();
+    }
+  }
+
+  // ------------------------------------------------------------------
+  // On-demand REST polling with cache TTL
+  // ------------------------------------------------------------------
+
+  /** Returns cached machines, refreshing via REST if cache is stale. */
+  async getMachinesOnDemand(agentId: string): Promise<LaundryMachine[]> {
+    const now = Date.now();
+    const lastPoll = this.lastPollByAgent.get(agentId) || 0;
+    const cached = this.machinesByAgent.get(agentId);
+
+    if (cached && (now - lastPoll) < STATUS_CACHE_TTL_MS) {
+      return cached;
+    }
+
+    // Stale or missing — poll this agent's location
+    const locationId = this.getLocationIdForAgent(agentId);
+    if (locationId) {
+      try {
+        await this.pollLocation(locationId);
+      } catch (err) {
+        console.error(`[speedqueen] On-demand poll failed for ${agentId}:`, err);
+      }
+    }
+
+    return this.machinesByAgent.get(agentId) || [];
+  }
+
+  // Manual poll (used on-demand and as WS fallback)
   async pollAllLocations(): Promise<void> {
     for (const locId of this.locationIds) {
       try {
@@ -692,6 +775,7 @@ export class SpeedQueenService {
 
     if (machines.length > 0) {
       this.machinesByAgent.set(agentId, machines);
+      this.lastPollByAgent.set(agentId, Date.now());
       this.onStatusUpdate(agentId, machines);
       console.log(`[speedqueen] Polled ${locationId} (${agentId}): ${machines.map(m => `${m.id}=${m.status}`).join(', ')}`);
     }
@@ -708,10 +792,11 @@ export class SpeedQueenService {
       }
     }
     this.machinesByAgent.set(agentId, current);
+    this.lastPollByAgent.set(agentId, Date.now());
     this.onStatusUpdate(agentId, current);
   }
 
-  // Get cached machines for an agent
+  // Get cached machines for an agent (no REST call — use getMachinesOnDemand for fresh data)
   getMachines(agentId: string): LaundryMachine[] {
     return this.machinesByAgent.get(agentId) || [];
   }
@@ -850,5 +935,7 @@ export {
   BRANDOA2_MACHINES,
   API_BASE,
   WS_URL,
+  STATUS_CACHE_TTL_MS,
+  WS_IDLE_TIMEOUT_MS,
 };
 export type { SQMachine, SQMachineStatus, SQCycle, SQError, SQCommandResponse, SQLocation };
