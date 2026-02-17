@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { LayoutDashboard, Server, Cpu, Pencil, Camera as CameraIcon, CameraOff as CameraOffIcon, ChevronDown, ChevronRight, WashingMachine, Wind } from 'lucide-react';
+import { LayoutDashboard, Server, Cpu, Pencil, Camera as CameraIcon, CameraOff as CameraOffIcon, ChevronDown, ChevronRight, WashingMachine, Wind, Clock } from 'lucide-react';
 import RelayCard from '../RelayCard';
+import { MachineDetailPanel } from '../MachineDetailPanel';
 import { Relay, CameraConfig, LaundryMachine, LaundryMachineStatus, UiUser } from '../../types';
 
 interface Laundry {
@@ -50,8 +51,76 @@ interface DashboardViewProps {
   machineStatus: Record<string, LaundryMachineStatus>;
 }
 
+const formatTimeShort = (seconds: number): string => {
+  if (seconds <= 0) return '';
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return `${m}:${String(s).padStart(2, '0')}`;
+};
+
+const machineStatusStyle = (status: string) => {
+  switch (status) {
+    case 'running':
+      return 'border-emerald-500/50 bg-emerald-500/10 text-emerald-200';
+    case 'idle':
+      return 'border-slate-600 bg-slate-800/50 text-slate-400';
+    case 'error':
+      return 'border-red-500/50 bg-red-500/10 text-red-200';
+    case 'out_of_order':
+      return 'border-amber-500/50 bg-amber-500/10 text-amber-200';
+    default:
+      return 'border-slate-700 bg-slate-900/50 text-slate-500';
+  }
+};
+
+const machineStatusBadgeStyle = (status: string) => {
+  switch (status) {
+    case 'running':
+      return 'bg-emerald-500/20 text-emerald-300';
+    case 'idle':
+      return 'bg-slate-700 text-slate-400';
+    case 'error':
+      return 'bg-red-500/20 text-red-300';
+    case 'out_of_order':
+      return 'bg-amber-500/20 text-amber-300';
+    default:
+      return 'bg-slate-800 text-slate-500';
+  }
+};
+
+const MachineCard: React.FC<{
+  machine: LaundryMachine;
+  isSpeedQueen: boolean;
+  onClick: () => void;
+}> = ({ machine, isSpeedQueen, onClick }) => (
+  <button
+    onClick={onClick}
+    className={`flex items-center justify-between px-2 py-1.5 rounded-md border text-xs text-left w-full transition-colors hover:brightness-110 ${machineStatusStyle(machine.status)}`}
+    title={machine.reason ? `Detection: ${machine.reason}` : isSpeedQueen ? 'Click for details' : undefined}
+  >
+    <span>{machine.label}</span>
+    <div className="flex items-center gap-1">
+      {isSpeedQueen && machine.status === 'running' && (machine.remainingSeconds ?? 0) > 0 && (
+        <span className="flex items-center gap-0.5 text-emerald-300 text-[10px]">
+          <Clock className="w-3 h-3" />
+          {formatTimeShort(machine.remainingSeconds!)}
+        </span>
+      )}
+      <span className={`px-1.5 py-0.5 rounded text-[10px] uppercase ${machineStatusBadgeStyle(machine.status)}`}>
+        {machine.status === 'out_of_order' ? 'OOO' : machine.status}
+      </span>
+      {!isSpeedQueen && machine.reason && (
+        <span className="text-[9px] text-slate-500">
+          ({machine.reason})
+        </span>
+      )}
+    </div>
+  </button>
+);
+
 export const DashboardView: React.FC<DashboardViewProps> = (props) => {
   const [expandedMachines, setExpandedMachines] = useState<Record<string, boolean>>({});
+  const [selectedMachine, setSelectedMachine] = useState<{ agentId: string; machine: LaundryMachine } | null>(null);
   const isViewer = props.authUser?.role === 'viewer';
 
   const toggleMachines = (agentId: string) => {
@@ -282,6 +351,7 @@ export const DashboardView: React.FC<DashboardViewProps> = (props) => {
               const washers = machines.filter(m => m.type === 'washer');
               const dryers = machines.filter(m => m.type === 'dryer');
               const runningCount = machines.filter(m => m.status === 'running').length;
+              const isSpeedQueen = status?.source === 'speedqueen';
 
               if (machines.length === 0) return null;
 
@@ -302,6 +372,11 @@ export const DashboardView: React.FC<DashboardViewProps> = (props) => {
                     <span className="text-xs text-slate-500">
                       ({runningCount}/{machines.length} running)
                     </span>
+                    {isSpeedQueen && (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded-full border border-indigo-400 text-indigo-300 bg-indigo-500/10">
+                        SQ
+                      </span>
+                    )}
                   </button>
 
                   {isExpanded && (
@@ -315,35 +390,12 @@ export const DashboardView: React.FC<DashboardViewProps> = (props) => {
                           </div>
                           <div className="grid grid-cols-2 gap-2">
                             {washers.map(machine => (
-                              <div
+                              <MachineCard
                                 key={machine.id}
-                                className={`flex items-center justify-between px-2 py-1.5 rounded-md border text-xs ${
-                                  machine.status === 'running'
-                                    ? 'border-emerald-500/50 bg-emerald-500/10 text-emerald-200'
-                                    : machine.status === 'idle'
-                                    ? 'border-slate-600 bg-slate-800/50 text-slate-400'
-                                    : 'border-slate-700 bg-slate-900/50 text-slate-500'
-                                }`}
-                                title={machine.reason ? `Detection: ${machine.reason}` : undefined}
-                              >
-                                <span>{machine.label}</span>
-                                <div className="flex items-center gap-1">
-                                  <span className={`px-1.5 py-0.5 rounded text-[10px] uppercase ${
-                                    machine.status === 'running'
-                                      ? 'bg-emerald-500/20 text-emerald-300'
-                                      : machine.status === 'idle'
-                                      ? 'bg-slate-700 text-slate-400'
-                                      : 'bg-slate-800 text-slate-500'
-                                  }`}>
-                                    {machine.status}
-                                  </span>
-                                  {machine.reason && (
-                                    <span className="text-[9px] text-slate-500">
-                                      ({machine.reason})
-                                    </span>
-                                  )}
-                                </div>
-                              </div>
+                                machine={machine}
+                                isSpeedQueen={isSpeedQueen}
+                                onClick={() => setSelectedMachine({ agentId: laundry.id, machine })}
+                              />
                             ))}
                           </div>
                         </div>
@@ -358,35 +410,12 @@ export const DashboardView: React.FC<DashboardViewProps> = (props) => {
                           </div>
                           <div className="grid grid-cols-2 gap-2">
                             {dryers.map(machine => (
-                              <div
+                              <MachineCard
                                 key={machine.id}
-                                className={`flex items-center justify-between px-2 py-1.5 rounded-md border text-xs ${
-                                  machine.status === 'running'
-                                    ? 'border-emerald-500/50 bg-emerald-500/10 text-emerald-200'
-                                    : machine.status === 'idle'
-                                    ? 'border-slate-600 bg-slate-800/50 text-slate-400'
-                                    : 'border-slate-700 bg-slate-900/50 text-slate-500'
-                                }`}
-                                title={machine.reason ? `Detection: ${machine.reason}` : undefined}
-                              >
-                                <span>{machine.label}</span>
-                                <div className="flex items-center gap-1">
-                                  <span className={`px-1.5 py-0.5 rounded text-[10px] uppercase ${
-                                    machine.status === 'running'
-                                      ? 'bg-emerald-500/20 text-emerald-300'
-                                      : machine.status === 'idle'
-                                      ? 'bg-slate-700 text-slate-400'
-                                      : 'bg-slate-800 text-slate-500'
-                                  }`}>
-                                    {machine.status}
-                                  </span>
-                                  {machine.reason && (
-                                    <span className="text-[9px] text-slate-500">
-                                      ({machine.reason})
-                                    </span>
-                                  )}
-                                </div>
-                              </div>
+                                machine={machine}
+                                isSpeedQueen={isSpeedQueen}
+                                onClick={() => setSelectedMachine({ agentId: laundry.id, machine })}
+                              />
                             ))}
                           </div>
                         </div>
@@ -400,6 +429,22 @@ export const DashboardView: React.FC<DashboardViewProps> = (props) => {
         );
       })}
     </div>
+
+    {/* Machine Detail Panel */}
+    {selectedMachine && (() => {
+      // Look up live machine data from status instead of using stale snapshot
+      const liveStatus = props.machineStatus[selectedMachine.agentId];
+      const liveMachine = liveStatus?.machines?.find(m => m.id === selectedMachine.machine.id) || selectedMachine.machine;
+      return (
+        <MachineDetailPanel
+          agentId={selectedMachine.agentId}
+          machine={liveMachine}
+          onClose={() => setSelectedMachine(null)}
+          isSpeedQueen={liveStatus?.source === 'speedqueen'}
+          isViewer={isViewer}
+        />
+      );
+    })()}
   </div>
   );
 };

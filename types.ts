@@ -236,11 +236,22 @@ export interface ExpenditureAudit {
   createdAt: number;
 }
 
-// Machine status from camera-based detection
+// Machine status from camera-based detection or Speed Queen API
 export type MachineType = 'washer' | 'dryer';
-export type MachineStatus = 'idle' | 'running' | 'unknown';
+export type MachineStatus = 'idle' | 'running' | 'error' | 'out_of_order' | 'unknown';
 
 export type DetectionReason = 'display-off' | 'lid-open' | 'clothes' | 'display-on' | 'unknown';
+export type MachineStatusSource = 'camera' | 'speedqueen';
+
+export interface SpeedQueenCycle {
+  id: string;
+  name: string;
+}
+
+export interface SpeedQueenModifier {
+  id: string;
+  name: string;
+}
 
 export interface LaundryMachine {
   id: string;
@@ -249,10 +260,72 @@ export interface LaundryMachine {
   status: MachineStatus;
   reason?: DetectionReason;
   lastUpdated: number;
+  // Speed Queen specific fields
+  source?: MachineStatusSource;
+  speedqueenId?: string;
+  remainingSeconds?: number;
+  remainingVend?: number;
+  isDoorOpen?: boolean;
+  selectedCycle?: SpeedQueenCycle | null;
+  selectedModifier?: SpeedQueenModifier | null;
+  vendPrice?: number;
+  errorCode?: number;
+  errorName?: string;
+  errorType?: string;
+  model?: string;
 }
 
 export interface LaundryMachineStatus {
   agentId: string;
   machines: LaundryMachine[];
   lastAnalyzed: number;
+  source?: MachineStatusSource;
+}
+
+// Speed Queen command types
+export type SpeedQueenCommandType =
+  | 'remote_start'
+  | 'remote_stop'
+  | 'remote_vend'
+  | 'select_cycle'
+  | 'start_dryer_with_time'
+  | 'clear_error'
+  | 'set_out_of_order'
+  | 'rapid_advance'
+  | 'clear_partial_vend';
+
+export interface SpeedQueenCommand {
+  id?: string;
+  machineId: string;
+  locationId: string;
+  commandType: SpeedQueenCommandType;
+  params?: Record<string, unknown>;
+  status?: 'pending' | 'sent' | 'success' | 'failed';
+  error?: string;
+  createdAt?: number;
+}
+
+export interface SpeedQueenMachineCycle {
+  id: string;
+  name: string;
+  vendPrice?: number;
+  duration?: number;
+}
+
+export interface SpeedQueenMachineDetail {
+  id: string;
+  locationId: string;
+  label: string;
+  type: MachineType;
+  model: string;
+  status: MachineStatus;
+  remainingSeconds: number;
+  remainingVend: number;
+  isDoorOpen: boolean;
+  selectedCycle: SpeedQueenCycle | null;
+  selectedModifier: SpeedQueenModifier | null;
+  cycles: SpeedQueenMachineCycle[];
+  errorCode?: number;
+  errorName?: string;
+  errorType?: string;
 }

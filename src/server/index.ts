@@ -9,6 +9,10 @@ import { listAgents, updateHeartbeat, saveMeta, getAgent, updateRelayMeta, listS
 import expenditureRoutes from './routes/expenditure';
 import inviteRoutes, { publicRouter as invitePublicRoutes } from './routes/invites';
 import invoicingRoutes from './routes/invoicing';
+import { SpeedQueenService } from './services/speedqueen';
+import { MockSpeedQueenService } from './services/speedqueen-mock';
+import { createSpeedQueenRouter } from './routes/speedqueen';
+import type { LaundryMachine, SpeedQueenCommandType } from '../../types';
 
 
 const asBool = (val: string | undefined, fallback = false) => {
@@ -175,6 +179,15 @@ const PRIMARY_LAUNDRY_ID = (process.env.PRIMARY_LAUNDRY_ID || KNOWN_LAUNDRY_IDS[
 const PRIMARY_CAMERAS_DEFAULT_ENABLED = asBool(process.env.PRIMARY_CAMERAS_DEFAULT_ENABLED, false);
 const PRIMARY_CAMERA_FRONT_RTSP_URL = (process.env.PRIMARY_CAMERA_FRONT_RTSP_URL || '').trim();
 const PRIMARY_CAMERA_BACK_RTSP_URL = (process.env.PRIMARY_CAMERA_BACK_RTSP_URL || '').trim();
+
+// Speed Queen Insights API configuration
+const SPEEDQUEEN_API_KEY = (process.env.SPEEDQUEEN_API_KEY || '').trim();
+const SPEEDQUEEN_LOCATIONS = (process.env.SPEEDQUEEN_LOCATIONS || '').trim();
+// Note: SPEEDQUEEN_POLL_INTERVAL_MS is no longer used (service uses lazy WS + on-demand REST).
+// Kept for backward compat with .env files but has no effect at runtime.
+const SPEEDQUEEN_POLL_INTERVAL_MS = parseDurationMs(process.env.SPEEDQUEEN_POLL_INTERVAL_MS, 60_000);
+const SPEEDQUEEN_MOCK = asBool(process.env.SPEEDQUEEN_MOCK, false);
+const SPEEDQUEEN_ENABLED = Boolean(SPEEDQUEEN_MOCK || (SPEEDQUEEN_API_KEY && SPEEDQUEEN_LOCATIONS));
 
 const isKnownLaundry = (agentId: string) => KNOWN_LAUNDRY_SET.size === 0 || KNOWN_LAUNDRY_SET.has(agentId) || agentId === 'FixCost' || agentId === GENERAL_AGENT_ID;
 const isPrimaryLaundry = (agentId: string) => Boolean(PRIMARY_LAUNDRY_ID) && agentId === PRIMARY_LAUNDRY_ID;
@@ -1799,19 +1812,11 @@ app.put('/api/agents/:id/relays/:relayId/meta', requireAdminOrUser, (req, res) =
 });
 
 // --- MACHINE STATUS API ---
-// In-memory cache for machine status (will be populated by agent heartbeats)
-type MachineStatus = 'idle' | 'running' | 'unknown';
-type MachineType = 'washer' | 'dryer';
-interface LaundryMachine {
-  id: string;
-  label: string;
-  type: MachineType;
-  status: MachineStatus;
-  lastUpdated: number;
-}
-const machineStatusCache = new Map<string, { machines: LaundryMachine[]; lastAnalyzed: number }>();
+// In-memory cache for machine status (will be populated by agent heartbeats or Speed Queen API)
+const machineStatusCache = new Map<string, { machines: LaundryMachine[]; lastAnalyzed: number; source?: string }>();
 
-// Default machine configurations per laundry (can be configured via DB later)
+// Default machine configurations per laundry (used when no status data yet)
+type MachineType = 'washer' | 'dryer';
 const DEFAULT_MACHINE_CONFIGS: Record<string, Array<{ id: string; label: string; type: MachineType }>> = {
   Brandoa1: [
     { id: 'w1', label: 'Washer 1', type: 'washer' },
@@ -1837,10 +1842,75 @@ const DEFAULT_MACHINE_CONFIGS: Record<string, Array<{ id: string; label: string;
   ],
 };
 
-app.get('/api/agents/:id/machines', (req, res) => {
+// --- SPEED QUEEN SERVICE ---
+let speedQueenService: SpeedQueenService | MockSpeedQueenService | null = null;
+
+const initSpeedQueen = () => {
+  if (!SPEEDQUEEN_ENABLED) {
+    console.log('[central] Speed Queen integration disabled (SPEEDQUEEN_API_KEY or SPEEDQUEEN_LOCATIONS not set)');
+    return;
+  }
+
+  const statusCallback = (agentId: string, machines: LaundryMachine[]) => {
+    machineStatusCache.set(agentId, {
+      machines,
+      lastAnalyzed: Date.now(),
+      source: 'speedqueen',
+    });
+    console.log(`[speedqueen→cache] ${agentId}: ${machines.map(m => `${m.id}=${m.status}`).join(', ')}`);
+  };
+
+  if (SPEEDQUEEN_MOCK) {
+    // Use mock locations if none specified
+    const locations = SPEEDQUEEN_LOCATIONS || 'loc_d23f6c,loc_7b105b';
+    console.log('[central] Initializing Speed Queen MOCK service...');
+    speedQueenService = new MockSpeedQueenService(
+      'mock-api-key',
+      locations,
+      statusCallback,
+      SPEEDQUEEN_POLL_INTERVAL_MS,
+    );
+  } else {
+    console.log('[central] Initializing Speed Queen integration (lazy WebSocket)...');
+    speedQueenService = new SpeedQueenService(
+      SPEEDQUEEN_API_KEY,
+      SPEEDQUEEN_LOCATIONS,
+      statusCallback,
+      SPEEDQUEEN_POLL_INTERVAL_MS,
+    );
+  }
+
+  speedQueenService.start().catch(err => {
+    console.error('[central] Failed to start Speed Queen service:', err);
+  });
+};
+
+app.get('/api/agents/:id/machines', async (req, res) => {
   const { id } = req.params;
   if (!isKnownLaundry(id)) {
     return res.status(404).json({ error: 'agent not found' });
+  }
+
+  // Notify Speed Queen service of UI activity (triggers lazy WS connect)
+  if (speedQueenService && 'notifyUiActivity' in speedQueenService) {
+    (speedQueenService as SpeedQueenService).notifyUiActivity();
+  }
+
+  // If Speed Queen is active, try on-demand fetch (respects cache TTL)
+  if (speedQueenService && 'getMachinesOnDemand' in speedQueenService) {
+    try {
+      const machines = await (speedQueenService as SpeedQueenService).getMachinesOnDemand(id);
+      if (machines.length > 0) {
+        return res.json({
+          agentId: id,
+          machines,
+          lastAnalyzed: Date.now(),
+          source: 'speedqueen',
+        });
+      }
+    } catch (_err) {
+      // Fall through to cache / defaults
+    }
   }
 
   const cached = machineStatusCache.get(id);
@@ -1849,6 +1919,7 @@ app.get('/api/agents/:id/machines', (req, res) => {
       agentId: id,
       machines: cached.machines,
       lastAnalyzed: cached.lastAnalyzed,
+      source: cached.source || 'camera',
     });
   }
 
@@ -1857,22 +1928,35 @@ app.get('/api/agents/:id/machines', (req, res) => {
   const now = Date.now();
   const machines: LaundryMachine[] = defaultConfig.map(m => ({
     ...m,
-    status: 'unknown' as MachineStatus,
+    status: 'unknown' as const,
     lastUpdated: now,
   }));
+
+  // Only report source as 'speedqueen' if this agent actually has SQ mappings
+  const hasSqMapping = speedQueenService
+    ? speedQueenService.getMachineMappingsForAgent(id).length > 0
+    : false;
 
   res.json({
     agentId: id,
     machines,
     lastAnalyzed: 0,
+    source: hasSqMapping ? 'speedqueen' : 'camera',
   });
 });
 
 // Endpoint to update machine status (called by agent after frame analysis)
+// When Speed Queen is active for this agent, camera-based updates are ignored
 app.post('/api/agents/:id/machines', requireAdminOrUser, (req, res) => {
   const { id } = req.params;
   if (!isKnownLaundry(id)) {
     return res.status(404).json({ error: 'agent not found' });
+  }
+
+  // Skip camera-based updates if Speed Queen is providing status for this agent
+  const existingCache = machineStatusCache.get(id);
+  if (existingCache?.source === 'speedqueen') {
+    return res.json({ ok: true, skipped: true, reason: 'speedqueen active' });
   }
 
   const { machines } = req.body || {};
@@ -1889,10 +1973,21 @@ app.post('/api/agents/:id/machines', requireAdminOrUser, (req, res) => {
       lastUpdated: m.lastUpdated || Date.now(),
     })),
     lastAnalyzed: Date.now(),
+    source: 'camera',
   });
 
   res.json({ ok: true });
 });
+
+// --- SPEED QUEEN COMMAND API (dedicated router) ---
+app.use('/api', createSpeedQueenRouter({
+  getService: () => speedQueenService,
+  getMachineStatusCache: () => machineStatusCache,
+  isKnownLaundry,
+  requireAdminOrUser,
+  isSpeedQueenEnabled: () => SPEEDQUEEN_ENABLED,
+  getSpeedQueenLocations: () => SPEEDQUEEN_LOCATIONS,
+}));
 
 // --- SCHEDULES API ---
 app.get('/api/agents/:id/schedules', (req, res) => {
@@ -2132,6 +2227,12 @@ wss.on('connection', (socket) => {
       }
 
       if (msg.type === 'machine_status') {
+        // Skip camera-based updates if Speed Queen is providing status for this agent
+        const existingEntry = machineStatusCache.get(agentId);
+        if (existingEntry?.source === 'speedqueen') {
+          console.log(`[central] machine_status ${agentId}: skipped (speedqueen active)`);
+          return;
+        }
         const machines = Array.isArray(msg.machines) ? msg.machines : [];
         if (machines.length > 0) {
           machineStatusCache.set(agentId, {
@@ -2144,6 +2245,7 @@ wss.on('connection', (socket) => {
               lastUpdated: m.lastUpdated || Date.now(),
             })),
             lastAnalyzed: Date.now(),
+            source: 'camera',
           });
           console.log(`[central] machine_status ${agentId}: ${machines.map((m: any) => `${m.id}=${m.status}`).join(', ')}`);
         }
@@ -2203,7 +2305,9 @@ if (process.env.NODE_ENV !== 'test') {
   server.listen(PORT, () => {
     console.log(`[central] HTTP+WS listening on ${PORT}`);
     console.log(`[central] WS endpoint ws://localhost:${PORT}/agent`);
+    // Initialize Speed Queen integration after server is ready
+    initSpeedQueen();
   });
 }
 
-export { app, server };
+export { app, server, speedQueenService, SPEEDQUEEN_MOCK, initSpeedQueen };
