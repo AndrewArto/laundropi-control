@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { X, Play, Square, AlertTriangle, Ban, Clock, DoorOpen, DoorClosed, Loader2, CheckCircle, XCircle, WashingMachine, Wind } from 'lucide-react';
 import { LaundryMachine, SpeedQueenMachineCycle, SpeedQueenCommandType } from '../types';
 import { ApiService } from '../services/api';
@@ -35,6 +35,16 @@ export const MachineDetailPanel: React.FC<MachineDetailPanelProps> = ({
   const [loading, setLoading] = useState(false);
   const [commandFeedback, setCommandFeedback] = useState<CommandFeedback | null>(null);
   const [remainingSeconds, setRemainingSeconds] = useState(machine.remainingSeconds ?? 0);
+  const feedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Clean up feedback timer on unmount
+  useEffect(() => {
+    return () => {
+      if (feedbackTimerRef.current) {
+        clearTimeout(feedbackTimerRef.current);
+      }
+    };
+  }, []);
 
   // Reset cycle selection when machine changes
   useEffect(() => {
@@ -84,8 +94,9 @@ export const MachineDetailPanel: React.FC<MachineDetailPanelProps> = ({
     } catch (err: any) {
       setCommandFeedback({ status: 'failed', message: err.message || 'Command failed' });
     }
-    // Clear feedback after 4s
-    setTimeout(() => setCommandFeedback(null), 4000);
+    // Clear feedback after 4s (safe: cleared on unmount)
+    if (feedbackTimerRef.current) clearTimeout(feedbackTimerRef.current);
+    feedbackTimerRef.current = setTimeout(() => setCommandFeedback(null), 4000);
   }, [agentId, machine.id]);
 
   const statusColor = {

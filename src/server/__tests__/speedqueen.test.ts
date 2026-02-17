@@ -30,6 +30,7 @@ import {
   SpeedQueenWSClient,
   SpeedQueenService,
   buildCommand,
+  COMMAND_PARAM_SCHEMAS,
   LOCATION_TO_AGENT,
   BRANDOA1_MACHINES,
   BRANDOA2_MACHINES,
@@ -201,6 +202,47 @@ describe('Speed Queen Service', () => {
 
     it('throws for unknown command type', () => {
       expect(() => buildCommand('invalid' as any)).toThrow('Unknown command type');
+    });
+
+    // --- Coverage Gap 1: params.type override bypass ---
+    it('prevents params.type from overriding validated command type', () => {
+      const cmd = buildCommand('remote_start', { cycleId: 'cyc_1', type: 'MaliciousRequest' } as any);
+      // type must always be the whitelisted value, not the caller's override
+      expect(cmd.type).toBe('MachineRemoteStartCommandRequest');
+      expect(cmd.cycleId).toBe('cyc_1');
+    });
+
+    it('ignores params.type silently (does not throw)', () => {
+      const cmd = buildCommand('remote_stop', { type: 'Evil' } as any);
+      expect(cmd.type).toBe('MachineRemoteStopCommandRequest');
+    });
+
+    // --- Coverage Gap 2: Malformed/unknown command params rejection ---
+    it('rejects unknown parameter keys', () => {
+      expect(() => buildCommand('remote_start', { malicious: true } as any))
+        .toThrow("Unknown parameter 'malicious' for command 'remote_start'");
+    });
+
+    it('accepts valid parameters for remote_start', () => {
+      const cmd = buildCommand('remote_start', { cycleId: 'cyc_1' });
+      expect(cmd.cycleId).toBe('cyc_1');
+      expect(cmd.type).toBe('MachineRemoteStartCommandRequest');
+    });
+
+    it('rejects parameters for commands that take none', () => {
+      expect(() => buildCommand('remote_stop', { unexpectedKey: 'value' } as any))
+        .toThrow("Unknown parameter 'unexpectedKey' for command 'remote_stop'");
+    });
+
+    it('COMMAND_PARAM_SCHEMAS covers all command types', () => {
+      const commandTypes = [
+        'remote_start', 'remote_stop', 'remote_vend', 'select_cycle',
+        'start_dryer_with_time', 'clear_error', 'set_out_of_order',
+        'rapid_advance', 'clear_partial_vend',
+      ];
+      for (const ct of commandTypes) {
+        expect(COMMAND_PARAM_SCHEMAS).toHaveProperty(ct);
+      }
     });
   });
 
@@ -453,16 +495,66 @@ describe('Speed Queen Service', () => {
   });
 
   // -------------------------------------------------------------------
+  // Coverage Gap 4: Resilience tests for timeout/abort/retry
+  // -------------------------------------------------------------------
+  describe('REST client timeout and retry', () => {
+    const client = new SpeedQueenRestClient('test-api-key');
+
+    it('retries on 5xx and eventually succeeds', async () => {
+      let calls = 0;
+      mockFetch.mockImplementation(async () => {
+        calls++;
+        if (calls <= 2) {
+          return { ok: false, status: 503, text: () => Promise.resolve('') };
+        }
+        return {
+          ok: true,
+          headers: new Headers({ 'content-type': 'application/json' }),
+          json: () => Promise.resolve([{ id: 'loc_1', name: 'Test' }]),
+        };
+      });
+
+      const result = await client.getLocations();
+      expect(result).toHaveLength(1);
+      expect(calls).toBe(3); // 2 retries + 1 success
+    });
+
+    it('does not retry on 4xx client errors', async () => {
+      let calls = 0;
+      mockFetch.mockImplementation(async () => {
+        calls++;
+        return { ok: false, status: 404, text: () => Promise.resolve('') };
+      });
+
+      await expect(client.getLocations()).rejects.toThrow('404');
+      expect(calls).toBe(1); // no retries
+    });
+
+    it('includes AbortSignal in fetch options', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: () => Promise.resolve([]),
+      });
+
+      await client.getLocations();
+      const callArgs = mockFetch.mock.calls[0];
+      expect(callArgs[1]).toHaveProperty('signal');
+      expect(callArgs[1].signal).toBeInstanceOf(AbortSignal);
+    });
+  });
+
+  // -------------------------------------------------------------------
   // Fix #6: Error message sanitization
   // -------------------------------------------------------------------
   describe('REST client error sanitization', () => {
     it('does not include raw vendor response in error message', async () => {
       const client = new SpeedQueenRestClient('test-api-key');
-      mockFetch.mockResolvedValueOnce({
+      // Mock all retry attempts to return 500
+      mockFetch.mockImplementation(async () => ({
         ok: false,
         status: 500,
-        text: () => Promise.resolve('Internal vendor error with sensitive details: API key xxx'),
-      });
+      }));
 
       try {
         await client.getLocations();

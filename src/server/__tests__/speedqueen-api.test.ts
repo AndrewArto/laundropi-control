@@ -123,4 +123,91 @@ describe('Speed Queen API Endpoints', () => {
       expect(dryers).toHaveLength(6);
     });
   });
+
+  // --- Coverage Gap 3: 404/400 on unknown machine/agent command flows ---
+  describe('Error status codes for SQ commands', () => {
+    it('returns 404 for unknown agent', async () => {
+      const app = await setupApp({ LAUNDRY_IDS: 'Brandoa1' });
+      await request(app)
+        .post('/api/agents/UnknownAgent/machines/w1/command')
+        .send({ commandType: 'remote_start' })
+        .expect(404);
+    });
+
+    it('returns 400 for invalid commandType (SQ enabled)', async () => {
+      vi.resetModules();
+      process.env.NODE_ENV = 'test';
+      process.env.CENTRAL_DB_PATH = ':memory:';
+      process.env.CENTRAL_ENV_FILE = '/dev/null';
+      process.env.ALLOW_INSECURE = 'true';
+      process.env.CORS_ORIGINS = 'http://localhost';
+      process.env.REQUIRE_CORS_ORIGINS = 'false';
+      process.env.ALLOW_DYNAMIC_AGENT_REGISTRATION = 'true';
+      process.env.AGENT_SECRETS = '';
+      process.env.LAUNDRY_IDS = 'Brandoa1,Brandoa2';
+      process.env.SPEEDQUEEN_MOCK = 'true';
+      delete process.env.SPEEDQUEEN_API_KEY;
+      delete process.env.SPEEDQUEEN_LOCATIONS;
+      const mod = await import('../index');
+      mod.initSpeedQueen();
+      await new Promise(resolve => setTimeout(resolve, 100));
+
+      const res = await request(mod.app as any)
+        .post('/api/agents/Brandoa1/machines/w1/command')
+        .send({ commandType: 'invalid_command' })
+        .expect(400);
+      expect(res.body.error).toContain('Invalid commandType');
+    });
+
+    it('returns 400 when commandType is missing (SQ enabled)', async () => {
+      vi.resetModules();
+      process.env.NODE_ENV = 'test';
+      process.env.CENTRAL_DB_PATH = ':memory:';
+      process.env.CENTRAL_ENV_FILE = '/dev/null';
+      process.env.ALLOW_INSECURE = 'true';
+      process.env.CORS_ORIGINS = 'http://localhost';
+      process.env.REQUIRE_CORS_ORIGINS = 'false';
+      process.env.ALLOW_DYNAMIC_AGENT_REGISTRATION = 'true';
+      process.env.AGENT_SECRETS = '';
+      process.env.LAUNDRY_IDS = 'Brandoa1,Brandoa2';
+      process.env.SPEEDQUEEN_MOCK = 'true';
+      delete process.env.SPEEDQUEEN_API_KEY;
+      delete process.env.SPEEDQUEEN_LOCATIONS;
+      const mod = await import('../index');
+      mod.initSpeedQueen();
+      await new Promise(resolve => setTimeout(resolve, 100));
+
+      const res = await request(mod.app as any)
+        .post('/api/agents/Brandoa1/machines/w1/command')
+        .send({})
+        .expect(400);
+      expect(res.body.error).toContain('commandType required');
+    });
+  });
+
+  // --- Coverage Gap 5: source correctness when SQ enabled but agent not mapped ---
+  describe('Source field correctness', () => {
+    it('returns source=camera for unmapped agent when SQ is globally enabled', async () => {
+      vi.resetModules();
+      process.env.NODE_ENV = 'test';
+      process.env.CENTRAL_DB_PATH = ':memory:';
+      process.env.CENTRAL_ENV_FILE = '/dev/null';
+      process.env.ALLOW_INSECURE = 'true';
+      process.env.CORS_ORIGINS = 'http://localhost';
+      process.env.REQUIRE_CORS_ORIGINS = 'false';
+      process.env.ALLOW_DYNAMIC_AGENT_REGISTRATION = 'true';
+      process.env.AGENT_SECRETS = '';
+      process.env.LAUNDRY_IDS = 'Brandoa1,OtherAgent';
+      process.env.SPEEDQUEEN_MOCK = 'true';
+      delete process.env.SPEEDQUEEN_API_KEY;
+      delete process.env.SPEEDQUEEN_LOCATIONS;
+      const mod = await import('../index');
+      mod.initSpeedQueen();
+      await new Promise(resolve => setTimeout(resolve, 200));
+
+      // OtherAgent is not in SQ mappings — source should be camera
+      const res = await request(mod.app as any).get('/api/agents/OtherAgent/machines').expect(200);
+      expect(res.body.source).toBe('camera');
+    });
+  });
 });

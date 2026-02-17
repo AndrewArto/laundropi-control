@@ -162,6 +162,21 @@ describe('MockSpeedQueenService', () => {
       expect(w1?.status).toBe('out_of_order');
     });
 
+    it('set_out_of_order with outOfOrder=false removes out_of_order', async () => {
+      await service.start();
+      // First set out of order
+      await service.sendMachineCommand('Brandoa1', 'w1', 'set_out_of_order');
+      let machines = service.getMachines('Brandoa1');
+      let w1 = machines.find(m => m.id === 'w1');
+      expect(w1?.status).toBe('out_of_order');
+
+      // Now remove out of order
+      await service.sendMachineCommand('Brandoa1', 'w1', 'set_out_of_order', { outOfOrder: false });
+      machines = service.getMachines('Brandoa1');
+      w1 = machines.find(m => m.id === 'w1');
+      expect(w1?.status).toBe('idle');
+    });
+
     it('throws for unknown machine', async () => {
       await service.start();
       await expect(

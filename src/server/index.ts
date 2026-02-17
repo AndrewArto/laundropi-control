@@ -11,6 +11,7 @@ import inviteRoutes, { publicRouter as invitePublicRoutes } from './routes/invit
 import invoicingRoutes from './routes/invoicing';
 import { SpeedQueenService } from './services/speedqueen';
 import { MockSpeedQueenService } from './services/speedqueen-mock';
+import { createSpeedQueenRouter } from './routes/speedqueen';
 import type { LaundryMachine, SpeedQueenCommandType } from '../../types';
 
 
@@ -1931,11 +1932,16 @@ app.get('/api/agents/:id/machines', async (req, res) => {
     lastUpdated: now,
   }));
 
+  // Only report source as 'speedqueen' if this agent actually has SQ mappings
+  const hasSqMapping = speedQueenService
+    ? speedQueenService.getMachineMappingsForAgent(id).length > 0
+    : false;
+
   res.json({
     agentId: id,
     machines,
     lastAnalyzed: 0,
-    source: SPEEDQUEEN_ENABLED ? 'speedqueen' : 'camera',
+    source: hasSqMapping ? 'speedqueen' : 'camera',
   });
 });
 
@@ -1973,103 +1979,15 @@ app.post('/api/agents/:id/machines', requireAdminOrUser, (req, res) => {
   res.json({ ok: true });
 });
 
-// --- SPEED QUEEN COMMAND API ---
-// Get machine detail with cycles (for machine detail panel)
-app.get('/api/agents/:id/machines/:machineId/detail', async (req, res) => {
-  const { id: agentId, machineId } = req.params;
-  if (!isKnownLaundry(agentId)) {
-    return res.status(404).json({ error: 'agent not found' });
-  }
-  if (!speedQueenService) {
-    return res.status(400).json({ error: 'Speed Queen integration not configured' });
-  }
-
-  // Notify UI activity for lazy WS
-  if ('notifyUiActivity' in speedQueenService) {
-    (speedQueenService as SpeedQueenService).notifyUiActivity();
-  }
-
-  const mapping = speedQueenService.getMachineMapping(agentId, machineId);
-  if (!mapping) {
-    return res.status(404).json({ error: 'machine not found in Speed Queen mapping' });
-  }
-
-  try {
-    const cycles = await speedQueenService.getMachineCycles(agentId, machineId);
-    const cached = machineStatusCache.get(agentId);
-    const machine = cached?.machines?.find(m => m.id === machineId);
-
-    res.json({
-      machine: machine || { id: machineId, label: mapping.label, type: mapping.type, status: 'unknown', lastUpdated: Date.now() },
-      cycles,
-      locationId: mapping.locationId,
-      speedqueenId: mapping.speedqueenId,
-      model: mapping.model,
-    });
-  } catch (err: any) {
-    console.error(`[speedqueen] Failed to get detail for ${agentId}/${machineId}:`, err);
-    res.status(500).json({ error: 'Failed to fetch machine detail' });
-  }
-});
-
-// Send command to a machine
-app.post('/api/agents/:id/machines/:machineId/command', requireAdminOrUser, async (req, res) => {
-  const { id: agentId, machineId } = req.params;
-  if (!isKnownLaundry(agentId)) {
-    return res.status(404).json({ error: 'agent not found' });
-  }
-  if (!speedQueenService) {
-    return res.status(400).json({ error: 'Speed Queen integration not configured' });
-  }
-
-  const { commandType, params } = req.body || {};
-  if (!commandType) {
-    return res.status(400).json({ error: 'commandType required' });
-  }
-
-  const validCommands: SpeedQueenCommandType[] = [
-    'remote_start', 'remote_stop', 'remote_vend', 'select_cycle',
-    'start_dryer_with_time', 'clear_error', 'set_out_of_order',
-    'rapid_advance', 'clear_partial_vend',
-  ];
-  if (!validCommands.includes(commandType)) {
-    return res.status(400).json({ error: `Invalid commandType. Valid: ${validCommands.join(', ')}` });
-  }
-
-  try {
-    const result = await speedQueenService.sendMachineCommand(agentId, machineId, commandType, params || {});
-    console.log(`[speedqueen] Command ${commandType} sent to ${agentId}/${machineId}: ${JSON.stringify(result).slice(0, 200)}`);
-    res.json({ ok: true, command: result });
-  } catch (err: any) {
-    console.error(`[speedqueen] Command failed for ${agentId}/${machineId}:`, err);
-    res.status(500).json({ error: 'Command failed' });
-  }
-});
-
-// Get command status
-app.get('/api/agents/:id/machines/:machineId/command/:commandId', async (req, res) => {
-  const { id: agentId, machineId, commandId } = req.params;
-  if (!speedQueenService) {
-    return res.status(400).json({ error: 'Speed Queen integration not configured' });
-  }
-
-  try {
-    const result = await speedQueenService.getCommandStatus(agentId, machineId, commandId);
-    res.json(result);
-  } catch (err: any) {
-    console.error(`[speedqueen] Command status failed for ${agentId}/${machineId}/${commandId}:`, err);
-    res.status(500).json({ error: 'Failed to get command status' });
-  }
-});
-
-// Check if Speed Queen is enabled
-app.get('/api/speedqueen/status', (_req, res) => {
-  res.json({
-    enabled: SPEEDQUEEN_ENABLED,
-    active: speedQueenService?.isActive() ?? false,
-    locations: SPEEDQUEEN_LOCATIONS ? SPEEDQUEEN_LOCATIONS.split(',').map(s => s.trim()) : [],
-  });
-});
+// --- SPEED QUEEN COMMAND API (dedicated router) ---
+app.use('/api', createSpeedQueenRouter({
+  getService: () => speedQueenService,
+  getMachineStatusCache: () => machineStatusCache,
+  isKnownLaundry,
+  requireAdminOrUser,
+  isSpeedQueenEnabled: () => SPEEDQUEEN_ENABLED,
+  getSpeedQueenLocations: () => SPEEDQUEEN_LOCATIONS,
+}));
 
 // --- SCHEDULES API ---
 app.get('/api/agents/:id/schedules', (req, res) => {

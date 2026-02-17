@@ -346,7 +346,11 @@ export class MockSpeedQueenService {
         state.selectedCycle = null;
         break;
       case 'set_out_of_order':
-        state.sqStatus = 'OUT_OF_ORDER';
+        if (params?.outOfOrder === false) {
+          state.sqStatus = 'AVAILABLE';
+        } else {
+          state.sqStatus = 'OUT_OF_ORDER';
+        }
         state.remainingSeconds = 0;
         break;
       case 'select_cycle': {

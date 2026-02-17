@@ -19,6 +19,9 @@ import type {
 const API_BASE = 'https://api.alliancelaundrydigital.com';
 const WS_URL = 'wss://realtime.alliancelaundrydigital.com/connection/websocket';
 const RATE_LIMIT_MS = 110; // ~10 req/s max
+const FETCH_TIMEOUT_MS = 15_000; // 15 s per request
+const MAX_RETRIES = 2;
+const RETRY_BASE_MS = 500;
 
 // ---------------------------------------------------------------------------
 // Location → agentId mapping (Speed Queen loc_id → our internal agentId)
@@ -168,32 +171,68 @@ export class SpeedQueenRestClient {
   }
 
   private async request<T>(method: string, path: string, body?: unknown): Promise<T> {
-    await rateLimit();
+    let lastError: Error | null = null;
 
-    const url = `${API_BASE}${path}`;
-    const headers: Record<string, string> = {
-      'x-api-key': this.apiKey,
-      'Content-Type': 'application/json',
-    };
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      if (attempt > 0) {
+        const delay = RETRY_BASE_MS * Math.pow(2, attempt - 1);
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
 
-    const options: RequestInit = { method, headers };
-    if (body !== undefined) {
-      options.body = JSON.stringify(body);
+      await rateLimit();
+
+      const url = `${API_BASE}${path}`;
+      const headers: Record<string, string> = {
+        'x-api-key': this.apiKey,
+        'Content-Type': 'application/json',
+      };
+
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+
+      const options: RequestInit = { method, headers, signal: controller.signal };
+      if (body !== undefined) {
+        options.body = JSON.stringify(body);
+      }
+
+      try {
+        const res = await fetch(url, options);
+        clearTimeout(timeoutId);
+
+        if (!res.ok) {
+          // Log only status and path — never raw vendor response body (may contain sensitive data)
+          console.error(`[speedqueen-rest] ${method} ${path} failed: ${res.status}`);
+
+          // Don't retry 4xx client errors
+          if (res.status >= 400 && res.status < 500) {
+            throw new Error(`Speed Queen API request failed: ${res.status}`);
+          }
+
+          lastError = new Error(`Speed Queen API request failed: ${res.status}`);
+          continue; // retry on 5xx
+        }
+
+        const contentType = res.headers.get('content-type') || '';
+        if (contentType.includes('application/json')) {
+          return res.json() as Promise<T>;
+        }
+        return {} as T;
+      } catch (err: any) {
+        clearTimeout(timeoutId);
+        if (err.name === 'AbortError') {
+          lastError = new Error(`Speed Queen API request timed out: ${method} ${path}`);
+          continue;
+        }
+        // Re-throw non-retryable errors (4xx mapped above)
+        if (err.message?.includes('Speed Queen API request failed: 4')) {
+          throw err;
+        }
+        lastError = err;
+        continue;
+      }
     }
 
-    const res = await fetch(url, options);
-    if (!res.ok) {
-      // Log the full error server-side but don't include raw vendor response in thrown error
-      const text = await res.text().catch(() => '');
-      console.error(`[speedqueen-rest] ${method} ${path} failed: ${res.status} ${text}`);
-      throw new Error(`Speed Queen API request failed: ${res.status}`);
-    }
-
-    const contentType = res.headers.get('content-type') || '';
-    if (contentType.includes('application/json')) {
-      return res.json() as Promise<T>;
-    }
-    return {} as T;
+    throw lastError || new Error(`Speed Queen API request failed after ${MAX_RETRIES + 1} attempts`);
   }
 
   // Locations
@@ -237,13 +276,18 @@ export class SpeedQueenRestClient {
   async getRealtimeToken(): Promise<string> {
     await rateLimit();
 
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+
     const res = await fetch(`${API_BASE}/v1/realtime/auth`, {
       method: 'POST',
       headers: {
         'Authorization': this.apiKey,
         'Content-Type': 'application/json',
       },
+      signal: controller.signal,
     });
+    clearTimeout(timeoutId);
 
     if (!res.ok) {
       throw new Error(`Speed Queen realtime auth failed: ${res.status}`);
@@ -260,29 +304,64 @@ export class SpeedQueenRestClient {
 // ---------------------------------------------------------------------------
 // Command builders
 // ---------------------------------------------------------------------------
-export function buildCommand(commandType: SpeedQueenCommandType, params?: Record<string, unknown>): Record<string, unknown> {
-  switch (commandType) {
-    case 'remote_start':
-      return { type: 'MachineRemoteStartCommandRequest', ...params };
-    case 'remote_stop':
-      return { type: 'MachineRemoteStopCommandRequest', ...params };
-    case 'remote_vend':
-      return { type: 'MachineRemoteVendCommandRequest', ...params };
-    case 'select_cycle':
-      return { type: 'MachineSelectMachineCycleCommandRequest', ...params };
-    case 'start_dryer_with_time':
-      return { type: 'MachineStartDryerWithTimeCommandRequest', ...params };
-    case 'clear_error':
-      return { type: 'MachineClearErrorCommandRequest', ...params };
-    case 'set_out_of_order':
-      return { type: 'MachineProgramOutOfOrderCommandRequest', ...params };
-    case 'rapid_advance':
-      return { type: 'MachineRapidAdvanceToNextStepCommandRequest', ...params };
-    case 'clear_partial_vend':
-      return { type: 'MachineClearPartialVendCommandRequest', ...params };
-    default:
-      throw new Error(`Unknown command type: ${commandType}`);
+// Allowed parameter keys per command type (reject unknown keys)
+const COMMAND_PARAM_SCHEMAS: Record<SpeedQueenCommandType, string[]> = {
+  remote_start: ['cycleId'],
+  remote_stop: [],
+  remote_vend: ['amount'],
+  select_cycle: ['cycleId'],
+  start_dryer_with_time: ['minutes'],
+  clear_error: [],
+  set_out_of_order: ['outOfOrder'],
+  rapid_advance: [],
+  clear_partial_vend: [],
+};
+
+/**
+ * Validate and sanitize command params: reject unknown keys and strip `type`.
+ */
+function sanitizeCommandParams(
+  commandType: SpeedQueenCommandType,
+  params?: Record<string, unknown>,
+): Record<string, unknown> {
+  if (!params || Object.keys(params).length === 0) return {};
+
+  const allowedKeys = COMMAND_PARAM_SCHEMAS[commandType];
+  const sanitized: Record<string, unknown> = {};
+
+  for (const [key, value] of Object.entries(params)) {
+    if (key === 'type') continue; // never allow caller to set 'type'
+    if (!allowedKeys.includes(key)) {
+      throw new Error(`Unknown parameter '${key}' for command '${commandType}'`);
+    }
+    sanitized[key] = value;
   }
+
+  return sanitized;
+}
+
+export function buildCommand(commandType: SpeedQueenCommandType, params?: Record<string, unknown>): Record<string, unknown> {
+  const sanitized = sanitizeCommandParams(commandType, params);
+
+  const TYPE_MAP: Record<SpeedQueenCommandType, string> = {
+    remote_start: 'MachineRemoteStartCommandRequest',
+    remote_stop: 'MachineRemoteStopCommandRequest',
+    remote_vend: 'MachineRemoteVendCommandRequest',
+    select_cycle: 'MachineSelectMachineCycleCommandRequest',
+    start_dryer_with_time: 'MachineStartDryerWithTimeCommandRequest',
+    clear_error: 'MachineClearErrorCommandRequest',
+    set_out_of_order: 'MachineProgramOutOfOrderCommandRequest',
+    rapid_advance: 'MachineRapidAdvanceToNextStepCommandRequest',
+    clear_partial_vend: 'MachineClearPartialVendCommandRequest',
+  };
+
+  const requestType = TYPE_MAP[commandType];
+  if (!requestType) {
+    throw new Error(`Unknown command type: ${commandType}`);
+  }
+
+  // Spread sanitized params first, then override type to prevent bypass
+  return { ...sanitized, type: requestType };
 }
 
 // ---------------------------------------------------------------------------
@@ -961,6 +1040,7 @@ export {
   mapSQStatus,
   parseLocationConfig,
   buildMachineMappings,
+  COMMAND_PARAM_SCHEMAS,
   LOCATION_TO_AGENT,
   BRANDOA1_MACHINES,
   BRANDOA2_MACHINES,
