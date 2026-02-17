@@ -339,6 +339,97 @@ describe('Speed Queen Service', () => {
 
       await expect(client.getRealtimeToken()).rejects.toThrow('no token in response');
     });
+
+    // --- Paginated response unwrapping ---
+    it('unwraps paginated getMachines response with { data: [...], meta: {...} }', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: () => Promise.resolve({
+          data: [
+            { id: 'mac_1', status: 'AVAILABLE' },
+            { id: 'mac_2', status: 'IN_USE' },
+          ],
+          meta: { page: 1, totalPages: 1 },
+        }),
+      });
+
+      const result = await client.getMachines('loc_d23f6c');
+      expect(result).toHaveLength(2);
+      expect(result[0].id).toBe('mac_1');
+      expect(result[1].id).toBe('mac_2');
+    });
+
+    it('handles raw array getMachines response (no pagination wrapper)', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: () => Promise.resolve([{ id: 'mac_1', status: 'AVAILABLE' }]),
+      });
+
+      const result = await client.getMachines('loc_d23f6c');
+      expect(result).toHaveLength(1);
+      expect(result[0].id).toBe('mac_1');
+    });
+
+    it('unwraps paginated getLocations response', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: () => Promise.resolve({
+          data: [{ id: 'loc_1', name: 'Location 1' }],
+          meta: { page: 1 },
+        }),
+      });
+
+      const result = await client.getLocations();
+      expect(result).toHaveLength(1);
+      expect(result[0].id).toBe('loc_1');
+    });
+
+    it('unwraps paginated getMachineCycles response', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: () => Promise.resolve({
+          data: [
+            { id: 'cyc_1', name: 'Normal' },
+            { id: 'cyc_2', name: 'Heavy' },
+          ],
+          meta: { page: 1 },
+        }),
+      });
+
+      const result = await client.getMachineCycles('loc_d23f6c', 'mac_1');
+      expect(result).toHaveLength(2);
+      expect(result[0].name).toBe('Normal');
+    });
+
+    it('unwraps paginated getMachineErrors response', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: () => Promise.resolve({
+          data: [{ id: 'err_1', name: 'E01', type: 'critical', code: 1, machine: { id: 'mac_1' }, location: { id: 'loc_1' }, timestamp: '2026-01-01' }],
+          meta: {},
+        }),
+      });
+
+      const result = await client.getMachineErrors('loc_d23f6c', 'mac_1');
+      expect(result).toHaveLength(1);
+      expect(result[0].id).toBe('err_1');
+    });
+
+    it('returns empty array for unexpected response shape', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: () => Promise.resolve({ unexpected: 'shape' }),
+      });
+
+      const result = await client.getMachines('loc_d23f6c');
+      expect(result).toEqual([]);
+    });
   });
 
   // -------------------------------------------------------------------
@@ -440,6 +531,39 @@ describe('Speed Queen Service', () => {
       expect(b1Mappings).toHaveLength(8);
       const b2Mappings = service.getMachineMappingsForAgent('Brandoa2');
       expect(b2Mappings).toHaveLength(10);
+    });
+
+    it('getMachinesOnDemand works with paginated API response', async () => {
+      mockFetch.mockImplementation(async (url: string) => {
+        if (url.includes('/machines')) {
+          return {
+            ok: true,
+            headers: new Headers({ 'content-type': 'application/json' }),
+            json: () => Promise.resolve({
+              data: [
+                {
+                  id: 'mac_1096b5',
+                  status: { status: 'IN_USE', remainingSeconds: 600 },
+                },
+              ],
+              meta: { page: 1, totalPages: 1 },
+            }),
+          };
+        }
+        return {
+          ok: true,
+          headers: new Headers({ 'content-type': 'application/json' }),
+          json: () => Promise.resolve({}),
+        };
+      });
+
+      const service = new SpeedQueenService('test-key', 'loc_d23f6c', () => {});
+      await service.start();
+      const machines = await service.getMachinesOnDemand('Brandoa1');
+      expect(machines.length).toBeGreaterThan(0);
+      expect(machines[0].status).toBe('running');
+      expect(machines[0].remainingSeconds).toBe(600);
+      service.stop();
     });
 
     it('throws when sending command for unknown machine', async () => {
