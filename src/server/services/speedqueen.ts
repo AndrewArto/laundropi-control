@@ -235,9 +235,24 @@ export class SpeedQueenRestClient {
     throw lastError || new Error(`Speed Queen API request failed after ${MAX_RETRIES + 1} attempts`);
   }
 
+  /**
+   * Unwrap paginated API responses.
+   * Speed Queen API may return `{ data: [...], meta: {...} }` instead of a raw array.
+   */
+  private async requestList<T>(method: string, path: string): Promise<T[]> {
+    const result = await this.request<T[] | { data: T[]; meta?: unknown }>(method, path);
+    if (Array.isArray(result)) {
+      return result;
+    }
+    if (result && typeof result === 'object' && 'data' in result && Array.isArray(result.data)) {
+      return result.data;
+    }
+    return [];
+  }
+
   // Locations
   async getLocations(): Promise<SQLocation[]> {
-    return this.request<SQLocation[]>('GET', '/v1/locations');
+    return this.requestList<SQLocation>('GET', '/v1/locations');
   }
 
   async getLocation(locationId: string): Promise<SQLocation> {
@@ -246,7 +261,7 @@ export class SpeedQueenRestClient {
 
   // Machines
   async getMachines(locationId: string): Promise<SQMachine[]> {
-    return this.request<SQMachine[]>('GET', `/v1/locations/${locationId}/machines`);
+    return this.requestList<SQMachine>('GET', `/v1/locations/${locationId}/machines`);
   }
 
   async getMachine(locationId: string, machineId: string): Promise<SQMachine> {
@@ -255,7 +270,7 @@ export class SpeedQueenRestClient {
 
   // Cycles
   async getMachineCycles(locationId: string, machineId: string): Promise<SQCycle[]> {
-    return this.request<SQCycle[]>('GET', `/v1/locations/${locationId}/machines/${machineId}/cycles`);
+    return this.requestList<SQCycle>('GET', `/v1/locations/${locationId}/machines/${machineId}/cycles`);
   }
 
   // Commands
@@ -269,7 +284,7 @@ export class SpeedQueenRestClient {
 
   // Errors
   async getMachineErrors(locationId: string, machineId: string): Promise<SQError[]> {
-    return this.request<SQError[]>('GET', `/v1/locations/${locationId}/machines/${machineId}/errors`);
+    return this.requestList<SQError>('GET', `/v1/locations/${locationId}/machines/${machineId}/errors`);
   }
 
   // Realtime auth
