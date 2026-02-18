@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { X, Play, Square, AlertTriangle, Ban, Clock, DoorOpen, DoorClosed, Loader2, CheckCircle, XCircle, WashingMachine, Wind } from 'lucide-react';
+import { X, Play, Square, AlertTriangle, Ban, Clock, Lock, LockOpen, Loader2, CheckCircle, XCircle, WashingMachine, Wind } from 'lucide-react';
 import { LaundryMachine, SpeedQueenMachineCycle, SpeedQueenCommandType } from '../types';
 import { ApiService } from '../services/api';
 
@@ -156,11 +156,11 @@ export const MachineDetailPanel: React.FC<MachineDetailPanelProps> = ({
             <div className="grid grid-cols-2 gap-2 text-sm">
               <div className="flex items-center gap-2 text-slate-400">
                 {machine.isDoorOpen ? (
-                  <DoorOpen className="w-4 h-4 text-amber-400" />
+                  <LockOpen className="w-4 h-4 text-amber-400" />
                 ) : (
-                  <DoorClosed className="w-4 h-4 text-slate-500" />
+                  <Lock className="w-4 h-4 text-slate-500" />
                 )}
-                <span>Door: {machine.isDoorOpen ? 'Open' : 'Closed'}</span>
+                <span>Door: {machine.isDoorOpen ? 'Unlocked' : 'Locked'}</span>
               </div>
               {machine.selectedCycle && (
                 <div className="text-slate-400">
