@@ -2,6 +2,7 @@ import express = require('express');
 import type { SpeedQueenService } from '../services/speedqueen';
 import type { MockSpeedQueenService } from '../services/speedqueen-mock';
 import type { LaundryMachine, SpeedQueenCommandType } from '../../../types';
+import { listMachineEvents } from '../db';
 
 type SQService = SpeedQueenService | MockSpeedQueenService;
 
@@ -10,8 +11,10 @@ export interface SpeedQueenRouterDeps {
   getMachineStatusCache: () => Map<string, { machines: LaundryMachine[]; lastAnalyzed: number; source?: string }>;
   isKnownLaundry: (agentId: string) => boolean;
   requireAdminOrUser: express.RequestHandler;
+  requireUiAuth: express.RequestHandler;
   isSpeedQueenEnabled: () => boolean;
   getSpeedQueenLocations: () => string;
+  getSessionUser: (req: express.Request) => string | null;
 }
 
 export function createSpeedQueenRouter(deps: SpeedQueenRouterDeps): express.Router {
@@ -82,6 +85,15 @@ export function createSpeedQueenRouter(deps: SpeedQueenRouterDeps): express.Rout
     }
 
     try {
+      // Record pending command for initiator tracking
+      if ('recordPendingCommand' in service) {
+        const mapping = service.getMachineMapping(agentId, machineId);
+        if (mapping) {
+          const username = deps.getSessionUser(req) || 'unknown';
+          (service as SpeedQueenService).recordPendingCommand(mapping.speedqueenId, username, commandType);
+        }
+      }
+
       const result = await service.sendMachineCommand(agentId, machineId, commandType, params || {});
       console.log(`[speedqueen] Command ${commandType} sent to ${agentId}/${machineId}: ${JSON.stringify(result).slice(0, 200)}`);
       res.json({ ok: true, command: result });
@@ -129,6 +141,24 @@ export function createSpeedQueenRouter(deps: SpeedQueenRouterDeps): express.Rout
         ? deps.getSpeedQueenLocations().split(',').map((s: string) => s.trim())
         : [],
     });
+  });
+
+  // Machine events log
+  router.get('/machine-events', deps.requireUiAuth, (req, res) => {
+    const { agentId, machineId, from, to, limit } = req.query;
+    try {
+      const events = listMachineEvents({
+        agentId: agentId as string | undefined,
+        machineId: machineId as string | undefined,
+        from: from as string | undefined,
+        to: to as string | undefined,
+        limit: limit ? Number(limit) : undefined,
+      });
+      res.json(events);
+    } catch (err: any) {
+      console.error('[machine-events] Query failed:', err);
+      res.status(500).json({ error: 'Failed to fetch machine events' });
+    }
   });
 
   return router;

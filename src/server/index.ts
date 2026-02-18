@@ -1985,8 +1985,13 @@ app.use('/api', createSpeedQueenRouter({
   getMachineStatusCache: () => machineStatusCache,
   isKnownLaundry,
   requireAdminOrUser,
+  requireUiAuth,
   isSpeedQueenEnabled: () => SPEEDQUEEN_ENABLED,
   getSpeedQueenLocations: () => SPEEDQUEEN_LOCATIONS,
+  getSessionUser: (req) => {
+    const session = getSession(req);
+    return session?.sub || null;
+  },
 }));
 
 // --- SCHEDULES API ---

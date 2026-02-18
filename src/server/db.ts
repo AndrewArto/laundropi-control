@@ -132,6 +132,30 @@ export type CameraRow = {
   updatedAt: number;
 };
 
+export type MachineEventRow = {
+  id?: number;
+  timestamp: string;
+  locationId: string;
+  locationName: string | null;
+  machineId: string;
+  localId: string;
+  agentId: string;
+  machineType: string | null;
+  statusId: string;
+  previousStatusId: string | null;
+  remainingSeconds: number | null;
+  remainingVend: number | null;
+  isDoorOpen: number | null;
+  cycleId: string | null;
+  cycleName: string | null;
+  linkQuality: number | null;
+  receivedAt: string | null;
+  source: string;
+  initiator: string | null;
+  initiatorUser: string | null;
+  commandType: string | null;
+};
+
 export type DetergentType = 'blue' | 'green' | 'brown';
 
 export type InventoryRow = {
@@ -368,6 +392,35 @@ CREATE TABLE IF NOT EXISTS expenditure_audit (
 );
 
 CREATE INDEX IF NOT EXISTS expenditure_audit_import_idx ON expenditure_audit(importId, createdAt);
+
+CREATE TABLE IF NOT EXISTS machine_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  timestamp TEXT NOT NULL,
+  locationId TEXT NOT NULL,
+  locationName TEXT,
+  machineId TEXT NOT NULL,
+  localId TEXT NOT NULL,
+  agentId TEXT NOT NULL,
+  machineType TEXT,
+  statusId TEXT NOT NULL,
+  previousStatusId TEXT,
+  remainingSeconds INTEGER,
+  remainingVend INTEGER,
+  isDoorOpen INTEGER,
+  cycleId TEXT,
+  cycleName TEXT,
+  linkQuality INTEGER,
+  receivedAt TEXT,
+  source TEXT NOT NULL,
+  initiator TEXT,
+  initiatorUser TEXT,
+  commandType TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_machine_events_timestamp ON machine_events(timestamp);
+CREATE INDEX IF NOT EXISTS idx_machine_events_machine ON machine_events(machineId);
+CREATE INDEX IF NOT EXISTS idx_machine_events_status ON machine_events(statusId);
+CREATE INDEX IF NOT EXISTS idx_machine_events_agent ON machine_events(agentId);
 `);
 
 // Best-effort migration: add entries column if missing (ignore errors)
@@ -1695,5 +1748,105 @@ export function listExpenditureAudit(importId: string): ExpenditureAuditRow[] {
     details: row.details,
     user: row.user,
     createdAt: row.createdAt,
+  }));
+}
+
+// --- MACHINE EVENTS ---
+
+const insertMachineEventStmt = db.prepare(`
+  INSERT INTO machine_events(
+    timestamp, locationId, locationName, machineId, localId, agentId, machineType,
+    statusId, previousStatusId, remainingSeconds, remainingVend, isDoorOpen,
+    cycleId, cycleName, linkQuality, receivedAt, source, initiator, initiatorUser, commandType
+  )
+  VALUES (
+    @timestamp, @locationId, @locationName, @machineId, @localId, @agentId, @machineType,
+    @statusId, @previousStatusId, @remainingSeconds, @remainingVend, @isDoorOpen,
+    @cycleId, @cycleName, @linkQuality, @receivedAt, @source, @initiator, @initiatorUser, @commandType
+  )
+`);
+
+export function insertMachineEvent(row: MachineEventRow) {
+  insertMachineEventStmt.run({
+    timestamp: row.timestamp,
+    locationId: row.locationId,
+    locationName: row.locationName ?? null,
+    machineId: row.machineId,
+    localId: row.localId,
+    agentId: row.agentId,
+    machineType: row.machineType ?? null,
+    statusId: row.statusId,
+    previousStatusId: row.previousStatusId ?? null,
+    remainingSeconds: row.remainingSeconds ?? null,
+    remainingVend: row.remainingVend ?? null,
+    isDoorOpen: row.isDoorOpen ?? null,
+    cycleId: row.cycleId ?? null,
+    cycleName: row.cycleName ?? null,
+    linkQuality: row.linkQuality ?? null,
+    receivedAt: row.receivedAt ?? null,
+    source: row.source,
+    initiator: row.initiator ?? null,
+    initiatorUser: row.initiatorUser ?? null,
+    commandType: row.commandType ?? null,
+  });
+}
+
+export function listMachineEvents(options: {
+  agentId?: string;
+  machineId?: string;
+  from?: string;
+  to?: string;
+  limit?: number;
+} = {}): MachineEventRow[] {
+  const conditions: string[] = [];
+  const params: any[] = [];
+
+  if (options.agentId) {
+    conditions.push('agentId = ?');
+    params.push(options.agentId);
+  }
+  if (options.machineId) {
+    conditions.push('machineId = ?');
+    params.push(options.machineId);
+  }
+  if (options.from) {
+    conditions.push('timestamp >= ?');
+    params.push(options.from);
+  }
+  if (options.to) {
+    conditions.push('timestamp <= ?');
+    params.push(options.to);
+  }
+
+  const where = conditions.length ? ' WHERE ' + conditions.join(' AND ') : '';
+  const limit = Math.min(options.limit || 100, 1000);
+  params.push(limit);
+
+  const rows = db.prepare(
+    `SELECT * FROM machine_events${where} ORDER BY timestamp DESC LIMIT ?`
+  ).all(...params) as any[];
+
+  return rows.map(row => ({
+    id: row.id,
+    timestamp: row.timestamp,
+    locationId: row.locationId,
+    locationName: row.locationName,
+    machineId: row.machineId,
+    localId: row.localId,
+    agentId: row.agentId,
+    machineType: row.machineType,
+    statusId: row.statusId,
+    previousStatusId: row.previousStatusId,
+    remainingSeconds: row.remainingSeconds,
+    remainingVend: row.remainingVend,
+    isDoorOpen: row.isDoorOpen,
+    cycleId: row.cycleId,
+    cycleName: row.cycleName,
+    linkQuality: row.linkQuality,
+    receivedAt: row.receivedAt,
+    source: row.source,
+    initiator: row.initiator,
+    initiatorUser: row.initiatorUser,
+    commandType: row.commandType,
   }));
 }

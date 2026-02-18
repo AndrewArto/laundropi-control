@@ -12,6 +12,7 @@ import type {
   SpeedQueenMachineCycle,
   SpeedQueenCommandType,
 } from '../../../types';
+import { insertMachineEvent, type MachineEventRow } from '../db';
 
 // ---------------------------------------------------------------------------
 // Config
@@ -383,6 +384,7 @@ export function buildCommand(commandType: SpeedQueenCommandType, params?: Record
 // WebSocket Client (Centrifuge protocol over vanilla WebSocket)
 // ---------------------------------------------------------------------------
 export type MachineStatusCallback = (agentId: string, machines: LaundryMachine[]) => void;
+export type MachineStatusRawCallback = (agentId: string, machineId: string, statusData: SQMachineStatus, mapping: MachineMapping) => void;
 export type MachineErrorCallback = (agentId: string, error: SQError) => void;
 export type MachineEventCallback = (agentId: string, event: Record<string, unknown>) => void;
 
@@ -413,6 +415,7 @@ export class SpeedQueenWSClient {
 
   // Callbacks
   onMachineStatus: MachineStatusCallback | null = null;
+  onMachineStatusRaw: MachineStatusRawCallback | null = null;
   onMachineError: MachineErrorCallback | null = null;
   onMachineEvent: MachineEventCallback | null = null;
 
@@ -572,9 +575,13 @@ export class SpeedQueenWSClient {
       return;
     }
 
-    const machine = this.mapSQStatusToLaundryMachine(data as unknown as SQMachineStatus, mapping);
+    const statusData = data as unknown as SQMachineStatus;
+    const machine = this.mapSQStatusToLaundryMachine(statusData, mapping);
     if (this.onMachineStatus) {
       this.onMachineStatus(mapping.agentId, [machine]);
+    }
+    if (this.onMachineStatusRaw) {
+      this.onMachineStatusRaw(mapping.agentId, machineId, statusData, mapping);
     }
   }
 
@@ -658,8 +665,16 @@ export class SpeedQueenWSClient {
 // ---------------------------------------------------------------------------
 export type StatusUpdateCallback = (agentId: string, machines: LaundryMachine[]) => void;
 
+// Pending command info for initiator tracking
+export interface PendingCommandInfo {
+  user: string;
+  commandType: string;
+  timestamp: number;
+}
+
 const STATUS_CACHE_TTL_MS = 30_000;   // 30 s
 const WS_IDLE_TIMEOUT_MS  = 60_000;   // disconnect WS after 60 s idle
+const COMMAND_INITIATOR_WINDOW_MS = 120_000; // 2 min window for command→IN_USE attribution
 
 export class SpeedQueenService {
   private restClient: SpeedQueenRestClient;
@@ -684,6 +699,12 @@ export class SpeedQueenService {
   private lastUiActivity = 0;
   private wsIdleTimer: ReturnType<typeof setInterval> | null = null;
   private wsConnecting = false;
+
+  // Event logging: track previous statusId per machine (keyed by speedqueenId)
+  private previousStatusById = new Map<string, string>();
+
+  // Pending commands for initiator tracking (keyed by speedqueenId)
+  private pendingCommands = new Map<string, PendingCommandInfo>();
 
   constructor(
     apiKey: string,
@@ -763,6 +784,15 @@ export class SpeedQueenService {
 
     wsClient.onMachineStatus = (agentId, updatedMachines) => {
       this.mergeStatus(agentId, updatedMachines);
+    };
+
+    wsClient.onMachineStatusRaw = (_agentId, _machineId, statusData, mapping) => {
+      const currentStatusId = (statusData.statusId || 'UNKNOWN').toUpperCase();
+      const prevStatusId = this.previousStatusById.get(mapping.speedqueenId);
+      if (prevStatusId !== currentStatusId) {
+        this.logMachineEvent(mapping, currentStatusId, prevStatusId || null, statusData, 'ws_push');
+        this.previousStatusById.set(mapping.speedqueenId, currentStatusId);
+      }
     };
 
     wsClient.onMachineError = (agentId, error) => {
@@ -892,11 +922,12 @@ export class SpeedQueenService {
       }
 
       const status = sqm.status || sqm as unknown as SQMachineStatus;
+      const currentStatusId = (status.statusId || 'UNKNOWN').toUpperCase();
       const machine: LaundryMachine = {
         id: mapping.localId,
         label: mapping.label,
         type: mapping.type,
-        status: mapSQStatus(status.statusId || 'UNKNOWN'),
+        status: mapSQStatus(currentStatusId),
         lastUpdated: Date.now(),
         source: 'speedqueen',
         speedqueenId: mapping.speedqueenId,
@@ -908,6 +939,13 @@ export class SpeedQueenService {
         model: mapping.model,
       };
       machines.push(machine);
+
+      // Log event only when status changes
+      const prevStatusId = this.previousStatusById.get(mapping.speedqueenId);
+      if (prevStatusId !== currentStatusId) {
+        this.logMachineEvent(mapping, currentStatusId, prevStatusId || null, status, 'rest_poll');
+        this.previousStatusById.set(mapping.speedqueenId, currentStatusId);
+      }
     }
 
     if (machines.length > 0) {
@@ -931,6 +969,80 @@ export class SpeedQueenService {
     this.machinesByAgent.set(agentId, current);
     this.lastPollByAgent.set(agentId, Date.now());
     this.onStatusUpdate(agentId, current);
+  }
+
+  /** Log a machine status change event to the database. */
+  private logMachineEvent(
+    mapping: MachineMapping,
+    statusId: string,
+    previousStatusId: string | null,
+    status: SQMachineStatus,
+    source: 'rest_poll' | 'ws_push',
+  ): void {
+    // Determine initiator: check if a pending command exists for this machine
+    let initiator: string | null = null;
+    let initiatorUser: string | null = null;
+    let commandType: string | null = null;
+
+    if (statusId === 'IN_USE') {
+      const pending = this.pendingCommands.get(mapping.speedqueenId);
+      if (pending && (Date.now() - pending.timestamp) < COMMAND_INITIATOR_WINDOW_MS) {
+        initiator = 'admin';
+        initiatorUser = pending.user;
+        commandType = pending.commandType;
+        this.pendingCommands.delete(mapping.speedqueenId);
+      } else {
+        initiator = 'customer';
+      }
+    }
+
+    const event: MachineEventRow = {
+      timestamp: new Date().toISOString(),
+      locationId: mapping.locationId,
+      locationName: mapping.agentId,
+      machineId: mapping.speedqueenId,
+      localId: mapping.localId,
+      agentId: mapping.agentId,
+      machineType: mapping.type,
+      statusId,
+      previousStatusId,
+      remainingSeconds: status.remainingSeconds ?? null,
+      remainingVend: status.remainingVend ?? null,
+      isDoorOpen: status.isDoorOpen != null ? (status.isDoorOpen ? 1 : 0) : null,
+      cycleId: status.selectedCycle?.id ?? null,
+      cycleName: status.selectedCycle?.name ?? null,
+      linkQuality: null,
+      receivedAt: status.timestamp ? new Date(status.timestamp).toISOString() : null,
+      source,
+      initiator,
+      initiatorUser,
+      commandType,
+    };
+
+    try {
+      insertMachineEvent(event);
+    } catch (err) {
+      console.error('[speedqueen] Failed to log machine event:', err);
+    }
+  }
+
+  /** Record a pending command for initiator attribution. */
+  recordPendingCommand(speedqueenId: string, user: string, commandType: string): void {
+    this.pendingCommands.set(speedqueenId, {
+      user,
+      commandType,
+      timestamp: Date.now(),
+    });
+  }
+
+  /** Expose previous status map for testing. */
+  getPreviousStatusMap(): Map<string, string> {
+    return this.previousStatusById;
+  }
+
+  /** Expose pending commands map for testing. */
+  getPendingCommandsMap(): Map<string, PendingCommandInfo> {
+    return this.pendingCommands;
   }
 
   // Get cached machines for an agent (no REST call — use getMachinesOnDemand for fresh data)
@@ -1077,3 +1189,4 @@ export {
   WS_IDLE_TIMEOUT_MS,
 };
 export type { SQMachine, SQMachineStatus, SQCycle, SQError, SQCommandResponse, SQLocation };
+export { COMMAND_INITIATOR_WINDOW_MS };
