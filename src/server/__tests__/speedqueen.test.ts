@@ -535,6 +535,9 @@ describe('Speed Queen Service', () => {
 
     it('getMachinesOnDemand works with paginated API response', async () => {
       mockFetch.mockImplementation(async (url: string) => {
+        if (url.includes('/v1/realtime/auth')) {
+          return { ok: true, json: () => Promise.resolve({ token: 'test-token' }) };
+        }
         if (url.includes('/machines')) {
           return {
             ok: true,
@@ -582,6 +585,9 @@ describe('Speed Queen Service', () => {
 
     it('getMachinesOnDemand uses custom agent mapping for polling', async () => {
       mockFetch.mockImplementation(async (url: string) => {
+        if (url.includes('/v1/realtime/auth')) {
+          return { ok: true, json: () => Promise.resolve({ token: 'test-token' }) };
+        }
         if (url.includes('/machines')) {
           return {
             ok: true,
@@ -655,16 +661,20 @@ describe('Speed Queen Service', () => {
     });
 
     it('includes AbortSignal in fetch options', async () => {
-      mockFetch.mockResolvedValueOnce({
+      mockFetch.mockImplementation(async () => ({
         ok: true,
         headers: new Headers({ 'content-type': 'application/json' }),
         json: () => Promise.resolve([]),
-      });
+      }));
 
       await client.getLocations();
-      const callArgs = mockFetch.mock.calls[0];
-      expect(callArgs[1]).toHaveProperty('signal');
-      expect(callArgs[1].signal).toBeInstanceOf(AbortSignal);
+      // Find the call that is for getLocations (not a leaked call from prior tests)
+      const locationCall = mockFetch.mock.calls.find(
+        (c: any) => c[0].includes('/v1/locations'),
+      );
+      expect(locationCall).toBeDefined();
+      expect(locationCall![1]).toHaveProperty('signal');
+      expect(locationCall![1].signal).toBeInstanceOf(AbortSignal);
     });
   });
 
@@ -700,6 +710,9 @@ describe('Speed Queen Service', () => {
     it('deduplicates concurrent getMachinesOnDemand calls', async () => {
       let pollCount = 0;
       mockFetch.mockImplementation(async (url: string) => {
+        if (url.includes('/v1/realtime/auth')) {
+          return { ok: true, json: () => Promise.resolve({ token: 'test-token' }) };
+        }
         if (url.includes('/machines')) {
           pollCount++;
           // Simulate network delay

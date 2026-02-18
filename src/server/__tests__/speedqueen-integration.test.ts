@@ -114,6 +114,9 @@ describe('SQ Integration: REST poll pipeline (getMachines → pollLocation → L
   it('correctly maps real nested SQ API response through full pipeline', async () => {
     // Simulate exact SQ API response: paginated with nested status object
     mockFetch.mockImplementation(async (url: string) => {
+      if (url.includes('/v1/realtime/auth')) {
+        return { ok: true, json: () => Promise.resolve({ token: 'test-token' }) };
+      }
       if (url.includes('/machines')) {
         return {
           ok: true,
@@ -233,6 +236,9 @@ describe('SQ Integration: REST poll pipeline (getMachines → pollLocation → L
     const statuses = ['IN_USE', 'AVAILABLE', 'END_OF_CYCLE', 'ERROR', 'AVAILABLE', 'IN_USE', 'DIAGNOSTIC', 'OUT_OF_ORDER'];
 
     mockFetch.mockImplementation(async (url: string) => {
+      if (url.includes('/v1/realtime/auth')) {
+        return { ok: true, json: () => Promise.resolve({ token: 'test-token' }) };
+      }
       if (url.includes('/machines')) {
         return {
           ok: true,
@@ -290,6 +296,9 @@ describe('SQ Integration: REST poll pipeline (getMachines → pollLocation → L
   it('maps nested sqm.status.statusId correctly (not flat statusId)', async () => {
     // This is the critical test: the API returns status NESTED inside sqm.status
     mockFetch.mockImplementation(async (url: string) => {
+      if (url.includes('/v1/realtime/auth')) {
+        return { ok: true, json: () => Promise.resolve({ token: 'test-token' }) };
+      }
       if (url.includes('/machines')) {
         return {
           ok: true,
@@ -430,10 +439,12 @@ describe('SQ Integration: WebSocket status push pipeline', () => {
     const mappings = buildMachineMappings([{ locationId: 'loc_d23f6c', agentId: 'Brandoa1' }]);
     const wsClient = new SpeedQueenWSClient(restClient, ['loc_d23f6c'], mappings);
 
-    // Get the mock token for WS connection
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve({ token: 'jwt-test-token' }),
+    // Mock fetch to handle realtime auth (use mockImplementation to avoid race with leaked fetches)
+    mockFetch.mockImplementation(async (url: string) => {
+      if (url.includes('/v1/realtime/auth')) {
+        return { ok: true, json: () => Promise.resolve({ token: 'jwt-test-token' }) };
+      }
+      return { ok: true, headers: new Headers(), json: () => Promise.resolve({}) };
     });
 
     await wsClient.connect();
@@ -516,6 +527,9 @@ describe('SQ Integration: Edge cases', () => {
 
   it('extra unexpected fields in REST response do not break polling', async () => {
     mockFetch.mockImplementation(async (url: string) => {
+      if (url.includes('/v1/realtime/auth')) {
+        return { ok: true, json: () => Promise.resolve({ token: 'test-token' }) };
+      }
       if (url.includes('/machines')) {
         return {
           ok: true,
@@ -573,6 +587,9 @@ describe('SQ Integration: Edge cases', () => {
   it('REST response without nested status (flat statusId on machine) still works', async () => {
     // Some API versions might return status flat on the machine object
     mockFetch.mockImplementation(async (url: string) => {
+      if (url.includes('/v1/realtime/auth')) {
+        return { ok: true, json: () => Promise.resolve({ token: 'test-token' }) };
+      }
       if (url.includes('/machines')) {
         return {
           ok: true,

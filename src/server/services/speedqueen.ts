@@ -734,14 +734,17 @@ export class SpeedQueenService {
     this.started = true;
 
     console.log(`[speedqueen] Starting service for locations: ${this.locationIds.join(', ')}`);
-    console.log('[speedqueen] WebSocket will connect lazily when UI clients request machine data');
+    console.log('[speedqueen] Connecting WebSocket (always-on for event logging)...');
 
-    // Do NOT connect WebSocket or poll on startup.
-    // WebSocket connects on first notifyUiActivity().
-    // REST polls happen on-demand in getMachinesOnDemand().
+    // Connect WebSocket immediately for continuous event logging.
+    // REST polls run as fallback every POLL_FALLBACK_MS when WS is disconnected.
+    this.lastUiActivity = Date.now(); // prevent immediate idle disconnect
+    this.ensureWsConnected().catch(err => {
+      console.error('[speedqueen] Initial WS connect failed, will retry via fallback poll:', err);
+    });
 
-    // Start idle-check timer that disconnects WS after inactivity
-    this.wsIdleTimer = setInterval(() => this.checkWsIdle(), 15_000);
+    // Fallback: poll REST every 60s if WS is not connected
+    this.wsIdleTimer = setInterval(() => this.fallbackPollIfNeeded(), 60_000);
   }
 
   stop(): void {
@@ -853,11 +856,25 @@ export class SpeedQueenService {
   }
 
   private checkWsIdle(): void {
-    if (!this.wsClient) return;
-    const idle = Date.now() - this.lastUiActivity;
-    if (idle > WS_IDLE_TIMEOUT_MS) {
-      this.disconnectWs();
-    }
+    // Keep WS alive — no idle disconnect (always-on for event logging)
+  }
+
+  /** Fallback: if WS is down, poll REST + try to reconnect WS. */
+  private async fallbackPollIfNeeded(): Promise<void> {
+    if (!this.started) return;
+
+    // If WS is connected, no action needed
+    if (this.wsClient?.isConnected()) return;
+
+    // Poll all locations via REST as fallback
+    console.log('[speedqueen] WS not connected — fallback REST poll');
+    await this.pollAllLocations().catch(err => {
+      console.error('[speedqueen] Fallback poll failed:', err);
+    });
+
+    // Try to reconnect WS
+    this.lastUiActivity = Date.now();
+    this.ensureWsConnected().catch(() => {});
   }
 
   // ------------------------------------------------------------------
