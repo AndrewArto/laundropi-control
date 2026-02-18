@@ -92,9 +92,9 @@ export const InvoicingView: React.FC<InvoicingViewProps> = ({ readOnly = false }
       setLog([]);
 
       const ptLabel = paymentTypes.find(p => p.value === paymentType)?.label || String(paymentType);
-      addLog(`Stripe €${rev} (${pct}%) → Кэш €${data.cashRevenue} → ${data.numInvoices} фатур • ${ptLabel}`, 'info');
+      addLog(`Stripe €${rev} (${pct}%) → Cash €${data.cashRevenue} → ${data.numInvoices} invoices • ${ptLabel}`, 'info');
       if (data.remainder > 0) {
-        addLog(`Остаток €${data.remainder} (не хватает на ещё одну фатуру)`, 'dim');
+        addLog(`Remainder €${data.remainder} (not enough for another invoice)`, 'dim');
       }
     } catch (err: any) {
       addLog(err.message, 'error');
@@ -105,7 +105,7 @@ export const InvoicingView: React.FC<InvoicingViewProps> = ({ readOnly = false }
     if (!calculation || createdCount >= calculation.numInvoices) return false;
 
     const num = createdCount + 1;
-    addLog(`Создаю фатуру #${num}/${calculation.numInvoices}...`, 'dim');
+    addLog(`Creating invoice #${num}/${calculation.numInvoices}...`, 'dim');
 
     try {
       const res = await apiFetch('/api/invoicing/create', {
@@ -135,7 +135,7 @@ export const InvoicingView: React.FC<InvoicingViewProps> = ({ readOnly = false }
   const handleCreateNext = useCallback(async () => {
     const ok = await createOne();
     if (ok && calculation && createdCount + 1 >= calculation.numInvoices) {
-      addLog('Все фатуры выписаны!', 'success');
+      addLog('All invoices created!', 'success');
     }
   }, [createOne, calculation, createdCount, addLog]);
 
@@ -148,7 +148,7 @@ export const InvoicingView: React.FC<InvoicingViewProps> = ({ readOnly = false }
     while (count < calculation.numInvoices && !shouldStop.current) {
       const ok = await createOne();
       if (!ok) {
-        addLog('Остановлено из-за ошибки', 'error');
+        addLog('Stopped due to error', 'error');
         break;
       }
       count++;
@@ -157,13 +157,13 @@ export const InvoicingView: React.FC<InvoicingViewProps> = ({ readOnly = false }
 
     setRunning(false);
     if (count >= calculation.numInvoices) {
-      addLog('Все фатуры выписаны!', 'success');
+      addLog('All invoices created!', 'success');
     }
   }, [calculation, createdCount, createOne, addLog]);
 
   const handleStop = useCallback(() => {
     shouldStop.current = true;
-    addLog('Останавливаю...', 'info');
+    addLog('Stopping...', 'info');
   }, [addLog]);
 
   const totalInvoices = calculation?.numInvoices ?? 0;
@@ -178,16 +178,16 @@ export const InvoicingView: React.FC<InvoicingViewProps> = ({ readOnly = false }
         connected ? 'bg-emerald-900/40 text-emerald-400' :
         'bg-red-900/40 text-red-400'
       }`}>
-        {connected === null && '⏳ Проверяю подключение к Fact.pt...'}
-        {connected === true && `✓ Fact.pt подключен • ${totalDocuments} документов`}
-        {connected === false && '✗ Fact.pt не подключен — проверь FACTPT_API_KEY в .env'}
+        {connected === null && '⏳ Checking Fact.pt connection...'}
+        {connected === true && `✓ Fact.pt connected • ${totalDocuments} documents`}
+        {connected === false && '✗ Fact.pt not connected — check FACTPT_API_KEY in .env'}
       </div>
 
       {/* Calculator */}
       <div className="bg-slate-800/50 rounded-xl p-4 space-y-3">
         <h3 className="text-sm font-semibold text-amber-400 flex items-center gap-2">
           <FileText className="w-4 h-4" />
-          Расчёт фатур
+          Invoice Calculator
         </h3>
 
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -203,7 +203,7 @@ export const InvoicingView: React.FC<InvoicingViewProps> = ({ readOnly = false }
             />
           </div>
           <div>
-            <label className="block text-xs text-slate-500 mb-1">Доля Stripe (%)</label>
+            <label className="block text-xs text-slate-500 mb-1">Stripe Share (%)</label>
             <input
               type="number"
               value={stripePercent}
@@ -214,7 +214,7 @@ export const InvoicingView: React.FC<InvoicingViewProps> = ({ readOnly = false }
             />
           </div>
           <div>
-            <label className="block text-xs text-slate-500 mb-1">Дата</label>
+            <label className="block text-xs text-slate-500 mb-1">Date</label>
             <input
               type="date"
               value={invoiceDate}
@@ -223,7 +223,7 @@ export const InvoicingView: React.FC<InvoicingViewProps> = ({ readOnly = false }
             />
           </div>
           <div>
-            <label className="block text-xs text-slate-500 mb-1">Тип оплаты</label>
+            <label className="block text-xs text-slate-500 mb-1">Payment Type</label>
             <select
               value={paymentType}
               onChange={e => setPaymentType(Number(e.target.value))}
@@ -241,17 +241,17 @@ export const InvoicingView: React.FC<InvoicingViewProps> = ({ readOnly = false }
           disabled={!stripeRevenue || !stripePercent || !connected || readOnly}
           className="px-4 py-2 bg-amber-600 hover:bg-amber-500 disabled:bg-slate-700 disabled:text-slate-500 text-white text-sm font-medium rounded-lg transition-colors"
         >
-          Посчитать
+          Calculate
         </button>
 
         {/* Stats */}
         {calculation && (
           <div className="grid grid-cols-4 gap-2 pt-2">
             {[
-              { label: 'Общая выручка', value: `€${calculation.totalRevenue.toLocaleString('pt-PT')}` },
-              { label: 'Кэш', value: `€${calculation.cashRevenue.toLocaleString('pt-PT')}` },
-              { label: 'Фатур', value: String(calculation.numInvoices) },
-              { label: 'Остаток', value: `€${calculation.remainder.toLocaleString('pt-PT')}` },
+              { label: 'Total Revenue', value: `€${calculation.totalRevenue.toLocaleString('pt-PT')}` },
+              { label: 'Cash', value: `€${calculation.cashRevenue.toLocaleString('pt-PT')}` },
+              { label: 'Invoices', value: String(calculation.numInvoices) },
+              { label: 'Remainder', value: `€${calculation.remainder.toLocaleString('pt-PT')}` },
             ].map(s => (
               <div key={s.label} className="bg-slate-900 rounded-lg p-3 text-center">
                 <div className="text-lg font-bold text-amber-400">{s.value}</div>
@@ -265,27 +265,27 @@ export const InvoicingView: React.FC<InvoicingViewProps> = ({ readOnly = false }
       {/* Invoice composition */}
       <details className="bg-slate-800/50 rounded-xl">
         <summary className="px-4 py-3 text-sm font-semibold text-slate-400 cursor-pointer hover:text-slate-200">
-          📋 Состав фатуры (€99,94)
+          📋 Invoice Composition (€99.94)
         </summary>
         <div className="px-4 pb-4">
           <table className="w-full text-xs">
             <thead>
               <tr className="text-slate-500 border-b border-slate-700">
                 <th className="text-left py-1">Ref</th>
-                <th className="text-left">Описание</th>
-                <th className="text-right">Цена</th>
-                <th className="text-right">Кол</th>
-                <th className="text-right">Сумма</th>
+                <th className="text-left">Description</th>
+                <th className="text-right">Price</th>
+                <th className="text-right">Qty</th>
+                <th className="text-right">Amount</th>
               </tr>
             </thead>
             <tbody className="text-slate-300">
-              <tr><td>LAV9KG</td><td>Стирка 9 кг</td><td className="text-right">€3,25</td><td className="text-right">5</td><td className="text-right">€16,25</td></tr>
-              <tr><td>LAV11KG</td><td>Стирка 11 кг</td><td className="text-right">€4,88</td><td className="text-right">4</td><td className="text-right">€19,52</td></tr>
-              <tr><td>LAV15KG</td><td>Стирка 15 кг</td><td className="text-right">€5,69</td><td className="text-right">3</td><td className="text-right">€17,07</td></tr>
-              <tr><td>LAV18KG</td><td>Стирка 18 кг</td><td className="text-right">€7,32</td><td className="text-right">2</td><td className="text-right">€14,64</td></tr>
-              <tr><td>SEC15KG</td><td>Сушка 15 кг</td><td className="text-right">€0,81</td><td className="text-right">17</td><td className="text-right">€13,77</td></tr>
+              <tr><td>LAV9KG</td><td>Wash 9 kg</td><td className="text-right">€3,25</td><td className="text-right">5</td><td className="text-right">€16,25</td></tr>
+              <tr><td>LAV11KG</td><td>Wash 11 kg</td><td className="text-right">€4,88</td><td className="text-right">4</td><td className="text-right">€19,52</td></tr>
+              <tr><td>LAV15KG</td><td>Wash 15 kg</td><td className="text-right">€5,69</td><td className="text-right">3</td><td className="text-right">€17,07</td></tr>
+              <tr><td>LAV18KG</td><td>Wash 18 kg</td><td className="text-right">€7,32</td><td className="text-right">2</td><td className="text-right">€14,64</td></tr>
+              <tr><td>SEC15KG</td><td>Dry 15 kg</td><td className="text-right">€0,81</td><td className="text-right">17</td><td className="text-right">€13,77</td></tr>
               <tr className="font-semibold border-t border-slate-700">
-                <td colSpan={4}>Итого (без IVA / с IVA 23%)</td>
+                <td colSpan={4}>Total (excl. VAT / incl. 23% VAT)</td>
                 <td className="text-right">€81,25 / €99,94</td>
               </tr>
             </tbody>
@@ -297,7 +297,7 @@ export const InvoicingView: React.FC<InvoicingViewProps> = ({ readOnly = false }
       {calculation && calculation.numInvoices > 0 && (
         <div className="bg-slate-800/50 rounded-xl p-4 space-y-3">
           <div className="flex items-center justify-between">
-            <h3 className="text-sm font-semibold text-emerald-400">Генерация</h3>
+            <h3 className="text-sm font-semibold text-emerald-400">Generation</h3>
             <span className="text-xs text-slate-500">
               {createdCount} / {totalInvoices}
             </span>
@@ -320,14 +320,14 @@ export const InvoicingView: React.FC<InvoicingViewProps> = ({ readOnly = false }
                   className="flex items-center gap-1.5 px-3 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium rounded-lg transition-colors"
                 >
                   <Play className="w-3.5 h-3.5" />
-                  Следующая
+                  Next
                 </button>
                 <button
                   onClick={handleCreateAll}
                   className="flex items-center gap-1.5 px-3 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium rounded-lg transition-colors"
                 >
                   <FastForward className="w-3.5 h-3.5" />
-                  Все оставшиеся
+                  Create All
                 </button>
               </>
             )}
@@ -337,20 +337,20 @@ export const InvoicingView: React.FC<InvoicingViewProps> = ({ readOnly = false }
                 className="flex items-center gap-1.5 px-3 py-2 bg-red-600 hover:bg-red-500 text-white text-sm font-medium rounded-lg transition-colors"
               >
                 <Square className="w-3.5 h-3.5" />
-                Стоп
+                Stop
               </button>
             )}
             {allDone && (
               <span className="flex items-center gap-1.5 text-emerald-400 text-sm font-medium">
                 <CheckCircle className="w-4 h-4" />
-                Все фатуры выписаны
+                All invoices created
               </span>
             )}
           </div>
 
           {/* Log */}
           <div className="bg-slate-900 rounded-lg p-3 max-h-64 overflow-y-auto font-mono text-xs space-y-0.5">
-            {log.length === 0 && <div className="text-slate-600">Ожидание...</div>}
+            {log.length === 0 && <div className="text-slate-600">Waiting...</div>}
             {log.map((entry, i) => (
               <div key={i} className={`flex gap-2 ${
                 entry.type === 'success' ? 'text-emerald-400' :

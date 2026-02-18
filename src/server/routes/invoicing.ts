@@ -24,7 +24,7 @@ const INVOICE_ITEMS = [
 const CLIENT_ID = 5409421; // Consumidor final
 
 const PAYMENT_TYPES = [
-  { value: 0,  label: 'Numerário (наличные)' },
+  { value: 0,  label: 'Numerário (cash)' },
   { value: 1,  label: 'Cartão de débito' },
   { value: 2,  label: 'Cartão de crédito' },
   { value: 3,  label: 'Cheque bancário' },

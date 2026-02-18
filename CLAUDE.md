@@ -63,3 +63,25 @@ scp public/washcontrol-logo.svg 3.249.38.131:/var/www/washcontrol/assets/
 # Edit index.html directly on server
 ssh 3.249.38.131 "nano /var/www/washcontrol/index.html"
 ```
+
+## Speed Queen API Response Format (IMPORTANT)
+
+The Speed Queen Insights API returns machine status with field `statusId` (NOT `status`).
+
+**Real API response for `sqm.status` object:**
+```json
+{
+  "statusId": "AVAILABLE",
+  "displayStatus": "",
+  "linkQualityIndicator": 44,
+  "remainingSeconds": 600,
+  "remainingVend": 100,
+  "isDoorOpen": true,
+  "selectedCycle": {"id": "cyc_medium", "name": "MEDIUM"},
+  "selectedModifiers": [{"id": "mod_none", "name": "NONE"}]
+}
+```
+
+Known `statusId` values: `AVAILABLE`, `IN_USE`, `END_OF_CYCLE`, `DIAGNOSTIC`, `OUT_OF_ORDER`, `ERROR`
+
+**Testing requirement:** All SQ-related tests MUST use real API field names (especially `statusId`). Add integration-style tests that verify the full pipeline: actual SQ API response shape → mapSQStatus → our internal status types. Test both REST poll and WebSocket push paths.
