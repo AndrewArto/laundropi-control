@@ -179,54 +179,67 @@ describe('Speed Queen Service', () => {
   // Command building
   // -------------------------------------------------------------------
   describe('buildCommand', () => {
-    it('builds remote_start command', () => {
-      const cmd = buildCommand('remote_start', { cycleId: 'cyc_high' });
-      expect(cmd.type).toBe('MachineRemoteStartCommandRequest');
-      expect(cmd.cycleId).toBe('cyc_high');
+    it('builds remote_start command with correct SQ API format', () => {
+      const cmd = buildCommand('remote_start');
+      expect(cmd.command).toBe('START');
+      expect(cmd).not.toHaveProperty('type');
+      expect(cmd).not.toHaveProperty('params');
     });
 
     it('builds remote_stop command', () => {
       const cmd = buildCommand('remote_stop');
-      expect(cmd.type).toBe('MachineRemoteStopCommandRequest');
+      expect(cmd.command).toBe('STOP');
+      expect(cmd).not.toHaveProperty('type');
+    });
+
+    it('builds start_dryer_with_time command with params', () => {
+      const cmd = buildCommand('start_dryer_with_time', { minutes: 20 });
+      expect(cmd.command).toBe('START_DRYER_WITH_TIME');
+      expect(cmd.params).toEqual({ minutes: 20 });
+    });
+
+    it('builds remote_vend command with vendAmount param', () => {
+      const cmd = buildCommand('remote_vend', { vendAmount: 350 });
+      expect(cmd.command).toBe('REMOTE_VEND');
+      expect(cmd.params).toEqual({ vendAmount: 350 });
     });
 
     it('builds clear_error command', () => {
       const cmd = buildCommand('clear_error');
-      expect(cmd.type).toBe('MachineClearErrorCommandRequest');
+      expect(cmd.command).toBe('CLEAR_ERROR');
     });
 
     it('builds set_out_of_order command', () => {
-      const cmd = buildCommand('set_out_of_order');
-      expect(cmd.type).toBe('MachineProgramOutOfOrderCommandRequest');
+      const cmd = buildCommand('set_out_of_order', { outOfOrder: true });
+      expect(cmd.command).toBe('PROGRAM_OUT_OF_ORDER');
+      expect(cmd.params).toEqual({ outOfOrder: true });
+    });
+
+    it('builds rapid_advance command', () => {
+      const cmd = buildCommand('rapid_advance');
+      expect(cmd.command).toBe('RAPID_ADVANCE_TO_NEXT_STEP');
+    });
+
+    it('builds clear_partial_vend command', () => {
+      const cmd = buildCommand('clear_partial_vend');
+      expect(cmd.command).toBe('CLEAR_PARTIAL_VEND');
     });
 
     it('throws for unknown command type', () => {
       expect(() => buildCommand('invalid' as any)).toThrow('Unknown command type');
     });
 
-    // --- Coverage Gap 1: params.type override bypass ---
-    it('prevents params.type from overriding validated command type', () => {
-      const cmd = buildCommand('remote_start', { cycleId: 'cyc_1', type: 'MaliciousRequest' } as any);
-      // type must always be the whitelisted value, not the caller's override
-      expect(cmd.type).toBe('MachineRemoteStartCommandRequest');
-      expect(cmd.cycleId).toBe('cyc_1');
-    });
-
+    // params.type is silently stripped (does not end up in output)
     it('ignores params.type silently (does not throw)', () => {
       const cmd = buildCommand('remote_stop', { type: 'Evil' } as any);
-      expect(cmd.type).toBe('MachineRemoteStopCommandRequest');
+      expect(cmd.command).toBe('STOP');
+      expect(cmd).not.toHaveProperty('type');
     });
 
     // --- Coverage Gap 2: Malformed/unknown command params rejection ---
     it('rejects unknown parameter keys', () => {
       expect(() => buildCommand('remote_start', { malicious: true } as any))
         .toThrow("Unknown parameter 'malicious' for command 'remote_start'");
-    });
-
-    it('accepts valid parameters for remote_start', () => {
-      const cmd = buildCommand('remote_start', { cycleId: 'cyc_1' });
-      expect(cmd.cycleId).toBe('cyc_1');
-      expect(cmd.type).toBe('MachineRemoteStartCommandRequest');
     });
 
     it('rejects parameters for commands that take none', () => {
@@ -236,13 +249,23 @@ describe('Speed Queen Service', () => {
 
     it('COMMAND_PARAM_SCHEMAS covers all command types', () => {
       const commandTypes = [
-        'remote_start', 'remote_stop', 'remote_vend', 'select_cycle',
+        'remote_start', 'remote_stop', 'remote_vend',
         'start_dryer_with_time', 'clear_error', 'set_out_of_order',
         'rapid_advance', 'clear_partial_vend',
       ];
       for (const ct of commandTypes) {
         expect(COMMAND_PARAM_SCHEMAS).toHaveProperty(ct);
       }
+    });
+
+    it('omits params key when command has no parameters', () => {
+      const cmd = buildCommand('remote_start');
+      expect(Object.keys(cmd)).toEqual(['command']);
+    });
+
+    it('includes params key only when command has parameters', () => {
+      const cmd = buildCommand('start_dryer_with_time', { minutes: 15 });
+      expect(Object.keys(cmd).sort()).toEqual(['command', 'params']);
     });
   });
 
@@ -631,6 +654,9 @@ describe('Speed Queen Service', () => {
     const client = new SpeedQueenRestClient('test-api-key');
 
     it('retries on 5xx and eventually succeeds', async () => {
+      // Wait briefly for any leaked async calls from previous tests to settle
+      await new Promise(r => setTimeout(r, 200));
+      mockFetch.mockReset();
       let calls = 0;
       mockFetch.mockImplementation(async () => {
         calls++;

@@ -287,7 +287,6 @@ export type SpeedQueenCommandType =
   | 'remote_start'
   | 'remote_stop'
   | 'remote_vend'
-  | 'select_cycle'
   | 'start_dryer_with_time'
   | 'clear_error'
   | 'set_out_of_order'

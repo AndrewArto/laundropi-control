@@ -76,7 +76,7 @@ export function createSpeedQueenRouter(deps: SpeedQueenRouterDeps): express.Rout
     }
 
     const validCommands: SpeedQueenCommandType[] = [
-      'remote_start', 'remote_stop', 'remote_vend', 'select_cycle',
+      'remote_start', 'remote_stop', 'remote_vend',
       'start_dryer_with_time', 'clear_error', 'set_out_of_order',
       'rapid_advance', 'clear_partial_vend',
     ];

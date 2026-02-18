@@ -170,9 +170,11 @@ export const MachineDetailPanel: React.FC<MachineDetailPanelProps> = ({
                   Cycle: <span className="text-slate-200">{machine.selectedCycle.name}</span>
                 </div>
               )}
-              {machine.remainingVend !== undefined && machine.remainingVend > 0 && (
+              {machine.remainingVend !== undefined && machine.remainingVend !== null && (
                 <div className="text-slate-400">
-                  Cycle price: €<span className="text-slate-200">{(machine.remainingVend / 100).toFixed(2)}</span>
+                  Cycle price: {machine.remainingVend > 0
+                    ? <span className="text-slate-200">€{(machine.remainingVend / 100).toFixed(2)}</span>
+                    : <span className="text-slate-200">Free</span>}
                 </div>
               )}
               {machine.speedqueenId && (

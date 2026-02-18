@@ -322,10 +322,9 @@ export class SpeedQueenRestClient {
 // ---------------------------------------------------------------------------
 // Allowed parameter keys per command type (reject unknown keys)
 const COMMAND_PARAM_SCHEMAS: Record<SpeedQueenCommandType, string[]> = {
-  remote_start: ['cycleId'],
+  remote_start: [],
   remote_stop: [],
-  remote_vend: ['amount'],
-  select_cycle: ['cycleId'],
+  remote_vend: ['vendAmount'],
   start_dryer_with_time: ['minutes'],
   clear_error: [],
   set_out_of_order: ['outOfOrder'],
@@ -359,25 +358,28 @@ function sanitizeCommandParams(
 export function buildCommand(commandType: SpeedQueenCommandType, params?: Record<string, unknown>): Record<string, unknown> {
   const sanitized = sanitizeCommandParams(commandType, params);
 
-  const TYPE_MAP: Record<SpeedQueenCommandType, string> = {
-    remote_start: 'MachineRemoteStartCommandRequest',
-    remote_stop: 'MachineRemoteStopCommandRequest',
-    remote_vend: 'MachineRemoteVendCommandRequest',
-    select_cycle: 'MachineSelectMachineCycleCommandRequest',
-    start_dryer_with_time: 'MachineStartDryerWithTimeCommandRequest',
-    clear_error: 'MachineClearErrorCommandRequest',
-    set_out_of_order: 'MachineProgramOutOfOrderCommandRequest',
-    rapid_advance: 'MachineRapidAdvanceToNextStepCommandRequest',
-    clear_partial_vend: 'MachineClearPartialVendCommandRequest',
+  // Map our internal command types to SQ API UPPERCASE command strings
+  const COMMAND_MAP: Record<SpeedQueenCommandType, string> = {
+    remote_start: 'START',
+    remote_stop: 'STOP',
+    remote_vend: 'REMOTE_VEND',
+    start_dryer_with_time: 'START_DRYER_WITH_TIME',
+    clear_error: 'CLEAR_ERROR',
+    set_out_of_order: 'PROGRAM_OUT_OF_ORDER',
+    rapid_advance: 'RAPID_ADVANCE_TO_NEXT_STEP',
+    clear_partial_vend: 'CLEAR_PARTIAL_VEND',
   };
 
-  const requestType = TYPE_MAP[commandType];
-  if (!requestType) {
+  const sqCommand = COMMAND_MAP[commandType];
+  if (!sqCommand) {
     throw new Error(`Unknown command type: ${commandType}`);
   }
 
-  // Spread sanitized params first, then override type to prevent bypass
-  return { ...sanitized, type: requestType };
+  // SQ API format: {command: "SQ_COMMAND", params: {...}} or {command: "SQ_COMMAND"} if no params
+  if (Object.keys(sanitized).length > 0) {
+    return { command: sqCommand, params: sanitized };
+  }
+  return { command: sqCommand };
 }
 
 // ---------------------------------------------------------------------------

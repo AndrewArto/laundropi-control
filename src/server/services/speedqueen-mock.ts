@@ -353,16 +353,6 @@ export class MockSpeedQueenService {
         }
         state.remainingSeconds = 0;
         break;
-      case 'select_cycle': {
-        const selId = params?.cycleId as string | undefined;
-        const allCycles = MOCK_CYCLES[state.mapping.model] || [];
-        const sel = selId ? allCycles.find(c => c.id === selId) : null;
-        if (sel) {
-          state.selectedCycle = { id: sel.id, name: sel.name };
-          state.remainingVend = sel.vendPrice ?? 0;
-        }
-        break;
-      }
       // Other commands: just acknowledge
     }
 
