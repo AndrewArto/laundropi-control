@@ -24,6 +24,8 @@ vi.mock('ws', () => {
 
 import {
   mapSQStatus,
+  translateCycleName,
+  CYCLE_NAME_TRANSLATIONS,
   parseLocationConfig,
   buildMachineMappings,
   SpeedQueenRestClient,
@@ -77,6 +79,40 @@ describe('Speed Queen Service', () => {
     it('is case-insensitive', () => {
       expect(mapSQStatus('available')).toBe('idle');
       expect(mapSQStatus('in_use')).toBe('running');
+    });
+  });
+
+  // -------------------------------------------------------------------
+  // Cycle name translation
+  // -------------------------------------------------------------------
+  describe('translateCycleName', () => {
+    it('translates Russian cycle names to English', () => {
+      expect(translateCycleName('Обычная')).toBe('Normal');
+      expect(translateCycleName('Цветное')).toBe('Colors');
+      expect(translateCycleName('Белое')).toBe('Whites');
+      expect(translateCycleName('Деликатная')).toBe('Delicate');
+      expect(translateCycleName('Горячая стирка')).toBe('Hot Wash');
+      expect(translateCycleName('Сполоснуть машину')).toBe('Machine Rinse');
+      expect(translateCycleName('Скоростн. отжим')).toBe('Speed Spin');
+    });
+
+    it('translates Portuguese cycle names to English', () => {
+      expect(translateCycleName('Cores')).toBe('Colors');
+      expect(translateCycleName('Lã')).toBe('Wool');
+      expect(translateCycleName('Enxaguar a máquina')).toBe('Machine Rinse');
+    });
+
+    it('passes through English cycle names unchanged', () => {
+      expect(translateCycleName('Normal')).toBe('Normal');
+      expect(translateCycleName('HIGH')).toBe('HIGH');
+      expect(translateCycleName('LOW')).toBe('LOW');
+      expect(translateCycleName('MEDIUM')).toBe('MEDIUM');
+      expect(translateCycleName('DELICATE')).toBe('DELICATE');
+      expect(translateCycleName('NO_HEAT')).toBe('NO_HEAT');
+    });
+
+    it('passes through unknown cycle names unchanged', () => {
+      expect(translateCycleName('SomeUnknownCycle')).toBe('SomeUnknownCycle');
     });
   });
 
@@ -485,6 +521,44 @@ describe('Speed Queen Service', () => {
       expect(result.isDoorOpen).toBe(false);
       expect(result.selectedCycle?.name).toBe('HIGH');
       expect(result.model).toBe('SY80U');
+    });
+
+    it('translates Russian cycle names in mapSQStatusToLaundryMachine', () => {
+      const restClient = new SpeedQueenRestClient('test-key');
+      const mappings = buildMachineMappings([{ locationId: 'loc_d23f6c', agentId: 'Brandoa1' }]);
+      const wsClient = new SpeedQueenWSClient(restClient, ['loc_d23f6c'], mappings);
+
+      const sqStatus = {
+        id: 'mac_1096b5',
+        statusId: 'IN_USE',
+        remainingSeconds: 900,
+        remainingVend: 0,
+        isDoorOpen: false,
+        selectedCycle: { id: 'cyc_normal', name: 'Обычная' },
+        selectedModifier: null,
+      };
+
+      const result = wsClient.mapSQStatusToLaundryMachine(sqStatus, mappings[0]);
+      expect(result.selectedCycle?.name).toBe('Normal');
+    });
+
+    it('translates Portuguese cycle names in mapSQStatusToLaundryMachine', () => {
+      const restClient = new SpeedQueenRestClient('test-key');
+      const mappings = buildMachineMappings([{ locationId: 'loc_7b105b', agentId: 'Brandoa2' }]);
+      const wsClient = new SpeedQueenWSClient(restClient, ['loc_7b105b'], mappings);
+
+      const sqStatus = {
+        id: 'mac_e1f20d',
+        statusId: 'IN_USE',
+        remainingSeconds: 600,
+        remainingVend: 0,
+        isDoorOpen: false,
+        selectedCycle: { id: 'cyc_cores', name: 'Cores' },
+        selectedModifier: null,
+      };
+
+      const result = wsClient.mapSQStatusToLaundryMachine(sqStatus, mappings.find(m => m.speedqueenId === 'mac_e1f20d')!);
+      expect(result.selectedCycle?.name).toBe('Colors');
     });
 
     it('handles AVAILABLE status mapping', () => {

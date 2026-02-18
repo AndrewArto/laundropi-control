@@ -149,6 +149,28 @@ function mapSQStatus(sqStatus: string): MachineStatus {
 }
 
 // ---------------------------------------------------------------------------
+// Cycle name translation: SQ API returns localized names (Russian, Portuguese)
+// ---------------------------------------------------------------------------
+const CYCLE_NAME_TRANSLATIONS: Record<string, string> = {
+  // Russian (Brandoa1 washers)
+  "Обычная": "Normal",
+  "Цветное": "Colors",
+  "Белое": "Whites",
+  "Деликатная": "Delicate",
+  "Горячая стирка": "Hot Wash",
+  "Сполоснуть машину": "Machine Rinse",
+  "Скоростн. отжим": "Speed Spin",
+  // Portuguese (Brandoa2 washers)
+  "Cores": "Colors",
+  "Lã": "Wool",
+  "Enxaguar a máquina": "Machine Rinse",
+};
+
+function translateCycleName(name: string): string {
+  return CYCLE_NAME_TRANSLATIONS[name] || name;
+}
+
+// ---------------------------------------------------------------------------
 // Rate limiter
 // ---------------------------------------------------------------------------
 let lastRequestTime = 0;
@@ -620,7 +642,9 @@ export class SpeedQueenWSClient {
       remainingSeconds: sq.remainingSeconds ?? 0,
       remainingVend: sq.remainingVend ?? 0,
       isDoorOpen: sq.isDoorOpen ?? false,
-      selectedCycle: sq.selectedCycle || null,
+      selectedCycle: sq.selectedCycle
+        ? { ...sq.selectedCycle, name: translateCycleName(sq.selectedCycle.name) }
+        : null,
       selectedModifier: sq.selectedModifier || null,
       model: mapping.model,
     };
@@ -953,7 +977,9 @@ export class SpeedQueenService {
         remainingSeconds: status.remainingSeconds ?? 0,
         remainingVend: status.remainingVend ?? 0,
         isDoorOpen: status.isDoorOpen ?? false,
-        selectedCycle: status.selectedCycle || null,
+        selectedCycle: status.selectedCycle
+          ? { ...status.selectedCycle, name: translateCycleName(status.selectedCycle.name) }
+          : null,
         selectedModifier: status.selectedModifier || null,
         model: mapping.model,
       };
@@ -1029,7 +1055,7 @@ export class SpeedQueenService {
       remainingVend: status.remainingVend ?? null,
       isDoorOpen: status.isDoorOpen != null ? (status.isDoorOpen ? 1 : 0) : null,
       cycleId: status.selectedCycle?.id ?? null,
-      cycleName: status.selectedCycle?.name ?? null,
+      cycleName: status.selectedCycle?.name ? translateCycleName(status.selectedCycle.name) : null,
       linkQuality: null,
       receivedAt: status.timestamp ? new Date(status.timestamp).toISOString() : null,
       source,
@@ -1196,6 +1222,8 @@ function buildMachineMappings(locationMappings: LocationMapping[]): MachineMappi
 // Exported for testing
 export {
   mapSQStatus,
+  translateCycleName,
+  CYCLE_NAME_TRANSLATIONS,
   parseLocationConfig,
   buildMachineMappings,
   COMMAND_PARAM_SCHEMAS,
