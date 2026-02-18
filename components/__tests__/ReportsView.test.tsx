@@ -78,10 +78,10 @@ describe('ReportsView', () => {
     vi.restoreAllMocks();
   });
 
-  it('should render Machine Events header', async () => {
+  it('should render Status Transitions header', async () => {
     globalThis.fetch = createFetchMock([]);
     render(<ReportsView authUser={mockAdminUser} laundries={mockLaundries} />);
-    expect(screen.getByText('Machine Events')).toBeTruthy();
+    expect(screen.getByText('Status Transitions')).toBeTruthy();
   });
 
   it('should show access restricted for non-admin/viewer users', () => {
@@ -94,7 +94,7 @@ describe('ReportsView', () => {
     globalThis.fetch = createFetchMock([]);
     const viewerUser = { ...mockAdminUser, role: 'viewer' as const };
     render(<ReportsView authUser={viewerUser} laundries={mockLaundries} />);
-    expect(screen.getByText('Machine Events')).toBeTruthy();
+    expect(screen.getByText('Status Transitions')).toBeTruthy();
   });
 
   it('should render filter dropdowns', async () => {
@@ -213,12 +213,99 @@ describe('ReportsView', () => {
     });
   });
 
-  it('should show event count', async () => {
+  it('should show transition count', async () => {
     globalThis.fetch = createFetchMock(mockEvents);
     render(<ReportsView authUser={mockAdminUser} laundries={mockLaundries} />);
 
     await waitFor(() => {
-      expect(screen.getByText('2 events shown')).toBeTruthy();
+      expect(screen.getByText('2 transitions shown')).toBeTruthy();
     });
+  });
+
+  it('should filter out initial snapshots by default', async () => {
+    const eventsWithSnapshot: MachineEvent[] = [
+      ...mockEvents,
+      {
+        id: 3,
+        timestamp: '2026-02-18T08:00:00.000Z',
+        locationId: 'loc1',
+        locationName: 'Brandoa1',
+        machineId: 'sq-w2',
+        localId: 'w2',
+        agentId: 'Brandoa1',
+        machineType: 'washer',
+        statusId: 'AVAILABLE',
+        previousStatusId: null,
+        remainingSeconds: null,
+        remainingVend: null,
+        isDoorOpen: null,
+        cycleId: null,
+        cycleName: null,
+        linkQuality: null,
+        receivedAt: null,
+        source: 'rest_poll',
+        initiator: null,
+        initiatorUser: null,
+        commandType: null,
+      },
+    ];
+    globalThis.fetch = createFetchMock(eventsWithSnapshot);
+    render(<ReportsView authUser={mockAdminUser} laundries={mockLaundries} />);
+
+    await waitFor(() => {
+      // Only 2 transitions shown (the initial snapshot is hidden)
+      expect(screen.getByText(/2 transition/)).toBeTruthy();
+      expect(screen.getByText(/1 initial snapshot hidden/)).toBeTruthy();
+    });
+  });
+
+  it('should show initial snapshots when toggle is on', async () => {
+    const eventsWithSnapshot: MachineEvent[] = [
+      ...mockEvents,
+      {
+        id: 3,
+        timestamp: '2026-02-18T08:00:00.000Z',
+        locationId: 'loc1',
+        locationName: 'Brandoa1',
+        machineId: 'sq-w2',
+        localId: 'w2',
+        agentId: 'Brandoa1',
+        machineType: 'washer',
+        statusId: 'AVAILABLE',
+        previousStatusId: null,
+        remainingSeconds: null,
+        remainingVend: null,
+        isDoorOpen: null,
+        cycleId: null,
+        cycleName: null,
+        linkQuality: null,
+        receivedAt: null,
+        source: 'rest_poll',
+        initiator: null,
+        initiatorUser: null,
+        commandType: null,
+      },
+    ];
+    globalThis.fetch = createFetchMock(eventsWithSnapshot);
+    render(<ReportsView authUser={mockAdminUser} laundries={mockLaundries} />);
+
+    await waitFor(() => {
+      expect(screen.getByText(/2 transition/)).toBeTruthy();
+    });
+
+    // Click the toggle button to show initial snapshots
+    const toggleButton = screen.getByText('Transitions only');
+    fireEvent.click(toggleButton);
+
+    await waitFor(() => {
+      expect(screen.getByText('3 transitions shown')).toBeTruthy();
+      expect(screen.getByText('All events')).toBeTruthy();
+    });
+  });
+
+  it('should show transitions only toggle button', async () => {
+    globalThis.fetch = createFetchMock([]);
+    render(<ReportsView authUser={mockAdminUser} laundries={mockLaundries} />);
+    expect(screen.getByText('Transitions only')).toBeTruthy();
   });
 });

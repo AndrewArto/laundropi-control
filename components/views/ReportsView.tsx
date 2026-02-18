@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { BarChart3, Lock, Unlock, ChevronDown, Loader2 } from 'lucide-react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { BarChart3, Lock, Unlock, ChevronDown, Loader2, Eye, EyeOff } from 'lucide-react';
 import type { UiUser, Laundry } from '../../types';
 
 export interface MachineEvent {
@@ -107,9 +107,16 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ authUser, laundries })
   const [statusFilter, setStatusFilter] = useState('All');
   const [dateFrom, setDateFrom] = useState(sevenDaysAgoStr);
   const [dateTo, setDateTo] = useState(todayStr);
+  const [showInitialSnapshots, setShowInitialSnapshots] = useState(false);
 
   const locationOptions = ['All', ...laundries.map(l => l.id)];
   const machineOptions = ['All', ...Array.from({ length: 10 }, (_, i) => `w${i + 1}`), ...Array.from({ length: 8 }, (_, i) => `d${i + 1}`)];
+
+  // Filter out initial snapshots (no previousStatusId) unless toggle is on
+  const displayedEvents = useMemo(() => {
+    if (showInitialSnapshots) return events;
+    return events.filter(e => e.previousStatusId !== null && e.previousStatusId !== '');
+  }, [events, showInitialSnapshots]);
 
   const fetchEvents = useCallback(async (append = false) => {
     setLoading(true);
@@ -171,10 +178,20 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ authUser, laundries })
 
   return (
     <div>
-      <h2 className="text-lg font-semibold text-slate-200 mb-4 flex items-center gap-2">
-        <BarChart3 className="w-5 h-5 text-cyan-400" />
-        Machine Events
-      </h2>
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="text-lg font-semibold text-slate-200 flex items-center gap-2">
+          <BarChart3 className="w-5 h-5 text-cyan-400" />
+          Status Transitions
+        </h2>
+        <button
+          onClick={() => setShowInitialSnapshots(v => !v)}
+          className="flex items-center gap-1.5 px-2.5 py-1 rounded text-[11px] border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-400"
+          title={showInitialSnapshots ? 'Showing all events including initial snapshots' : 'Showing only status transitions'}
+        >
+          {showInitialSnapshots ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
+          {showInitialSnapshots ? 'All events' : 'Transitions only'}
+        </button>
+      </div>
 
       {/* Filters */}
       <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 mb-4">
@@ -254,7 +271,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ authUser, laundries })
       )}
 
       {/* Loading */}
-      {loading && events.length === 0 && (
+      {loading && displayedEvents.length === 0 && (
         <div className="flex items-center justify-center py-12 text-slate-500">
           <Loader2 className="w-5 h-5 animate-spin mr-2" />
           Loading events...
@@ -262,7 +279,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ authUser, laundries })
       )}
 
       {/* No results */}
-      {!loading && events.length === 0 && !error && (
+      {!loading && displayedEvents.length === 0 && !error && (
         <div className="text-center text-slate-500 py-12">
           <BarChart3 className="w-10 h-10 mx-auto mb-2 opacity-30" />
           <p className="text-sm">No events found for the selected filters.</p>
@@ -270,7 +287,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ authUser, laundries })
       )}
 
       {/* Desktop table (hidden on small screens) */}
-      {events.length > 0 && (
+      {displayedEvents.length > 0 && (
         <div className="hidden md:block overflow-x-auto">
           <table className="w-full text-xs text-slate-300">
             <thead>
@@ -292,7 +309,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ authUser, laundries })
               </tr>
             </thead>
             <tbody>
-              {events.map(e => (
+              {displayedEvents.map(e => (
                 <tr key={e.id} className="border-b border-slate-800 hover:bg-slate-800/50">
                   <td className="py-1.5 px-1 whitespace-nowrap">{formatTime(e.timestamp)}</td>
                   <td className="py-1.5 px-1 whitespace-nowrap">{e.locationName || e.agentId}</td>
@@ -342,9 +359,9 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ authUser, laundries })
       )}
 
       {/* Mobile card layout (hidden on md+) */}
-      {events.length > 0 && (
+      {displayedEvents.length > 0 && (
         <div className="md:hidden space-y-2">
-          {events.map(e => (
+          {displayedEvents.map(e => (
             <div key={e.id} className="bg-slate-800 rounded-lg p-3 border border-slate-700">
               <div className="flex items-center justify-between mb-2">
                 <span className="text-[10px] text-slate-500">{formatTime(e.timestamp)}</span>
@@ -427,15 +444,15 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ authUser, laundries })
                 Loading...
               </span>
             ) : (
-              `Load more (${events.length} shown)`
+              `Load more (${displayedEvents.length} shown)`
             )}
           </button>
         </div>
       )}
 
       {/* Count */}
-      {events.length > 0 && !loading && (
-        <p className="text-[10px] text-slate-600 mt-2 text-right">{events.length} event{events.length !== 1 ? 's' : ''} shown</p>
+      {displayedEvents.length > 0 && !loading && (
+        <p className="text-[10px] text-slate-600 mt-2 text-right">{displayedEvents.length} transition{displayedEvents.length !== 1 ? 's' : ''} shown{!showInitialSnapshots && events.length !== displayedEvents.length ? ` (${events.length - displayedEvents.length} initial snapshot${events.length - displayedEvents.length !== 1 ? 's' : ''} hidden)` : ''}</p>
       )}
     </div>
   );

@@ -595,9 +595,10 @@ export class SpeedQueenWSClient {
                       (data.id as string) || '';
     const mapping = this.sqIdToMapping.get(machineId);
     if (!mapping) {
-      console.log(`[speedqueen-ws] Unknown machine in status push: ${machineId}`);
+      console.log(`[speedqueen-ws] Unknown machine in status push: ${machineId}`, JSON.stringify(data).slice(0, 200));
       return;
     }
+    console.log(`[speedqueen-ws] Status push for ${mapping.localId} (${machineId}): statusId=${(data as any).statusId}`);
 
     const statusData = data as unknown as SQMachineStatus;
     const machine = this.mapSQStatusToLaundryMachine(statusData, mapping);
@@ -818,8 +819,12 @@ export class SpeedQueenService {
     wsClient.onMachineStatusRaw = (_agentId, _machineId, statusData, mapping) => {
       const currentStatusId = (statusData.statusId || 'UNKNOWN').toUpperCase();
       const prevStatusId = this.previousStatusById.get(mapping.speedqueenId);
-      if (prevStatusId !== currentStatusId) {
-        this.logMachineEvent(mapping, currentStatusId, prevStatusId || null, statusData, 'ws_push');
+      console.log(`[speedqueen] WS push: ${mapping.localId} ${currentStatusId} (prev: ${prevStatusId || "unknown"})`);
+      if (prevStatusId === undefined) {
+        // First WS push for this machine — establish baseline, don't log
+        this.previousStatusById.set(mapping.speedqueenId, currentStatusId);
+      } else if (prevStatusId !== currentStatusId) {
+        this.logMachineEvent(mapping, currentStatusId, prevStatusId, statusData, 'ws_push');
         this.previousStatusById.set(mapping.speedqueenId, currentStatusId);
       }
     };
@@ -985,10 +990,13 @@ export class SpeedQueenService {
       };
       machines.push(machine);
 
-      // Log event only when status changes
+      // Log event only when status changes (skip initial snapshot with no previous)
       const prevStatusId = this.previousStatusById.get(mapping.speedqueenId);
-      if (prevStatusId !== currentStatusId) {
-        this.logMachineEvent(mapping, currentStatusId, prevStatusId || null, status, 'rest_poll');
+      if (prevStatusId === undefined) {
+        // First poll for this machine — establish baseline, don't log
+        this.previousStatusById.set(mapping.speedqueenId, currentStatusId);
+      } else if (prevStatusId !== currentStatusId) {
+        this.logMachineEvent(mapping, currentStatusId, prevStatusId, status, 'rest_poll');
         this.previousStatusById.set(mapping.speedqueenId, currentStatusId);
       }
     }
