@@ -53,7 +53,7 @@ interface SQLocation {
 
 interface SQMachineStatus {
   id: string;
-  status: string;
+  statusId: string;
   remainingSeconds?: number;
   remainingVend?: number;
   isDoorOpen?: boolean;
@@ -495,7 +495,19 @@ export class SpeedQueenWSClient {
     this.ws.send(JSON.stringify(payload));
   }
 
+  /** Respond to Centrifuge server ping with pong (empty JSON object). */
+  private sendPong(): void {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+    this.ws.send('{}');
+  }
+
   private handleMessage(msg: WSMessage): void {
+    // Centrifuge ping frame: empty object {} — respond with pong {}
+    if (!msg.id && !msg.result && !msg.push && !msg.error && !msg.connect && !msg.subscribe) {
+      this.sendPong();
+      return;
+    }
+
     // Connection response → subscribe to channels
     if (msg.result !== undefined && !msg.push) {
       console.log('[speedqueen-ws] Connected successfully');
@@ -592,7 +604,7 @@ export class SpeedQueenWSClient {
       id: mapping.localId,
       label: mapping.label,
       type: mapping.type,
-      status: mapSQStatus(sq.status),
+      status: mapSQStatus(sq.statusId),
       lastUpdated: Date.now(),
       source: 'speedqueen',
       speedqueenId: mapping.speedqueenId,
@@ -884,7 +896,7 @@ export class SpeedQueenService {
         id: mapping.localId,
         label: mapping.label,
         type: mapping.type,
-        status: mapSQStatus(status.status || 'UNKNOWN'),
+        status: mapSQStatus(status.statusId || 'UNKNOWN'),
         lastUpdated: Date.now(),
         source: 'speedqueen',
         speedqueenId: mapping.speedqueenId,

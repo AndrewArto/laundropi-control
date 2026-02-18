@@ -443,7 +443,7 @@ describe('Speed Queen Service', () => {
 
       const sqStatus = {
         id: 'mac_1096b5',
-        status: 'IN_USE',
+        statusId: 'IN_USE',
         remainingSeconds: 1200,
         remainingVend: 150,
         isDoorOpen: false,
@@ -471,7 +471,7 @@ describe('Speed Queen Service', () => {
 
       const sqStatus = {
         id: 'mac_1096b5',
-        status: 'AVAILABLE',
+        statusId: 'AVAILABLE',
         remainingSeconds: 0,
         isDoorOpen: true,
         selectedCycle: null,
@@ -543,7 +543,7 @@ describe('Speed Queen Service', () => {
               data: [
                 {
                   id: 'mac_1096b5',
-                  status: { status: 'IN_USE', remainingSeconds: 600 },
+                  status: { statusId: 'IN_USE', remainingSeconds: 600 },
                 },
               ],
               meta: { page: 1, totalPages: 1 },
@@ -589,7 +589,7 @@ describe('Speed Queen Service', () => {
             json: () => Promise.resolve([
               {
                 id: 'mac_1096b5',
-                status: { status: 'AVAILABLE', remainingSeconds: 0 },
+                status: { statusId: 'AVAILABLE', remainingSeconds: 0 },
               },
             ]),
           };
@@ -710,7 +710,7 @@ describe('Speed Queen Service', () => {
             json: () => Promise.resolve([
               {
                 id: 'mac_1096b5',
-                status: { status: 'AVAILABLE', remainingSeconds: 0 },
+                status: { statusId: 'AVAILABLE', remainingSeconds: 0 },
               },
             ]),
           };

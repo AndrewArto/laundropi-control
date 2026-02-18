@@ -92,7 +92,7 @@ describe('SpeedQueenService — lazy WebSocket & caching', () => {
             json: () => Promise.resolve([
               {
                 id: 'mac_1096b5',
-                status: { status: 'AVAILABLE', remainingSeconds: 0 },
+                status: { statusId: 'AVAILABLE', remainingSeconds: 0 },
               },
             ]),
           };
@@ -127,7 +127,7 @@ describe('SpeedQueenService — lazy WebSocket & caching', () => {
             json: () => Promise.resolve([
               {
                 id: 'mac_1096b5',
-                status: { status: 'IN_USE', remainingSeconds: 600 },
+                status: { statusId: 'IN_USE', remainingSeconds: 600 },
               },
             ]),
           };
@@ -157,7 +157,7 @@ describe('SpeedQueenService — lazy WebSocket & caching', () => {
             json: () => Promise.resolve([
               {
                 id: 'mac_1096b5',
-                status: { status: 'AVAILABLE', remainingSeconds: 0 },
+                status: { statusId: 'AVAILABLE', remainingSeconds: 0 },
               },
             ]),
           };
