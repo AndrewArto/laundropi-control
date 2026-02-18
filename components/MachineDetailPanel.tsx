@@ -32,6 +32,7 @@ export const MachineDetailPanel: React.FC<MachineDetailPanelProps> = ({
 }) => {
   const [cycles, setCycles] = useState<SpeedQueenMachineCycle[]>([]);
   const [selectedCycleId, setSelectedCycleId] = useState<string>('');
+  const [dryerMinutes, setDryerMinutes] = useState<string>('');
   const [loading, setLoading] = useState(false);
   const [commandFeedback, setCommandFeedback] = useState<CommandFeedback | null>(null);
   const [remainingSeconds, setRemainingSeconds] = useState(machine.remainingSeconds ?? 0);
@@ -98,6 +99,8 @@ export const MachineDetailPanel: React.FC<MachineDetailPanelProps> = ({
     if (feedbackTimerRef.current) clearTimeout(feedbackTimerRef.current);
     feedbackTimerRef.current = setTimeout(() => setCommandFeedback(null), 4000);
   }, [agentId, machine.id]);
+
+  const isDryer = machine.type === 'dryer';
 
   const statusColor = {
     idle: 'text-slate-400 border-slate-600',
@@ -217,13 +220,33 @@ export const MachineDetailPanel: React.FC<MachineDetailPanelProps> = ({
                     </select>
                   </div>
                 )}
+                {isDryer && (
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number"
+                      value={dryerMinutes}
+                      onChange={(e) => setDryerMinutes(e.target.value)}
+                      placeholder="Minutes (optional)"
+                      min="1"
+                      max="120"
+                      className="flex-1 bg-slate-900 border border-slate-600 text-slate-200 text-sm rounded-md px-3 py-2 placeholder-slate-600 focus:border-indigo-500 focus:outline-none"
+                    />
+                  </div>
+                )}
                 <button
-                  onClick={() => sendCommand('remote_start', selectedCycleId ? { cycleId: selectedCycleId } : undefined)}
+                  onClick={() => {
+                    const mins = parseInt(dryerMinutes, 10);
+                    if (isDryer && mins > 0) {
+                      sendCommand('start_dryer_with_time', { minutes: mins });
+                    } else {
+                      sendCommand('remote_start', selectedCycleId ? { cycleId: selectedCycleId } : undefined);
+                    }
+                  }}
                   disabled={commandFeedback?.status === 'pending'}
                   className="w-full flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium disabled:opacity-50"
                 >
                   <Play className="w-4 h-4" />
-                  Start Cycle
+                  {isDryer && parseInt(dryerMinutes, 10) > 0 ? `Start Dryer (${dryerMinutes} min)` : 'Start Cycle'}
                 </button>
               </div>
             )}
