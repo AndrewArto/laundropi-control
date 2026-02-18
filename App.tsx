@@ -16,6 +16,7 @@ import { SchedulesView } from './components/views/SchedulesView';
 import { RevenueView } from './components/views/RevenueView';
 import { SettingsView } from './components/views/SettingsView';
 import { InventoryView } from './components/views/InventoryView';
+import { ReportsView } from './components/views/ReportsView';
 import { LoginForm } from './components/LoginForm';
 import { LoadingScreen } from './components/LoadingScreen';
 import { Header } from './components/Header';
@@ -1490,6 +1491,9 @@ const App: React.FC = () => {
         {activeTab === Tab.DASHBOARD && renderDashboard()}
         {activeTab === Tab.SCHEDULE && renderScheduler()}
         {activeTab === Tab.REVENUE && renderRevenue()}
+        {activeTab === Tab.REPORTS && (
+          <ReportsView authUser={authUser} laundries={laundries} />
+        )}
         {activeTab === Tab.INVENTORY && (
           <InventoryView
             authUser={authUser}

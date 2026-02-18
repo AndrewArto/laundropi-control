@@ -1,11 +1,12 @@
 import React from 'react';
-import { LayoutDashboard, CalendarClock, Settings, Coins, Package } from 'lucide-react';
+import { LayoutDashboard, CalendarClock, Settings, Coins, Package, BarChart3 } from 'lucide-react';
 import type { UiUser } from '../types';
 
 enum Tab {
   DASHBOARD = 'DASHBOARD',
   SCHEDULE = 'SCHEDULE',
   REVENUE = 'REVENUE',
+  REPORTS = 'REPORTS',
   INVENTORY = 'INVENTORY',
   SETTINGS = 'SETTINGS'
 }
@@ -32,6 +33,17 @@ export const BottomNavigation: React.FC<BottomNavigationProps> = ({
           >
             <Coins className="w-6 h-6" />
             <span className="text-[10px] font-medium">Finance</span>
+          </button>
+        )}
+
+        {/* Reports - show for admin and viewer */}
+        {(authUser?.role === 'admin' || authUser?.role === 'viewer') && (
+          <button
+            onClick={() => setActiveTab(Tab.REPORTS)}
+            className={`flex flex-col items-center gap-1 ${activeTab === Tab.REPORTS ? 'text-cyan-400' : 'text-slate-500 hover:text-slate-300'}`}
+          >
+            <BarChart3 className="w-6 h-6" />
+            <span className="text-[10px] font-medium">Reports</span>
           </button>
         )}
 
