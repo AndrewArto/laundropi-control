@@ -95,26 +95,26 @@ const MachineCard: React.FC<{
 }> = ({ machine, isSpeedQueen, onClick }) => (
   <button
     onClick={onClick}
-    className={`flex items-center justify-between px-2 py-1.5 rounded-md border text-xs text-left w-full transition-colors hover:brightness-110 ${machineStatusStyle(machine.status)}`}
+    className={`flex flex-col gap-1 px-2 py-1.5 rounded-md border text-xs text-left w-full transition-colors hover:brightness-110 ${machineStatusStyle(machine.status)}`}
     title={machine.reason ? `Detection: ${machine.reason}` : isSpeedQueen ? 'Click for details' : undefined}
   >
-    <span>{machine.label}</span>
-    <div className="flex items-center gap-1">
-      {isSpeedQueen && machine.status === 'running' && (machine.remainingSeconds ?? 0) > 0 && (
-        <span className="flex items-center gap-0.5 text-emerald-300 text-[10px]">
-          <Clock className="w-3 h-3" />
-          {formatTimeShort(machine.remainingSeconds!)}
-        </span>
-      )}
-      <span className={`px-1.5 py-0.5 rounded text-[10px] uppercase ${machineStatusBadgeStyle(machine.status)}`}>
+    <div className="flex items-center justify-between w-full">
+      <span className="truncate">{machine.label}</span>
+      <span className={`px-1.5 py-0.5 rounded text-[10px] uppercase flex-shrink-0 ${machineStatusBadgeStyle(machine.status)}`}>
         {machine.status === 'out_of_order' ? 'OOO' : machine.status}
       </span>
-      {!isSpeedQueen && machine.reason && (
-        <span className="text-[9px] text-slate-500">
-          ({machine.reason})
-        </span>
-      )}
     </div>
+    {isSpeedQueen && machine.status === 'running' && (machine.remainingSeconds ?? 0) > 0 && (
+      <div className="flex items-center gap-1 text-emerald-300 text-[10px]">
+        <Clock className="w-3 h-3" />
+        <span>{formatTimeShort(machine.remainingSeconds!)}</span>
+      </div>
+    )}
+    {!isSpeedQueen && machine.reason && (
+      <span className="text-[9px] text-slate-500">
+        ({machine.reason})
+      </span>
+    )}
   </button>
 );
 
