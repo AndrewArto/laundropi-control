@@ -128,6 +128,7 @@ export const InvoicingView: React.FC<InvoicingViewProps> = ({ readOnly = false }
         const link = data.AppResponse?.permanentUrl || '';
         createdCountRef.current = num;
         setCreatedCount(num);
+        setTotalDocuments(prev => prev + 1);
         addLog(`#${num} • ID: ${docId}`, 'success', link);
         return true;
       } else {
