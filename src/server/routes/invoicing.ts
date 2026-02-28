@@ -64,7 +64,7 @@ router.get('/status', async (_req, res) => {
 
 // POST /api/invoicing/calculate
 router.post('/calculate', (req, res) => {
-  const { stripeRevenue, stripePercent } = req.body;
+  const { stripeRevenue, stripePercent, paymentType } = req.body;
 
   if (!stripeRevenue || !stripePercent || stripePercent <= 0 || stripePercent >= 100) {
     return res.status(400).json({ error: 'Invalid input' });
@@ -73,15 +73,19 @@ router.post('/calculate', (req, res) => {
   const totalRevenue = stripeRevenue / (stripePercent / 100);
   const cashRevenue = totalRevenue - stripeRevenue;
   const invoiceAmount = 99.94;
-  const numInvoices = Math.floor(cashRevenue / invoiceAmount);
-  const remainder = cashRevenue - (numInvoices * invoiceAmount);
+  const isCash = (paymentType ?? 0) === 0;
+  const baseRevenue = isCash ? cashRevenue : stripeRevenue;
+  const numInvoices = Math.floor(baseRevenue / invoiceAmount);
+  const remainder = baseRevenue - (numInvoices * invoiceAmount);
 
   res.json({
     totalRevenue: +totalRevenue.toFixed(2),
     cashRevenue: +cashRevenue.toFixed(2),
+    baseRevenue: +baseRevenue.toFixed(2),
     invoiceAmount,
     numInvoices,
     remainder: +remainder.toFixed(2),
+    isCash,
   });
 });
 

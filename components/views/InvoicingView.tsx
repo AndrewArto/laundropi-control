@@ -9,9 +9,11 @@ interface PaymentType {
 interface CalculationResult {
   totalRevenue: number;
   cashRevenue: number;
+  baseRevenue: number;
   invoiceAmount: number;
   numInvoices: number;
   remainder: number;
+  isCash: boolean;
 }
 
 interface LogEntry {
@@ -80,7 +82,7 @@ export const InvoicingView: React.FC<InvoicingViewProps> = ({ readOnly = false }
       const res = await apiFetch('/api/invoicing/calculate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ stripeRevenue: rev, stripePercent: pct }),
+        body: JSON.stringify({ stripeRevenue: rev, stripePercent: pct, paymentType }),
       });
       const data = await res.json();
       if (data.error) {
@@ -92,7 +94,11 @@ export const InvoicingView: React.FC<InvoicingViewProps> = ({ readOnly = false }
       setLog([]);
 
       const ptLabel = paymentTypes.find(p => p.value === paymentType)?.label || String(paymentType);
-      addLog(`Stripe €${rev} (${pct}%) → Cash €${data.cashRevenue} → ${data.numInvoices} invoices • ${ptLabel}`, 'info');
+      if (data.isCash) {
+        addLog(`Stripe €${rev} (${pct}%) → Cash €${data.cashRevenue} → ${data.numInvoices} invoices • ${ptLabel}`, 'info');
+      } else {
+        addLog(`Cards €${rev} → ${data.numInvoices} invoices • ${ptLabel}`, 'info');
+      }
       if (data.remainder > 0) {
         addLog(`Remainder €${data.remainder} (not enough for another invoice)`, 'dim');
       }
@@ -249,7 +255,7 @@ export const InvoicingView: React.FC<InvoicingViewProps> = ({ readOnly = false }
           <div className="grid grid-cols-4 gap-2 pt-2">
             {[
               { label: 'Total Revenue', value: `€${calculation.totalRevenue.toLocaleString('pt-PT')}` },
-              { label: 'Cash', value: `€${calculation.cashRevenue.toLocaleString('pt-PT')}` },
+              { label: calculation.isCash ? 'Cash' : 'Cards', value: `€${calculation.baseRevenue.toLocaleString('pt-PT')}` },
               { label: 'Invoices', value: String(calculation.numInvoices) },
               { label: 'Remainder', value: `€${calculation.remainder.toLocaleString('pt-PT')}` },
             ].map(s => (
