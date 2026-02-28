@@ -46,6 +46,7 @@ export const InvoicingView: React.FC<InvoicingViewProps> = ({ readOnly = false }
   const [log, setLog] = useState<LogEntry[]>([]);
 
   const shouldStop = useRef(false);
+  const createdCountRef = useRef(0);
   const logEndRef = useRef<HTMLDivElement>(null);
 
   // Check connection on mount
@@ -90,6 +91,7 @@ export const InvoicingView: React.FC<InvoicingViewProps> = ({ readOnly = false }
         return;
       }
       setCalculation(data);
+      createdCountRef.current = 0;
       setCreatedCount(0);
       setLog([]);
 
@@ -108,9 +110,9 @@ export const InvoicingView: React.FC<InvoicingViewProps> = ({ readOnly = false }
   }, [stripeRevenue, stripePercent, paymentType, paymentTypes, addLog]);
 
   const createOne = useCallback(async (): Promise<boolean> => {
-    if (!calculation || createdCount >= calculation.numInvoices) return false;
+    if (!calculation || createdCountRef.current >= calculation.numInvoices) return false;
 
-    const num = createdCount + 1;
+    const num = createdCountRef.current + 1;
     addLog(`Creating invoice #${num}/${calculation.numInvoices}...`, 'dim');
 
     try {
@@ -124,7 +126,8 @@ export const InvoicingView: React.FC<InvoicingViewProps> = ({ readOnly = false }
       if (data.AppStatusCode === 200) {
         const docId = data.AppResponse?.data?.id;
         const link = data.AppResponse?.permanentUrl || '';
-        setCreatedCount(prev => prev + 1);
+        createdCountRef.current = num;
+        setCreatedCount(num);
         addLog(`#${num} • ID: ${docId}`, 'success', link);
         return true;
       } else {
@@ -136,7 +139,7 @@ export const InvoicingView: React.FC<InvoicingViewProps> = ({ readOnly = false }
       addLog(`#${num}: ${err.message}`, 'error');
       return false;
     }
-  }, [calculation, createdCount, invoiceDate, paymentType, addLog]);
+  }, [calculation, invoiceDate, paymentType, addLog]);
 
   const handleCreateNext = useCallback(async () => {
     const ok = await createOne();
@@ -150,22 +153,20 @@ export const InvoicingView: React.FC<InvoicingViewProps> = ({ readOnly = false }
     shouldStop.current = false;
     setRunning(true);
 
-    let count = createdCount;
-    while (count < calculation.numInvoices && !shouldStop.current) {
+    while (createdCountRef.current < calculation.numInvoices && !shouldStop.current) {
       const ok = await createOne();
       if (!ok) {
         addLog('Stopped due to error', 'error');
         break;
       }
-      count++;
       await new Promise(r => setTimeout(r, 500));
     }
 
     setRunning(false);
-    if (count >= calculation.numInvoices) {
+    if (createdCountRef.current >= calculation.numInvoices) {
       addLog('All invoices created!', 'success');
     }
-  }, [calculation, createdCount, createOne, addLog]);
+  }, [calculation, createOne, addLog]);
 
   const handleStop = useCallback(() => {
     shouldStop.current = true;
