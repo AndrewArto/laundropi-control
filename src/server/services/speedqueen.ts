@@ -13,7 +13,7 @@ import type {
   SpeedQueenCommandType,
 } from '../../../types';
 // import { insertMachineEvent, type MachineEventRow } from '../db'; // Moved to MachineEventCollector
-import type { MachineEventCollector } from './machine-event-collector';
+import type { CommandInitiatorResolution, MachineEventCollector } from './machine-event-collector';
 
 // ---------------------------------------------------------------------------
 // Config
@@ -744,6 +744,10 @@ export class SpeedQueenService {
     eventCollector.onStatusUpdate = (agentId, machines) => {
       this.mergeStatus(agentId, machines);
     };
+
+    eventCollector.setInitiatorResolver((speedqueenId, statusId) => {
+      return this.resolveCommandInitiator(speedqueenId, statusId);
+    });
   }
 
   async start(): Promise<void> {
@@ -889,6 +893,30 @@ export class SpeedQueenService {
   }
 
   // Previous status tracking moved to MachineEventCollector
+
+  private resolveCommandInitiator(speedqueenId: string, statusId: string): CommandInitiatorResolution {
+    if (statusId !== 'IN_USE') {
+      return { initiator: null, initiatorUser: null, commandType: null };
+    }
+
+    const pending = this.pendingCommands.get(speedqueenId);
+    if (!pending) {
+      return { initiator: 'customer', initiatorUser: null, commandType: null };
+    }
+
+    const ageMs = Date.now() - pending.timestamp;
+    if (ageMs > COMMAND_INITIATOR_WINDOW_MS) {
+      this.pendingCommands.delete(speedqueenId);
+      return { initiator: 'customer', initiatorUser: null, commandType: null };
+    }
+
+    this.pendingCommands.delete(speedqueenId);
+    return {
+      initiator: 'admin',
+      initiatorUser: pending.user,
+      commandType: pending.commandType,
+    };
+  }
 
   /** Expose pending commands map for testing. */
   getPendingCommandsMap(): Map<string, PendingCommandInfo> {
@@ -1038,7 +1066,6 @@ export {
   API_BASE,
   WS_URL,
   STATUS_CACHE_TTL_MS,
-  WS_IDLE_TIMEOUT_MS,
 };
 export type { SQMachine, SQMachineStatus, SQCycle, SQError, SQCommandResponse, SQLocation };
 export { COMMAND_INITIATOR_WINDOW_MS };

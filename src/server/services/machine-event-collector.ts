@@ -9,7 +9,6 @@
  * - Emits events for SpeedQueenService to consume
  */
 
-import { WebSocket } from 'ws';
 import type { LaundryMachine, MachineType } from '../../../types';
 import { insertMachineEvent, getLastKnownStatus, type MachineEventRow } from '../db';
 import {
@@ -30,6 +29,15 @@ const RECONNECT_BACKOFF_FACTOR = 2;
 
 // Callback types
 export type StatusUpdateCallback = (agentId: string, machines: LaundryMachine[]) => void;
+export interface CommandInitiatorResolution {
+  initiator: 'admin' | 'customer' | null;
+  initiatorUser: string | null;
+  commandType: string | null;
+}
+export type CommandInitiatorResolver = (
+  speedqueenId: string,
+  statusId: string
+) => CommandInitiatorResolution;
 
 export class MachineEventCollector {
   private restClient: SpeedQueenRestClient;
@@ -45,6 +53,7 @@ export class MachineEventCollector {
   private reconnectDelay = INITIAL_RECONNECT_DELAY_MS;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private snapshotTimer: ReturnType<typeof setInterval> | null = null;
+  private initiatorResolver: CommandInitiatorResolver | null = null;
 
   // Baseline status tracking (loaded from DB, not in-memory)
   private baselineStatusById = new Map<string, string>();
@@ -304,6 +313,10 @@ export class MachineEventCollector {
     source: 'ws_push' | 'rest_snapshot',
     isTransition: number
   ): void {
+    const resolvedInitiator = statusId === 'IN_USE'
+      ? this.resolveInitiator(mapping.speedqueenId, statusId)
+      : null;
+
     const event: MachineEventRow = {
       timestamp: new Date().toISOString(),
       locationId: mapping.locationId,
@@ -322,9 +335,9 @@ export class MachineEventCollector {
       linkQuality: null,
       receivedAt: status.timestamp ? new Date(status.timestamp).toISOString() : null,
       source,
-      initiator: null, // Event collector doesn't track command initiation
-      initiatorUser: null,
-      commandType: null,
+      initiator: resolvedInitiator?.initiator ?? null,
+      initiatorUser: resolvedInitiator?.initiatorUser ?? null,
+      commandType: resolvedInitiator?.commandType ?? null,
       isTransition,
     };
 
@@ -334,6 +347,19 @@ export class MachineEventCollector {
     } catch (err) {
       console.error('[machine-event-collector] Failed to log machine event:', err);
     }
+  }
+
+  private resolveInitiator(speedqueenId: string, statusId: string): CommandInitiatorResolution {
+    if (!this.initiatorResolver) {
+      return { initiator: 'customer', initiatorUser: null, commandType: null };
+    }
+
+    const resolved = this.initiatorResolver(speedqueenId, statusId);
+    if (!resolved || !resolved.initiator) {
+      return { initiator: 'customer', initiatorUser: null, commandType: null };
+    }
+
+    return resolved;
   }
 
   // Status accessors for other services
@@ -356,5 +382,9 @@ export class MachineEventCollector {
 
   getMachineMappings(): MachineMapping[] {
     return [...this.machineMappings];
+  }
+
+  setInitiatorResolver(resolver: CommandInitiatorResolver): void {
+    this.initiatorResolver = resolver;
   }
 }

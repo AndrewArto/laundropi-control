@@ -465,6 +465,7 @@ describe('Machine Events', () => {
         getRestClient: () => ({ getMachines: vi.fn() }),
         getLocationIds: () => ['loc_d23f6c'],
         getMachineMappings: () => [],
+        setInitiatorResolver: vi.fn(),
         start: vi.fn(),
         stop: vi.fn(),
         isConnected: vi.fn(() => false),

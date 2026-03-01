@@ -45,6 +45,7 @@ const createMockEventCollector = (restClient: any, locationIds: string[], machin
   getRestClient: () => restClient,
   getLocationIds: () => locationIds,
   getMachineMappings: () => machineMappings,
+  setInitiatorResolver: vi.fn(),
   start: vi.fn(),
   stop: vi.fn(),
   isConnected: vi.fn(() => false),
