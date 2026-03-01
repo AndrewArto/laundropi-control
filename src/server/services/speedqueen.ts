@@ -12,7 +12,8 @@ import type {
   SpeedQueenMachineCycle,
   SpeedQueenCommandType,
 } from '../../../types';
-import { insertMachineEvent, type MachineEventRow } from '../db';
+// import { insertMachineEvent, type MachineEventRow } from '../db'; // Moved to MachineEventCollector
+import type { CommandInitiatorResolution, MachineEventCollector } from './machine-event-collector';
 
 // ---------------------------------------------------------------------------
 // Config
@@ -700,12 +701,10 @@ export interface PendingCommandInfo {
 }
 
 const STATUS_CACHE_TTL_MS = 30_000;   // 30 s
-const WS_IDLE_TIMEOUT_MS  = 60_000;   // disconnect WS after 60 s idle
 const COMMAND_INITIATOR_WINDOW_MS = 120_000; // 2 min window for command→IN_USE attribution
 
 export class SpeedQueenService {
   private restClient: SpeedQueenRestClient;
-  private wsClient: SpeedQueenWSClient | null = null;
   private locationIds: string[];
   private machineMappings: MachineMapping[];
   private locationToAgent: Map<string, string>;
@@ -722,191 +721,57 @@ export class SpeedQueenService {
   // In-flight poll deduplication
   private pollInFlight = new Map<string, Promise<void>>();
 
-  // Lazy WebSocket bookkeeping
-  private lastUiActivity = 0;
-  private wsIdleTimer: ReturnType<typeof setInterval> | null = null;
-  private wsConnecting = false;
-
-  // Event logging: track previous statusId per machine (keyed by speedqueenId)
-  private previousStatusById = new Map<string, string>();
-
   // Pending commands for initiator tracking (keyed by speedqueenId)
   private pendingCommands = new Map<string, PendingCommandInfo>();
 
   constructor(
-    apiKey: string,
-    locationConfig: string, // comma-separated "loc_id:agentId" pairs or just loc_ids
+    eventCollector: MachineEventCollector,
     onStatusUpdate: StatusUpdateCallback,
-    _pollIntervalMs?: number, // kept for backward compat but unused (lazy WS + on-demand REST)
   ) {
-    this.restClient = new SpeedQueenRestClient(apiKey);
+    // Get configuration from the event collector
+    this.restClient = eventCollector.getRestClient();
+    this.locationIds = eventCollector.getLocationIds();
+    this.machineMappings = eventCollector.getMachineMappings();
     this.onStatusUpdate = onStatusUpdate;
 
-    // Parse location config
-    const mappings = parseLocationConfig(locationConfig);
-    this.locationIds = mappings.map(m => m.locationId);
-
-    // Build machine mappings from hardcoded data
-    this.machineMappings = buildMachineMappings(mappings);
-
-    // Build locationId → agentId from parsed config (supports custom mappings)
+    // Build locationId → agentId from machine mappings
     this.locationToAgent = new Map();
     for (const m of this.machineMappings) {
       this.locationToAgent.set(m.locationId, m.agentId);
     }
+
+    // Subscribe to status updates from the event collector
+    eventCollector.onStatusUpdate = (agentId, machines) => {
+      this.mergeStatus(agentId, machines);
+    };
+
+    eventCollector.setInitiatorResolver((speedqueenId, statusId) => {
+      return this.resolveCommandInitiator(speedqueenId, statusId);
+    });
   }
 
   async start(): Promise<void> {
     if (this.started) return;
     this.started = true;
 
-    console.log(`[speedqueen] Starting service for locations: ${this.locationIds.join(', ')}`);
-    console.log('[speedqueen] Connecting WebSocket (always-on for event logging)...');
-
-    // Connect WebSocket immediately for continuous event logging.
-    // REST polls run as fallback every POLL_FALLBACK_MS when WS is disconnected.
-    this.lastUiActivity = Date.now(); // prevent immediate idle disconnect
-    this.ensureWsConnected().catch(err => {
-      console.error('[speedqueen] Initial WS connect failed, will retry via fallback poll:', err);
-    });
-
-    // Fallback: poll REST every 60s if WS is not connected
-    this.wsIdleTimer = setInterval(() => this.fallbackPollIfNeeded(), 60_000);
+    console.log(`[speedqueen] Starting service for locations: ${this.locationIds.join(', ')} (REST-only mode)`);
   }
 
   stop(): void {
     this.started = false;
-    this.disconnectWs();
-    if (this.wsIdleTimer) {
-      clearInterval(this.wsIdleTimer);
-      this.wsIdleTimer = null;
-    }
     console.log('[speedqueen] Service stopped');
   }
 
   // ------------------------------------------------------------------
-  // Lazy WebSocket: connect / disconnect based on UI activity
+  // UI Activity (no-op in REST-only mode)
   // ------------------------------------------------------------------
 
   /** Call this whenever a UI client requests machine data. */
   notifyUiActivity(): void {
-    this.lastUiActivity = Date.now();
-    this.ensureWsConnected();
+    // No-op: WebSocket connection is managed by MachineEventCollector
   }
 
-  private async ensureWsConnected(): Promise<void> {
-    if (this.wsClient?.isConnected() || this.wsConnecting || !this.started) return;
-
-    this.wsConnecting = true;
-    console.log('[speedqueen] UI activity detected — connecting WebSocket…');
-
-    // Destroy any stale WS client before creating a new one (prevents leaks)
-    if (this.wsClient) {
-      this.wsClient.destroy();
-      this.wsClient = null;
-    }
-
-    const wsClient = new SpeedQueenWSClient(
-      this.restClient,
-      this.locationIds,
-      this.machineMappings,
-    );
-
-    wsClient.onMachineStatus = (agentId, updatedMachines) => {
-      this.mergeStatus(agentId, updatedMachines);
-    };
-
-    wsClient.onMachineStatusRaw = (_agentId, _machineId, statusData, mapping) => {
-      const currentStatusId = (statusData.statusId || 'UNKNOWN').toUpperCase();
-      const prevStatusId = this.previousStatusById.get(mapping.speedqueenId);
-      console.log(`[speedqueen] WS push: ${mapping.localId} ${currentStatusId} (prev: ${prevStatusId || "unknown"})`);
-      if (prevStatusId === undefined) {
-        // First WS push for this machine — establish baseline, don't log
-        this.previousStatusById.set(mapping.speedqueenId, currentStatusId);
-      } else if (prevStatusId !== currentStatusId) {
-        this.logMachineEvent(mapping, currentStatusId, prevStatusId, statusData, 'ws_push');
-        this.previousStatusById.set(mapping.speedqueenId, currentStatusId);
-      }
-    };
-
-    wsClient.onMachineError = (agentId, error) => {
-      console.log(`[speedqueen] Error for ${agentId}: ${error.name} (code=${error.code})`);
-      const mapping = this.machineMappings.find(m => m.speedqueenId === error.machine?.id);
-      if (mapping) {
-        const errorMachine: LaundryMachine = {
-          id: mapping.localId,
-          label: mapping.label,
-          type: mapping.type,
-          status: 'error',
-          lastUpdated: Date.now(),
-          source: 'speedqueen',
-          speedqueenId: mapping.speedqueenId,
-          errorCode: error.code,
-          errorName: error.name,
-          errorType: error.type,
-          model: mapping.model,
-        };
-        this.mergeStatus(agentId, [errorMachine]);
-      }
-    };
-
-    wsClient.onMachineEvent = (agentId, event) => {
-      console.log(`[speedqueen] Event for ${agentId}:`, JSON.stringify(event).slice(0, 200));
-    };
-
-    try {
-      await wsClient.connect();
-    } catch (err) {
-      console.error('[speedqueen] Failed to connect WebSocket:', err);
-    }
-
-    // Only assign if we're still the active connection attempt
-    // (another call may have run disconnectWs() while we were awaiting)
-    if (this.wsConnecting) {
-      this.wsClient = wsClient;
-      this.wsConnecting = false;
-    } else {
-      // We were cancelled during the await — clean up
-      wsClient.destroy();
-      return;
-    }
-
-    // Also do an initial REST poll to fill the cache
-    this.pollAllLocations().catch(err => {
-      console.error('[speedqueen] Initial poll after WS connect failed:', err);
-    });
-  }
-
-  private disconnectWs(): void {
-    if (this.wsClient) {
-      console.log('[speedqueen] Disconnecting WebSocket (idle)');
-      this.wsClient.destroy();
-      this.wsClient = null;
-    }
-    this.wsConnecting = false;
-  }
-
-  private checkWsIdle(): void {
-    // Keep WS alive — no idle disconnect (always-on for event logging)
-  }
-
-  /** Fallback: if WS is down, poll REST + try to reconnect WS. */
-  private async fallbackPollIfNeeded(): Promise<void> {
-    if (!this.started) return;
-
-    // If WS is connected, no action needed
-    if (this.wsClient?.isConnected()) return;
-
-    // Poll all locations via REST as fallback
-    console.log('[speedqueen] WS not connected — fallback REST poll');
-    await this.pollAllLocations().catch(err => {
-      console.error('[speedqueen] Fallback poll failed:', err);
-    });
-
-    // Try to reconnect WS
-    this.lastUiActivity = Date.now();
-    this.ensureWsConnected().catch(() => {});
-  }
+  // WebSocket connection management removed - handled by MachineEventCollector
 
   // ------------------------------------------------------------------
   // On-demand REST polling with cache TTL
@@ -990,15 +855,7 @@ export class SpeedQueenService {
       };
       machines.push(machine);
 
-      // Log event only when status changes (skip initial snapshot with no previous)
-      const prevStatusId = this.previousStatusById.get(mapping.speedqueenId);
-      if (prevStatusId === undefined) {
-        // First poll for this machine — establish baseline, don't log
-        this.previousStatusById.set(mapping.speedqueenId, currentStatusId);
-      } else if (prevStatusId !== currentStatusId) {
-        this.logMachineEvent(mapping, currentStatusId, prevStatusId, status, 'rest_poll');
-        this.previousStatusById.set(mapping.speedqueenId, currentStatusId);
-      }
+      // Event logging handled by MachineEventCollector
     }
 
     if (machines.length > 0) {
@@ -1024,60 +881,7 @@ export class SpeedQueenService {
     this.onStatusUpdate(agentId, current);
   }
 
-  /** Log a machine status change event to the database. */
-  private logMachineEvent(
-    mapping: MachineMapping,
-    statusId: string,
-    previousStatusId: string | null,
-    status: SQMachineStatus,
-    source: 'rest_poll' | 'ws_push',
-  ): void {
-    // Determine initiator: check if a pending command exists for this machine
-    let initiator: string | null = null;
-    let initiatorUser: string | null = null;
-    let commandType: string | null = null;
-
-    if (statusId === 'IN_USE') {
-      const pending = this.pendingCommands.get(mapping.speedqueenId);
-      if (pending && (Date.now() - pending.timestamp) < COMMAND_INITIATOR_WINDOW_MS) {
-        initiator = 'admin';
-        initiatorUser = pending.user;
-        commandType = pending.commandType;
-        this.pendingCommands.delete(mapping.speedqueenId);
-      } else {
-        initiator = 'customer';
-      }
-    }
-
-    const event: MachineEventRow = {
-      timestamp: new Date().toISOString(),
-      locationId: mapping.locationId,
-      locationName: mapping.agentId,
-      machineId: mapping.speedqueenId,
-      localId: mapping.localId,
-      agentId: mapping.agentId,
-      machineType: mapping.type,
-      statusId,
-      previousStatusId,
-      remainingSeconds: status.remainingSeconds ?? null,
-      remainingVend: status.remainingVend ?? null,
-      isDoorOpen: status.isDoorOpen != null ? (status.isDoorOpen ? 1 : 0) : null,
-      cycleId: status.selectedCycle?.id ?? null,
-      cycleName: status.selectedCycle?.name ? translateCycleName(status.selectedCycle.name) : null,
-      linkQuality: null,
-      receivedAt: status.timestamp ? new Date(status.timestamp).toISOString() : null,
-      source,
-      initiator,
-      initiatorUser,
-      commandType,
-    };
-
-    try {
-      insertMachineEvent(event);
-    } catch (err) {
-      console.error('[speedqueen] Failed to log machine event:', err);
-    }
-  }
+  // Event logging moved to MachineEventCollector
 
   /** Record a pending command for initiator attribution. */
   recordPendingCommand(speedqueenId: string, user: string, commandType: string): void {
@@ -1088,9 +892,30 @@ export class SpeedQueenService {
     });
   }
 
-  /** Expose previous status map for testing. */
-  getPreviousStatusMap(): Map<string, string> {
-    return this.previousStatusById;
+  // Previous status tracking moved to MachineEventCollector
+
+  private resolveCommandInitiator(speedqueenId: string, statusId: string): CommandInitiatorResolution {
+    if (statusId !== 'IN_USE') {
+      return { initiator: null, initiatorUser: null, commandType: null };
+    }
+
+    const pending = this.pendingCommands.get(speedqueenId);
+    if (!pending) {
+      return { initiator: 'customer', initiatorUser: null, commandType: null };
+    }
+
+    const ageMs = Date.now() - pending.timestamp;
+    if (ageMs > COMMAND_INITIATOR_WINDOW_MS) {
+      this.pendingCommands.delete(speedqueenId);
+      return { initiator: 'customer', initiatorUser: null, commandType: null };
+    }
+
+    this.pendingCommands.delete(speedqueenId);
+    return {
+      initiator: 'admin',
+      initiatorUser: pending.user,
+      commandType: pending.commandType,
+    };
   }
 
   /** Expose pending commands map for testing. */
@@ -1241,7 +1066,6 @@ export {
   API_BASE,
   WS_URL,
   STATUS_CACHE_TTL_MS,
-  WS_IDLE_TIMEOUT_MS,
 };
 export type { SQMachine, SQMachineStatus, SQCycle, SQError, SQCommandResponse, SQLocation };
 export { COMMAND_INITIATOR_WINDOW_MS };
