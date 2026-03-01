@@ -23,25 +23,44 @@ vi.mock('ws', () => {
 
 import {
   SpeedQueenService,
+  SpeedQueenRestClient,
+  parseLocationConfig,
+  buildMachineMappings,
   STATUS_CACHE_TTL_MS,
-  WS_IDLE_TIMEOUT_MS,
 } from '../services/speedqueen';
 import type { LaundryMachine } from '../../../types';
 
-describe('SpeedQueenService — always-on WebSocket & caching', () => {
+// Mock MachineEventCollector for tests
+const createMockEventCollector = (restClient: any, locationIds: string[], machineMappings: any[]) => ({
+  getRestClient: () => restClient,
+  getLocationIds: () => locationIds,
+  getMachineMappings: () => machineMappings,
+  start: vi.fn(),
+  stop: vi.fn(),
+  isConnected: vi.fn(() => false),
+  onStatusUpdate: vi.fn(),
+});
+
+// Helper function to create test SpeedQueenService
+const createTestService = (locationConfig: string, statusCallback: any = () => {}) => {
+  const restClient = new SpeedQueenRestClient('test-key');
+  const locationMappings = parseLocationConfig(locationConfig);
+  const machineMappings = buildMachineMappings(locationMappings);
+  const locationIds = locationMappings.map(m => m.locationId);
+  const mockEventCollector = createMockEventCollector(restClient, locationIds, machineMappings);
+  return new SpeedQueenService(mockEventCollector, statusCallback);
+};
+
+describe('SpeedQueenService — REST-only mode & caching', () => {
   let service: SpeedQueenService;
   let statusUpdates: Array<{ agentId: string; machines: LaundryMachine[] }>;
 
   beforeEach(() => {
     mockFetch.mockReset();
     statusUpdates = [];
-    service = new SpeedQueenService(
-      'test-key',
-      'loc_d23f6c,loc_7b105b',
-      (agentId, machines) => {
-        statusUpdates.push({ agentId, machines: [...machines] });
-      },
-    );
+    service = createTestService('loc_d23f6c,loc_7b105b', (agentId, machines) => {
+      statusUpdates.push({ agentId, machines: [...machines] });
+    });
   });
 
   afterEach(() => {
@@ -53,83 +72,30 @@ describe('SpeedQueenService — always-on WebSocket & caching', () => {
       expect(STATUS_CACHE_TTL_MS).toBe(30_000);
     });
 
-    it('exports WS idle timeout of 60 seconds', () => {
-      expect(WS_IDLE_TIMEOUT_MS).toBe(60_000);
-    });
+    // Note: WS idle timeout moved to MachineEventCollector
   });
 
-  describe('start() — always-on WebSocket', () => {
-    it('connects WebSocket immediately on start()', async () => {
-      // Mock WS auth + initial poll so start() completes
-      mockFetch.mockImplementation(async (url: string) => {
-        if (url.includes('/v1/realtime/auth')) {
-          return { ok: true, json: () => Promise.resolve({ token: 'test-token' }) };
-        }
-        if (url.includes('/machines')) {
-          return {
-            ok: true,
-            headers: { get: () => 'application/json' },
-            json: () => Promise.resolve([
-              { id: 'mac_1096b5', status: { statusId: 'AVAILABLE', remainingSeconds: 0 } },
-            ]),
-          };
-        }
-        return { ok: true, json: () => Promise.resolve({}) };
-      });
-
+  describe('start() — REST-only mode', () => {
+    it('starts service without WS (WS managed by EventCollector)', async () => {
       await service.start();
-      // Wait for the fire-and-forget ensureWsConnected to complete
-      await new Promise(r => setTimeout(r, 100));
-
       expect(service.isActive()).toBe(true);
-      // WS auth token should have been requested
+      // SpeedQueenService no longer manages WS — no token calls expected
       const tokenCalls = mockFetch.mock.calls.filter(
         (c: any) => c[0].includes('/v1/realtime/auth'),
       );
-      expect(tokenCalls.length).toBeGreaterThanOrEqual(1);
+      expect(tokenCalls.length).toBe(0);
     });
   });
 
-  describe('notifyUiActivity() — keeps WS alive', () => {
-    it('does not create additional WS connection if already connected from start()', async () => {
-      let tokenCallCount = 0;
-      // Mock the realtime token endpoint
-      mockFetch.mockImplementation(async (url: string) => {
-        if (url.includes('/v1/realtime/auth')) {
-          tokenCallCount++;
-          return {
-            ok: true,
-            json: () => Promise.resolve({ token: 'mock-ws-token' }),
-          };
-        }
-        if (url.includes('/v1/locations/') && url.includes('/machines')) {
-          return {
-            ok: true,
-            headers: new Headers({ 'content-type': 'application/json' }),
-            json: () => Promise.resolve([
-              {
-                id: 'mac_1096b5',
-                status: { statusId: 'AVAILABLE', remainingSeconds: 0 },
-              },
-            ]),
-          };
-        }
-        return { ok: true, headers: new Headers(), json: () => Promise.resolve({}) };
-      });
-
+  describe('notifyUiActivity() — no-op in REST-only mode', () => {
+    it('notifyUiActivity is a no-op (WS managed by EventCollector)', async () => {
       await service.start();
-      // Wait for the fire-and-forget ensureWsConnected to complete
-      await new Promise(resolve => setTimeout(resolve, 100));
 
-      // start() should have initiated WS connection (1 token call)
-      expect(tokenCallCount).toBe(1);
-
-      // Trigger UI activity — should not create a new WS since already connected
+      // notifyUiActivity should not trigger any fetch calls
+      const callsBefore = mockFetch.mock.calls.length;
       service.notifyUiActivity();
       await new Promise(resolve => setTimeout(resolve, 50));
-
-      // No additional token calls — WS was already connected
-      expect(tokenCallCount).toBe(1);
+      expect(mockFetch.mock.calls.length).toBe(callsBefore);
     });
   });
 
@@ -290,14 +256,9 @@ describe('SpeedQueenService — always-on WebSocket & caching', () => {
   // -------------------------------------------------------------------
   // Fix #8: pollIntervalMs is unused (backward compat)
   // -------------------------------------------------------------------
-  describe('pollIntervalMs parameter', () => {
-    it('accepts pollIntervalMs for backward compat without error', () => {
-      const svc = new SpeedQueenService(
-        'test-key',
-        'loc_d23f6c',
-        () => {},
-        30_000, // backward compat param
-      );
+  describe('constructor', () => {
+    it('accepts MachineEventCollector and creates service', () => {
+      const svc = createTestService('loc_d23f6c', () => {});
       expect(svc.isActive()).toBe(false);
       svc.stop();
     });

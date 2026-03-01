@@ -38,6 +38,27 @@ import {
   BRANDOA2_MACHINES,
 } from '../services/speedqueen';
 
+// Mock MachineEventCollector for tests
+const createMockEventCollector = (restClient: any, locationIds: string[], machineMappings: any[]) => ({
+  getRestClient: () => restClient,
+  getLocationIds: () => locationIds,
+  getMachineMappings: () => machineMappings,
+  start: vi.fn(),
+  stop: vi.fn(),
+  isConnected: vi.fn(() => false),
+  onStatusUpdate: vi.fn(),
+});
+
+// Helper function to create test SpeedQueenService
+const createTestService = (locationConfig: string, statusCallback: any = () => {}) => {
+  const restClient = new SpeedQueenRestClient('test-key');
+  const locationMappings = parseLocationConfig(locationConfig);
+  const machineMappings = buildMachineMappings(locationMappings);
+  const locationIds = locationMappings.map(m => m.locationId);
+  const mockEventCollector = createMockEventCollector(restClient, locationIds, machineMappings);
+  return new SpeedQueenService(mockEventCollector, statusCallback);
+};
+
 describe('Speed Queen Service', () => {
   beforeEach(() => {
     mockFetch.mockReset();
@@ -588,13 +609,11 @@ describe('Speed Queen Service', () => {
   describe('SpeedQueenService', () => {
     it('initializes with correct location mappings', () => {
       const statusUpdates: Array<{ agentId: string; count: number }> = [];
-      const service = new SpeedQueenService(
-        'test-key',
-        'loc_d23f6c,loc_7b105b',
-        (agentId, machines) => {
-          statusUpdates.push({ agentId, count: machines.length });
-        },
-      );
+      const statusCallback = (agentId: string, machines: any[]) => {
+        statusUpdates.push({ agentId, count: machines.length });
+      };
+
+      const service = createTestService('loc_d23f6c,loc_7b105b', statusCallback);
 
       // Check the service was created (it won't start without calling start())
       expect(service.isActive()).toBe(false);
@@ -603,7 +622,7 @@ describe('Speed Queen Service', () => {
     });
 
     it('returns machine mapping for known machine', () => {
-      const service = new SpeedQueenService('test-key', 'loc_d23f6c', () => {});
+      const service = createTestService('loc_d23f6c');
       const mapping = service.getMachineMapping('Brandoa1', 'w1');
       expect(mapping).toBeDefined();
       expect(mapping?.speedqueenId).toBe('mac_1096b5');
@@ -611,19 +630,19 @@ describe('Speed Queen Service', () => {
     });
 
     it('returns undefined for unknown machine mapping', () => {
-      const service = new SpeedQueenService('test-key', 'loc_d23f6c', () => {});
+      const service = createTestService('loc_d23f6c');
       const mapping = service.getMachineMapping('Brandoa1', 'w99');
       expect(mapping).toBeUndefined();
     });
 
     it('returns location ID for agent', () => {
-      const service = new SpeedQueenService('test-key', 'loc_d23f6c', () => {});
+      const service = createTestService('loc_d23f6c');
       expect(service.getLocationIdForAgent('Brandoa1')).toBe('loc_d23f6c');
       expect(service.getLocationIdForAgent('Unknown')).toBeUndefined();
     });
 
     it('returns all machine mappings for an agent', () => {
-      const service = new SpeedQueenService('test-key', 'loc_d23f6c,loc_7b105b', () => {});
+      const service = createTestService('loc_d23f6c,loc_7b105b');
       const b1Mappings = service.getMachineMappingsForAgent('Brandoa1');
       expect(b1Mappings).toHaveLength(8);
       const b2Mappings = service.getMachineMappingsForAgent('Brandoa2');
@@ -657,7 +676,7 @@ describe('Speed Queen Service', () => {
         };
       });
 
-      const service = new SpeedQueenService('test-key', 'loc_d23f6c', () => {});
+      const service = createTestService('loc_d23f6c');
       await service.start();
       const machines = await service.getMachinesOnDemand('Brandoa1');
       expect(machines.length).toBeGreaterThan(0);
@@ -667,7 +686,7 @@ describe('Speed Queen Service', () => {
     });
 
     it('throws when sending command for unknown machine', async () => {
-      const service = new SpeedQueenService('test-key', 'loc_d23f6c', () => {});
+      const service = createTestService('loc_d23f6c');
       await expect(
         service.sendMachineCommand('Brandoa1', 'w99', 'remote_start'),
       ).rejects.toThrow('No Speed Queen mapping');
@@ -675,7 +694,7 @@ describe('Speed Queen Service', () => {
 
     // --- Fix #1: Custom locationId:agentId mappings at runtime ---
     it('resolves custom agent ID from loc_xxx:CustomAgent config', () => {
-      const service = new SpeedQueenService('test-key', 'loc_d23f6c:CustomAgent', () => {});
+      const service = createTestService('loc_d23f6c:CustomAgent');
       expect(service.getLocationIdForAgent('CustomAgent')).toBe('loc_d23f6c');
       expect(service.getLocationIdForAgent('Brandoa1')).toBeUndefined();
     });
@@ -704,7 +723,7 @@ describe('Speed Queen Service', () => {
         };
       });
 
-      const service = new SpeedQueenService('test-key', 'loc_d23f6c:CustomAgent', () => {});
+      const service = createTestService('loc_d23f6c:CustomAgent');
       await service.start();
       const machines = await service.getMachinesOnDemand('CustomAgent');
       expect(machines.length).toBeGreaterThan(0);
@@ -713,7 +732,7 @@ describe('Speed Queen Service', () => {
     });
 
     it('getMachineMapping works with custom agent ID', () => {
-      const service = new SpeedQueenService('test-key', 'loc_d23f6c:MyLaundry', () => {});
+      const service = createTestService('loc_d23f6c:MyLaundry');
       const mapping = service.getMachineMapping('MyLaundry', 'w1');
       expect(mapping).toBeDefined();
       expect(mapping?.speedqueenId).toBe('mac_1096b5');
@@ -835,7 +854,7 @@ describe('Speed Queen Service', () => {
         };
       });
 
-      const service = new SpeedQueenService('test-key', 'loc_d23f6c', () => {});
+      const service = createTestService('loc_d23f6c');
       await service.start();
 
       // Fire multiple concurrent requests

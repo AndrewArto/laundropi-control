@@ -31,6 +31,7 @@ vi.mock('ws', () => {
 import {
   mapSQStatus,
   buildMachineMappings,
+  parseLocationConfig,
   SpeedQueenRestClient,
   SpeedQueenWSClient,
   SpeedQueenService,
@@ -38,6 +39,27 @@ import {
 } from '../services/speedqueen';
 import type { SQMachineStatus } from '../services/speedqueen';
 import type { MachineStatus } from '../../../types';
+
+// Mock MachineEventCollector for integration tests
+const createMockEventCollector = (restClient: any, locationIds: string[], machineMappings: any[]) => ({
+  getRestClient: () => restClient,
+  getLocationIds: () => locationIds,
+  getMachineMappings: () => machineMappings,
+  start: vi.fn(),
+  stop: vi.fn(),
+  isConnected: vi.fn(() => false),
+  onStatusUpdate: vi.fn(),
+});
+
+// Helper function to create test SpeedQueenService
+const createTestService = (locationConfig: string, statusCallback: any = () => {}) => {
+  const restClient = new SpeedQueenRestClient('test-key');
+  const locationMappings = parseLocationConfig(locationConfig);
+  const machineMappings = buildMachineMappings(locationMappings);
+  const locationIds = locationMappings.map(m => m.locationId);
+  const mockEventCollector = createMockEventCollector(restClient, locationIds, machineMappings);
+  return new SpeedQueenService(mockEventCollector, statusCallback);
+};
 
 // ============================================================================
 // Fixtures — mirror the EXACT shape returned by the Speed Queen Insights API
@@ -188,7 +210,7 @@ describe('SQ Integration: REST poll pipeline (getMachines → pollLocation → L
     });
 
     const updates: Array<{ agentId: string; machines: any[] }> = [];
-    const service = new SpeedQueenService('test-key', 'loc_d23f6c', (agentId, machines) => {
+    const service = createTestService('loc_d23f6c', (agentId, machines) => {
       updates.push({ agentId, machines: [...machines] });
     });
     await service.start();
@@ -268,7 +290,7 @@ describe('SQ Integration: REST poll pipeline (getMachines → pollLocation → L
       };
     });
 
-    const service = new SpeedQueenService('test-key', 'loc_d23f6c', () => {});
+    const service = createTestService('loc_d23f6c');
     await service.start();
     const machines = await service.getMachinesOnDemand('Brandoa1');
     service.stop();
@@ -327,7 +349,7 @@ describe('SQ Integration: REST poll pipeline (getMachines → pollLocation → L
       };
     });
 
-    const service = new SpeedQueenService('test-key', 'loc_d23f6c', () => {});
+    const service = createTestService('loc_d23f6c');
     await service.start();
     const machines = await service.getMachinesOnDemand('Brandoa1');
     service.stop();
@@ -570,7 +592,7 @@ describe('SQ Integration: Edge cases', () => {
       };
     });
 
-    const service = new SpeedQueenService('test-key', 'loc_d23f6c', () => {});
+    const service = createTestService('loc_d23f6c');
     await service.start();
     const machines = await service.getMachinesOnDemand('Brandoa1');
     service.stop();
@@ -616,7 +638,7 @@ describe('SQ Integration: Edge cases', () => {
       };
     });
 
-    const service = new SpeedQueenService('test-key', 'loc_d23f6c', () => {});
+    const service = createTestService('loc_d23f6c');
     await service.start();
     const machines = await service.getMachinesOnDemand('Brandoa1');
     service.stop();

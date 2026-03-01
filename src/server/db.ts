@@ -154,6 +154,7 @@ export type MachineEventRow = {
   initiator: string | null;
   initiatorUser: string | null;
   commandType: string | null;
+  isTransition: number | null;
 };
 
 export type DetergentType = 'blue' | 'green' | 'brown';
@@ -447,6 +448,13 @@ try {
 // Best-effort migration: add accountExpiresAt column to invite_tokens
 try {
   db.prepare('ALTER TABLE invite_tokens ADD COLUMN accountExpiresAt INTEGER').run();
+} catch (_) {
+  // column already exists
+}
+
+// Best-effort migration: add isTransition column to machine_events
+try {
+  db.prepare('ALTER TABLE machine_events ADD COLUMN isTransition INTEGER DEFAULT 1').run();
 } catch (_) {
   // column already exists
 }
@@ -1757,12 +1765,14 @@ const insertMachineEventStmt = db.prepare(`
   INSERT INTO machine_events(
     timestamp, locationId, locationName, machineId, localId, agentId, machineType,
     statusId, previousStatusId, remainingSeconds, remainingVend, isDoorOpen,
-    cycleId, cycleName, linkQuality, receivedAt, source, initiator, initiatorUser, commandType
+    cycleId, cycleName, linkQuality, receivedAt, source, initiator, initiatorUser, commandType,
+    isTransition
   )
   VALUES (
     @timestamp, @locationId, @locationName, @machineId, @localId, @agentId, @machineType,
     @statusId, @previousStatusId, @remainingSeconds, @remainingVend, @isDoorOpen,
-    @cycleId, @cycleName, @linkQuality, @receivedAt, @source, @initiator, @initiatorUser, @commandType
+    @cycleId, @cycleName, @linkQuality, @receivedAt, @source, @initiator, @initiatorUser, @commandType,
+    @isTransition
   )
 `);
 
@@ -1788,6 +1798,7 @@ export function insertMachineEvent(row: MachineEventRow) {
     initiator: row.initiator ?? null,
     initiatorUser: row.initiatorUser ?? null,
     commandType: row.commandType ?? null,
+    isTransition: row.isTransition ?? null,
   });
 }
 
@@ -1797,6 +1808,7 @@ export function listMachineEvents(options: {
   from?: string;
   to?: string;
   limit?: number;
+  transitionsOnly?: boolean;
 } = {}): MachineEventRow[] {
   const conditions: string[] = [];
   const params: any[] = [];
@@ -1816,6 +1828,9 @@ export function listMachineEvents(options: {
   if (options.to) {
     conditions.push('timestamp <= ?');
     params.push(options.to);
+  }
+  if (options.transitionsOnly) {
+    conditions.push('isTransition = 1');
   }
 
   const where = conditions.length ? ' WHERE ' + conditions.join(' AND ') : '';
@@ -1848,5 +1863,14 @@ export function listMachineEvents(options: {
     initiator: row.initiator,
     initiatorUser: row.initiatorUser,
     commandType: row.commandType,
+    isTransition: row.isTransition,
   }));
+}
+
+export function getLastKnownStatus(machineId: string): string | null {
+  const row = db.prepare(
+    'SELECT statusId FROM machine_events WHERE machineId = ? ORDER BY timestamp DESC LIMIT 1'
+  ).get(machineId) as any;
+
+  return row?.statusId ?? null;
 }

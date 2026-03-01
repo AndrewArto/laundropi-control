@@ -9,8 +9,9 @@ import { listAgents, updateHeartbeat, saveMeta, getAgent, updateRelayMeta, listS
 import expenditureRoutes from './routes/expenditure';
 import inviteRoutes, { publicRouter as invitePublicRoutes } from './routes/invites';
 import invoicingRoutes from './routes/invoicing';
-import { SpeedQueenService } from './services/speedqueen';
+import { SpeedQueenService, SpeedQueenRestClient, parseLocationConfig, buildMachineMappings } from './services/speedqueen';
 import { MockSpeedQueenService } from './services/speedqueen-mock';
+import { MachineEventCollector } from './services/machine-event-collector';
 import { createSpeedQueenRouter } from './routes/speedqueen';
 import type { LaundryMachine, SpeedQueenCommandType } from '../../types';
 
@@ -1843,6 +1844,7 @@ const DEFAULT_MACHINE_CONFIGS: Record<string, Array<{ id: string; label: string;
 };
 
 // --- SPEED QUEEN SERVICE ---
+let machineEventCollector: MachineEventCollector | null = null;
 let speedQueenService: SpeedQueenService | MockSpeedQueenService | null = null;
 
 const initSpeedQueen = () => {
@@ -1871,18 +1873,41 @@ const initSpeedQueen = () => {
       SPEEDQUEEN_POLL_INTERVAL_MS,
     );
   } else {
-    console.log('[central] Initializing Speed Queen integration (lazy WebSocket)...');
-    speedQueenService = new SpeedQueenService(
-      SPEEDQUEEN_API_KEY,
-      SPEEDQUEEN_LOCATIONS,
-      statusCallback,
-      SPEEDQUEEN_POLL_INTERVAL_MS,
+    console.log('[central] Initializing Speed Queen integration with MachineEventCollector...');
+
+    // Parse location configuration
+    const locationMappings = parseLocationConfig(SPEEDQUEEN_LOCATIONS);
+    const machineMappings = buildMachineMappings(locationMappings);
+    const locationIds = locationMappings.map(m => m.locationId);
+
+    // Create REST client
+    const restClient = new SpeedQueenRestClient(SPEEDQUEEN_API_KEY);
+
+    // Create MachineEventCollector for 24/7 event collection
+    machineEventCollector = new MachineEventCollector(
+      restClient,
+      locationIds,
+      machineMappings,
+      statusCallback
     );
+
+    // Create SpeedQueenService that uses the event collector
+    speedQueenService = new SpeedQueenService(
+      machineEventCollector,
+      statusCallback
+    );
+
+    // Start both services
+    machineEventCollector.start().catch(err => {
+      console.error('[central] Failed to start MachineEventCollector:', err);
+    });
   }
 
-  speedQueenService.start().catch(err => {
-    console.error('[central] Failed to start Speed Queen service:', err);
-  });
+  if (speedQueenService) {
+    speedQueenService.start().catch(err => {
+      console.error('[central] Failed to start Speed Queen service:', err);
+    });
+  }
 };
 
 app.get('/api/agents/:id/machines', async (req, res) => {
@@ -2315,4 +2340,4 @@ if (process.env.NODE_ENV !== 'test') {
   });
 }
 
-export { app, server, speedQueenService, SPEEDQUEEN_MOCK, initSpeedQueen };
+export { app, server, speedQueenService, machineEventCollector, SPEEDQUEEN_MOCK, initSpeedQueen };
