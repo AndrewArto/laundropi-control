@@ -1084,6 +1084,34 @@ describe('Expenditure API', { timeout: 30000 }, () => {
 
       expect(response.body.error).toBe('category required for expense transactions');
     });
+
+    it('rejects PUT setting reconciliationStatus=existing on expense without assignedAgentId', async () => {
+      const app = await setupApp();
+
+      const csvContent = createCsvContent([
+        { date: '15/01/2026', description: 'Expense without agent test', amount: '30,00' },
+      ]);
+
+      const uploadResponse = await request(app)
+        .post('/api/expenditure/imports')
+        .set('Content-Type', 'text/csv')
+        .set('X-Filename', 'no-agent-test.csv')
+        .send(csvContent)
+        .expect(200);
+
+      const transactionId = uploadResponse.body.transactions[0].id;
+
+      const response = await request(app)
+        .put(`/api/expenditure/transactions/${transactionId}`)
+        .send({
+          reconciliationStatus: 'existing',
+          category: 'detergents',
+          // no assignedAgentId provided
+        })
+        .expect(400);
+
+      expect(response.body.error).toBe('assignedAgentId required for existing expense transactions');
+    });
   });
 
   describe('Auto-Match Category Preservation', () => {

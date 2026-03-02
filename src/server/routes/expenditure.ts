@@ -437,6 +437,11 @@ router.put('/transactions/:id', (req, res) => {
       return res.status(400).json({ error: 'category required for expense transactions' });
     }
 
+    // Validation: existing expense transactions must have an assignedAgentId
+    if (!effectiveAgentId) {
+      return res.status(400).json({ error: 'assignedAgentId required for existing expense transactions' });
+    }
+
     // If assignedAgentId changes, validate category against new agent's allowed categories
     if (effectiveAgentId) {
       const validCategories = getCategoriesForAgent(effectiveAgentId);
