@@ -17,6 +17,7 @@ export interface PendingChange {
   agentId?: string;
   entryDate?: string;
   comment?: string;
+  category?: string;
 }
 
 export const useReconciliation = () => {
@@ -196,7 +197,8 @@ export const useReconciliation = () => {
     transactionId: string,
     agentId: string,
     entryDate?: string,
-    comment?: string
+    comment?: string,
+    category?: string
   ) => {
     setPendingChanges(prev => {
       const next = new Map(prev);
@@ -206,6 +208,7 @@ export const useReconciliation = () => {
         agentId,
         entryDate,
         comment,
+        category,
       });
       return next;
     });
@@ -310,7 +313,8 @@ export const useReconciliation = () => {
               change.transactionId,
               change.agentId!,
               change.entryDate,
-              change.comment
+              change.comment,
+              change.category
             );
             break;
           case 'assign_stripe':

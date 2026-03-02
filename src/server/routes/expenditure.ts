@@ -410,7 +410,8 @@ router.put('/transactions/:id', (req, res) => {
     reconciliationStatus || transaction.reconciliationStatus,
     matchedDeductionKey !== undefined ? matchedDeductionKey : transaction.matchedDeductionKey,
     assignedAgentId !== undefined ? assignedAgentId : transaction.assignedAgentId,
-    reconciliationNotes !== undefined ? reconciliationNotes : transaction.reconciliationNotes
+    reconciliationNotes !== undefined ? reconciliationNotes : transaction.reconciliationNotes,
+    transaction.category  // Keep existing category when updating other fields
   );
 
   // Create audit entry
@@ -453,7 +454,7 @@ router.post('/transactions/:id/assign', (req, res) => {
     });
   }
 
-  const { agentId, entryDate, comment } = req.body;
+  const { agentId, entryDate, comment, category } = req.body;
   if (!agentId) {
     return res.status(400).json({ error: 'agentId required' });
   }
@@ -513,7 +514,8 @@ router.post('/transactions/:id/assign', (req, res) => {
     'existing',
     deductionKey,
     agentId,
-    `Assigned to ${agentId} on ${targetDate}`
+    `Assigned to ${agentId} on ${targetDate}`,
+    category || null
   );
 
   // Create expenditure audit entry
@@ -527,6 +529,7 @@ router.post('/transactions/:id/assign', (req, res) => {
       amount: transaction.amount,
       comment: deductionComment,
       deductionKey,
+      category: category || null,
     }),
     user,
     createdAt: now,
@@ -623,7 +626,8 @@ router.post('/transactions/:id/assign-stripe', (req, res) => {
     'existing',
     `stripe:${agentId}:${targetDate}`,
     agentId,
-    `Stripe payment assigned to ${agentId} revenue on ${targetDate}`
+    `Stripe payment assigned to ${agentId} revenue on ${targetDate}`,
+    null  // Stripe credits don't use expense categories
   );
 
   // Create expenditure audit entry

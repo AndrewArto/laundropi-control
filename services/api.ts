@@ -481,7 +481,7 @@ export const ApiService = {
     return await res.json();
   },
 
-  async assignExpenditureTransaction(transactionId: string, agentId: string, entryDate?: string, comment?: string): Promise<{
+  async assignExpenditureTransaction(transactionId: string, agentId: string, entryDate?: string, comment?: string, category?: string): Promise<{
     transaction: ExpenditureTransaction;
     revenueEntry: RevenueEntry;
     deductionKey: string;
@@ -489,7 +489,7 @@ export const ApiService = {
     const res = await request(`${API_BASE}/expenditure/transactions/${encodeURIComponent(transactionId)}/assign`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ agentId, entryDate, comment }),
+      body: JSON.stringify({ agentId, entryDate, comment, category }),
     });
     return await res.json();
   },

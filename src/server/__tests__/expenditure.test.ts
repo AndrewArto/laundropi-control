@@ -330,6 +330,68 @@ describe('Expenditure API', { timeout: 30000 }, () => {
       expect(response.body.revenueEntry.deductions[0].comment).toBe(customComment);
     });
 
+    it('assigns transaction with expense category', async () => {
+      const app = await setupApp();
+
+      const csvContent = createCsvContent([
+        { date: '15/01/2026', description: 'Laundry detergent', amount: '45,50' },
+      ]);
+
+      const uploadResponse = await request(app)
+        .post('/api/expenditure/imports')
+        .set('Content-Type', 'text/csv')
+        .set('X-Filename', 'category-assign-test.csv')
+        .send(csvContent)
+        .expect(200);
+
+      const transactionId = uploadResponse.body.transactions[0].id;
+      const agentId = 'brandoa1';
+      const category = 'detergents';
+
+      const response = await request(app)
+        .post(`/api/expenditure/transactions/${transactionId}/assign`)
+        .send({ agentId, category })
+        .expect(200);
+
+      expect(response.body.transaction.reconciliationStatus).toBe('existing');
+      expect(response.body.transaction.assignedAgentId).toBe(agentId);
+      expect(response.body.transaction.category).toBe(category);
+      expect(response.body.revenueEntry).toBeDefined();
+      expect(response.body.revenueEntry.deductions).toHaveLength(1);
+      expect(response.body.revenueEntry.deductions[0].amount).toBe(45.5);
+    });
+
+    it('assigns transaction with fixed cost category to General agent', async () => {
+      const app = await setupApp();
+
+      const csvContent = createCsvContent([
+        { date: '15/01/2026', description: 'Accounting services', amount: '120,00' },
+      ]);
+
+      const uploadResponse = await request(app)
+        .post('/api/expenditure/imports')
+        .set('Content-Type', 'text/csv')
+        .set('X-Filename', 'fixed-category-assign-test.csv')
+        .send(csvContent)
+        .expect(200);
+
+      const transactionId = uploadResponse.body.transactions[0].id;
+      const agentId = 'General';
+      const category = 'accounting';
+
+      const response = await request(app)
+        .post(`/api/expenditure/transactions/${transactionId}/assign`)
+        .send({ agentId, category })
+        .expect(200);
+
+      expect(response.body.transaction.reconciliationStatus).toBe('existing');
+      expect(response.body.transaction.assignedAgentId).toBe(agentId);
+      expect(response.body.transaction.category).toBe(category);
+      expect(response.body.revenueEntry).toBeDefined();
+      expect(response.body.revenueEntry.deductions).toHaveLength(1);
+      expect(response.body.revenueEntry.deductions[0].amount).toBe(120);
+    });
+
     it('rejects duplicate assignment of the same expense transaction', async () => {
       const app = await setupApp();
 

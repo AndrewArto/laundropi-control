@@ -1565,7 +1565,8 @@ const updateExpenditureTransactionStmt = db.prepare(`
   SET reconciliationStatus = @reconciliationStatus,
       matchedDeductionKey = @matchedDeductionKey,
       assignedAgentId = @assignedAgentId,
-      reconciliationNotes = @reconciliationNotes
+      reconciliationNotes = @reconciliationNotes,
+      category = @category
   WHERE id = @id
 `);
 
@@ -1592,7 +1593,8 @@ export function updateExpenditureTransaction(
   reconciliationStatus: string,
   matchedDeductionKey: string | null,
   assignedAgentId: string | null,
-  reconciliationNotes: string | null
+  reconciliationNotes: string | null,
+  category: string | null = null
 ) {
   updateExpenditureTransactionStmt.run({
     id,
@@ -1600,6 +1602,7 @@ export function updateExpenditureTransaction(
     matchedDeductionKey,
     assignedAgentId,
     reconciliationNotes,
+    category,
   });
 }
 
