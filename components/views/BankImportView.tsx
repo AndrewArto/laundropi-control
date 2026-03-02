@@ -534,10 +534,10 @@ export const BankImportView: React.FC<BankImportViewProps> = ({
                                 const selectedAgentId = selectedByClick || pending?.agentId;
 
                                 return allLaundries.map((l, idx) => {
-                                  // Default: first laundry for expenses
+                                  // No default selection for expenses - user must choose
                                   const isSelected = selectedAgentId
                                     ? l.id === selectedAgentId
-                                    : idx === 0;
+                                    : false;
 
                                   return (
                                     <button
@@ -594,9 +594,10 @@ export const BankImportView: React.FC<BankImportViewProps> = ({
                               const selectedAgentId = selectedByClick || pending?.agentId;
 
                               return allLaundries.map((l, idx) => {
+                                // No default selection for expenses - user must choose
                                 const isSelected = selectedAgentId
                                   ? l.id === selectedAgentId
-                                  : idx === 0;
+                                  : false;
 
                                 return (
                                   <button
