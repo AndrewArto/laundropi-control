@@ -182,6 +182,7 @@ router.post('/imports', express.text({ type: '*/*', limit: '5mb' }), (req, res) 
     let reconciliationStatus: ExpenditureTransactionRow['reconciliationStatus'] = 'new';
     let reconciliationNotes: string | null = null;
     let assignedAgentId: string | null = null;
+    let category: string | null = null;
 
     const txLookup = {
       transactionDate: parsed.date,
@@ -209,6 +210,7 @@ router.post('/imports', express.text({ type: '*/*', limit: '5mb' }), (req, res) 
         if (matchedAssigned) {
           reconciliationStatus = 'existing';
           assignedAgentId = matchedAssigned.assignedAgentId;
+          category = matchedAssigned.category;
           reconciliationNotes = 'Auto-matched (previously assigned transaction)';
           autoExistingCount++;
         }
@@ -234,7 +236,7 @@ router.post('/imports', express.text({ type: '*/*', limit: '5mb' }), (req, res) 
       description: parsed.description,
       amount: parsed.amount,
       bankReference: parsed.reference,
-      category: null,
+      category,
       transactionType: parsed.transactionType,
       reconciliationStatus,
       matchedDeductionKey: null,
@@ -400,10 +402,28 @@ router.put('/transactions/:id', (req, res) => {
     return res.status(404).json({ error: 'Transaction not found' });
   }
 
-  const { reconciliationStatus, assignedAgentId, matchedDeductionKey, reconciliationNotes } = req.body;
+  const { reconciliationStatus, assignedAgentId, matchedDeductionKey, reconciliationNotes, category } = req.body;
 
   if (reconciliationStatus && !['new', 'existing', 'discrepancy', 'ignored'].includes(reconciliationStatus)) {
     return res.status(400).json({ error: 'Invalid reconciliation status' });
+  }
+
+  // Category validation: if setting reconciliationStatus to 'existing' with assignedAgentId
+  // on an expense transaction, require category
+  if (reconciliationStatus === 'existing' &&
+      assignedAgentId &&
+      transaction.transactionType === 'expense') {
+
+    const targetCategory = category || transaction.category;
+    if (!targetCategory) {
+      return res.status(400).json({ error: 'category required for expense transactions' });
+    }
+
+    // Validate category against allowed categories for this agent
+    const validCategories = getCategoriesForAgent(assignedAgentId);
+    if (!validCategories.some(c => c.id === targetCategory)) {
+      return res.status(400).json({ error: 'invalid category for this agent' });
+    }
   }
 
   updateExpenditureTransaction(
@@ -412,7 +432,7 @@ router.put('/transactions/:id', (req, res) => {
     matchedDeductionKey !== undefined ? matchedDeductionKey : transaction.matchedDeductionKey,
     assignedAgentId !== undefined ? assignedAgentId : transaction.assignedAgentId,
     reconciliationNotes !== undefined ? reconciliationNotes : transaction.reconciliationNotes,
-    transaction.category  // Keep existing category when updating other fields
+    category !== undefined ? category : transaction.category
   );
 
   // Create audit entry

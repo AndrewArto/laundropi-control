@@ -52,6 +52,7 @@ export const useReconciliation = () => {
             ...tx,
             reconciliationStatus: 'existing' as const,
             assignedAgentId: change.agentId || null,
+            category: change.action === 'assign_expense' ? (change.category || null) : null,
             reconciliationNotes: change.action === 'assign_stripe'
               ? `Stripe payment → ${change.agentId}`
               : `Expense → ${change.agentId}`,
