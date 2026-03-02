@@ -291,7 +291,7 @@ describe('Expenditure API', { timeout: 30000 }, () => {
 
       const response = await request(app)
         .post(`/api/expenditure/transactions/${transactionId}/assign`)
-        .send({ agentId })
+        .send({ agentId, category: 'detergents' })
         .expect(200);
 
       expect(response.body.transaction.reconciliationStatus).toBe('existing');
@@ -323,7 +323,7 @@ describe('Expenditure API', { timeout: 30000 }, () => {
 
       const response = await request(app)
         .post(`/api/expenditure/transactions/${transactionId}/assign`)
-        .send({ agentId, entryDate: customDate, comment: customComment })
+        .send({ agentId, entryDate: customDate, comment: customComment, category: 'water' })
         .expect(200);
 
       expect(response.body.revenueEntry.entryDate).toBe(customDate);
@@ -411,12 +411,12 @@ describe('Expenditure API', { timeout: 30000 }, () => {
 
       await request(app)
         .post(`/api/expenditure/transactions/${transactionId}/assign`)
-        .send({ agentId })
+        .send({ agentId, category: 'gas' })
         .expect(200);
 
       await request(app)
         .post(`/api/expenditure/transactions/${transactionId}/assign`)
-        .send({ agentId })
+        .send({ agentId, category: 'gas' })
         .expect(409);
 
       const revenue = await request(app)
@@ -578,7 +578,7 @@ describe('Expenditure API', { timeout: 30000 }, () => {
       // Assign to a laundry
       await request(app)
         .post(`/api/expenditure/transactions/${txId}/assign`)
-        .send({ agentId: 'Laundry-1' })
+        .send({ agentId: 'Laundry-1', category: 'electricity' })
         .expect(200);
 
       // Second import: same transaction appears again (same reference, different file)
@@ -621,7 +621,7 @@ describe('Expenditure API', { timeout: 30000 }, () => {
 
       await request(app)
         .post(`/api/expenditure/transactions/${upload1.body.transactions[0].id}/assign`)
-        .send({ agentId: 'Laundry-2' })
+        .send({ agentId: 'Laundry-2', category: 'electricity' })
         .expect(200);
 
       // Second import: same transaction by date+desc+amount
@@ -706,7 +706,7 @@ describe('Expenditure API', { timeout: 30000 }, () => {
       // Assign the transaction
       await request(app)
         .post(`/api/expenditure/transactions/${transactionId}/assign`)
-        .send({ agentId: 'Laundry-1' })
+        .send({ agentId: 'Laundry-1', category: 'vendomat_materials' })
         .expect(200);
 
       // Complete the import
@@ -821,7 +821,7 @@ describe('Expenditure API', { timeout: 30000 }, () => {
 
       await request(app)
         .post(`/api/expenditure/transactions/${transactionId}/assign`)
-        .send({ agentId: 'Laundry-1' })
+        .send({ agentId: 'Laundry-1', category: 'detergents' })
         .expect(200);
 
       const detailsResponse = await request(app)
@@ -861,6 +861,85 @@ describe('Expenditure API', { timeout: 30000 }, () => {
 
       const ignoreAudit = detailsResponse.body.audit.find((a: any) => a.action === 'TRANSACTION_IGNORED');
       expect(ignoreAudit).toBeDefined();
+    });
+  });
+
+  describe('Category Validation', () => {
+    it('rejects expense assignment without category', async () => {
+      const app = await setupApp();
+
+      const csvContent = createCsvContent([
+        { date: '15/01/2026', description: 'Expense without category', amount: '50,00' },
+      ]);
+
+      const uploadResponse = await request(app)
+        .post('/api/expenditure/imports')
+        .set('Content-Type', 'text/csv')
+        .set('X-Filename', 'no-category-test.csv')
+        .send(csvContent)
+        .expect(200);
+
+      const transactionId = uploadResponse.body.transactions[0].id;
+      const agentId = 'brandoa1';
+
+      const response = await request(app)
+        .post(`/api/expenditure/transactions/${transactionId}/assign`)
+        .send({ agentId })
+        .expect(400);
+
+      expect(response.body.error).toBe('category required for expense transactions');
+    });
+
+    it('rejects expense assignment with invalid category', async () => {
+      const app = await setupApp();
+
+      const csvContent = createCsvContent([
+        { date: '15/01/2026', description: 'Expense with invalid category', amount: '45,50' },
+      ]);
+
+      const uploadResponse = await request(app)
+        .post('/api/expenditure/imports')
+        .set('Content-Type', 'text/csv')
+        .set('X-Filename', 'invalid-category-test.csv')
+        .send(csvContent)
+        .expect(200);
+
+      const transactionId = uploadResponse.body.transactions[0].id;
+      const agentId = 'brandoa1';
+      const invalidCategory = 'nonexistent_category';
+
+      const response = await request(app)
+        .post(`/api/expenditure/transactions/${transactionId}/assign`)
+        .send({ agentId, category: invalidCategory })
+        .expect(400);
+
+      expect(response.body.error).toBe('invalid category for this agent');
+    });
+
+    it('rejects expense assignment with wrong agent category', async () => {
+      const app = await setupApp();
+
+      const csvContent = createCsvContent([
+        { date: '15/01/2026', description: 'Expense with wrong agent category', amount: '120,00' },
+      ]);
+
+      const uploadResponse = await request(app)
+        .post('/api/expenditure/imports')
+        .set('Content-Type', 'text/csv')
+        .set('X-Filename', 'wrong-agent-category-test.csv')
+        .send(csvContent)
+        .expect(200);
+
+      const transactionId = uploadResponse.body.transactions[0].id;
+      const agentId = 'brandoa1'; // Variable cost agent
+      const fixedCategory = 'accounting'; // Fixed cost category, should be rejected
+
+      const response = await request(app)
+        .post(`/api/expenditure/transactions/${transactionId}/assign`)
+        .send({ agentId, category: fixedCategory })
+        .expect(400);
+
+      expect(response.body.error).toBe('invalid category for this agent');
     });
   });
 });

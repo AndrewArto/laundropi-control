@@ -4,7 +4,7 @@ import type { ExpenditureImport, ExpenditureTransaction, Laundry } from '../../t
 import { GENERAL_LAUNDRY } from '../../types';
 import type { ReconciliationSummary, PendingChange } from '../../hooks/useReconciliation';
 import { formatTimestamp } from '../../utils/formatting';
-import { getCategoriesForAgent, type CostCategory } from '../../constants/costCategories';
+import { getCategoriesForAgent } from '../../constants/costCategories';
 
 interface BankImportViewProps {
   laundries: Laundry[];

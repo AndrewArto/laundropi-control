@@ -36,11 +36,13 @@ export const ALL_COST_CATEGORIES: CostCategory[] = [
   ...FIXED_COST_CATEGORIES,
 ];
 
+import { GENERAL_AGENT_ID } from '../types';
+
 /**
  * Get appropriate cost categories for a specific agent
  * @param agentId - The agent ID (e.g., 'brandoa1', 'brandoa2', 'General')
  * @returns Array of cost categories appropriate for the agent
  */
 export function getCategoriesForAgent(agentId: string): CostCategory[] {
-  return agentId === 'General' ? FIXED_COST_CATEGORIES : VARIABLE_COST_CATEGORIES;
+  return agentId === GENERAL_AGENT_ID ? FIXED_COST_CATEGORIES : VARIABLE_COST_CATEGORIES;
 }

@@ -25,6 +25,7 @@ import {
   UserRole,
 } from '../db';
 import { parseCSV } from '../services/csv-parser';
+import { getCategoriesForAgent } from '../../../constants/costCategories';
 
 const router = express.Router();
 
@@ -457,6 +458,17 @@ router.post('/transactions/:id/assign', (req, res) => {
   const { agentId, entryDate, comment, category } = req.body;
   if (!agentId) {
     return res.status(400).json({ error: 'agentId required' });
+  }
+
+  // Category is required for expense transactions
+  if (transaction.transactionType === 'expense' && !category) {
+    return res.status(400).json({ error: 'category required for expense transactions' });
+  }
+
+  // Validate category against allowed categories for this agent
+  const validCategories = getCategoriesForAgent(agentId);
+  if (category && !validCategories.some(c => c.id === category)) {
+    return res.status(400).json({ error: 'invalid category for this agent' });
   }
 
   const targetDate = entryDate || transaction.transactionDate;
