@@ -210,7 +210,17 @@ router.post('/imports', express.text({ type: '*/*', limit: '5mb' }), (req, res) 
         if (matchedAssigned) {
           reconciliationStatus = 'existing';
           assignedAgentId = matchedAssigned.assignedAgentId;
-          category = matchedAssigned.category;
+
+          // Only copy category if the matched transaction has a valid category for the agent
+          if (matchedAssigned.category &&
+              matchedAssigned.transactionType === 'expense' &&
+              matchedAssigned.assignedAgentId) {
+            const validCategories = getCategoriesForAgent(matchedAssigned.assignedAgentId);
+            if (validCategories.some(c => c.id === matchedAssigned.category)) {
+              category = matchedAssigned.category;
+            }
+          }
+
           reconciliationNotes = 'Auto-matched (previously assigned transaction)';
           autoExistingCount++;
         }
@@ -408,21 +418,26 @@ router.put('/transactions/:id', (req, res) => {
     return res.status(400).json({ error: 'Invalid reconciliation status' });
   }
 
-  // Category validation: if setting reconciliationStatus to 'existing' with assignedAgentId
-  // on an expense transaction, require category
-  if (reconciliationStatus === 'existing' &&
-      assignedAgentId &&
+  // Compute effective final state after applying updates
+  const effectiveStatus = reconciliationStatus !== undefined ? reconciliationStatus : transaction.reconciliationStatus;
+  const effectiveAgentId = assignedAgentId !== undefined ? assignedAgentId : transaction.assignedAgentId;
+  const effectiveCategory = category !== undefined && category !== null ? category : transaction.category;
+
+  // Validation: if effective state is 'existing' with expense transaction, require valid category
+  if (effectiveStatus === 'existing' &&
       transaction.transactionType === 'expense') {
 
-    const targetCategory = category || transaction.category;
-    if (!targetCategory) {
+    // Check for empty string category
+    if (!effectiveCategory || effectiveCategory.trim() === '') {
       return res.status(400).json({ error: 'category required for expense transactions' });
     }
 
-    // Validate category against allowed categories for this agent
-    const validCategories = getCategoriesForAgent(assignedAgentId);
-    if (!validCategories.some(c => c.id === targetCategory)) {
-      return res.status(400).json({ error: 'invalid category for this agent' });
+    // If assignedAgentId changes, validate category against new agent's allowed categories
+    if (effectiveAgentId) {
+      const validCategories = getCategoriesForAgent(effectiveAgentId);
+      if (!validCategories.some(c => c.id === effectiveCategory)) {
+        return res.status(400).json({ error: 'invalid category for this agent' });
+      }
     }
   }
 

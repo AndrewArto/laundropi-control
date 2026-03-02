@@ -1094,4 +1094,104 @@ describe('Expenditure API', { timeout: 30000 }, () => {
       expect(newTx.category).toBeNull();
     });
   });
+
+  describe('PUT Edge Cases', () => {
+    it('rejects empty string category on expense in existing state', async () => {
+      const app = await setupApp();
+
+      // Create an import with an expense transaction
+      const csvContent = createCsvContent([
+        { date: '15/01/2026', description: 'Test expense', amount: '50,00' },
+      ]);
+
+      const upload = await request(app)
+        .post('/api/expenditure/imports')
+        .set('Content-Type', 'text/csv')
+        .send(csvContent)
+        .expect(200);
+
+      const transactionId = upload.body.transactions[0].id;
+
+      // Try to update with empty string category in existing state - should fail
+      await request(app)
+        .put(`/api/expenditure/transactions/${transactionId}`)
+        .send({
+          reconciliationStatus: 'existing',
+          assignedAgentId: 'brandoa1',
+          category: '', // Empty string should be rejected
+        })
+        .expect(400);
+    });
+
+    it('rejects PUT changing assignedAgentId to agent without matching category', async () => {
+      const app = await setupApp();
+
+      // Create an expense transaction and assign it
+      const csvContent = createCsvContent([
+        { date: '15/01/2026', description: 'Rent expense', amount: '500,00' },
+      ]);
+
+      const upload = await request(app)
+        .post('/api/expenditure/imports')
+        .set('Content-Type', 'text/csv')
+        .send(csvContent)
+        .expect(200);
+
+      const transactionId = upload.body.transactions[0].id;
+
+      // First assign to General with rent category (fixed cost)
+      await request(app)
+        .post(`/api/expenditure/transactions/${transactionId}/assign`)
+        .send({ agentId: 'General', category: 'rent_br1' })
+        .expect(200);
+
+      // Try to change agent to brandoa1 without updating category
+      // brandoa1 doesn't have 'rent_br1' category (General only), so should fail
+      await request(app)
+        .put(`/api/expenditure/transactions/${transactionId}`)
+        .send({
+          assignedAgentId: 'brandoa1', // Change agent without updating category
+        })
+        .expect(400);
+    });
+
+    it('validates category against current assignedAgentId in category-only update', async () => {
+      const app = await setupApp();
+
+      // Create an expense transaction and assign it
+      const csvContent = createCsvContent([
+        { date: '15/01/2026', description: 'Test expense', amount: '50,00' },
+      ]);
+
+      const upload = await request(app)
+        .post('/api/expenditure/imports')
+        .set('Content-Type', 'text/csv')
+        .send(csvContent)
+        .expect(200);
+
+      const transactionId = upload.body.transactions[0].id;
+
+      // First assign to brandoa1 with detergents category
+      await request(app)
+        .post(`/api/expenditure/transactions/${transactionId}/assign`)
+        .send({ agentId: 'brandoa1', category: 'detergents' })
+        .expect(200);
+
+      // Valid category-only update (brandoa1 has gas category)
+      await request(app)
+        .put(`/api/expenditure/transactions/${transactionId}`)
+        .send({
+          category: 'gas', // Valid for brandoa1
+        })
+        .expect(200);
+
+      // Invalid category-only update (brandoa1 doesn't have rent category - that's General only)
+      await request(app)
+        .put(`/api/expenditure/transactions/${transactionId}`)
+        .send({
+          category: 'rent', // Invalid for brandoa1, should fail
+        })
+        .expect(400);
+    });
+  });
 });

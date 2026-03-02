@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useRef, useMemo } from 'react';
 import { Upload, FileText, Check, ChevronDown, ChevronRight, Trash2, ArrowLeft, Ban, Loader2, Undo2 } from 'lucide-react';
 import type { ExpenditureImport, ExpenditureTransaction, Laundry } from '../../types';
-import { GENERAL_LAUNDRY } from '../../types';
+import { GENERAL_LAUNDRY, GENERAL_AGENT_ID } from '../../types';
 import type { ReconciliationSummary, PendingChange } from '../../hooks/useReconciliation';
 import { formatTimestamp } from '../../utils/formatting';
 import { getCategoriesForAgent } from '../../constants/costCategories';
@@ -137,7 +137,7 @@ export const BankImportView: React.FC<BankImportViewProps> = ({
     return (
       <div className="mt-2 p-3 bg-slate-800 rounded border border-slate-600">
         <div className="text-sm text-slate-300 mb-2">
-          Select expense category for {agentId === 'General' ? GENERAL_LAUNDRY.name : `${agentId}`}:
+          Select expense category for {agentId === GENERAL_AGENT_ID ? GENERAL_LAUNDRY.name : `${agentId}`}:
         </div>
         <div className="grid gap-2">
           {categories.map((category) => (
@@ -404,10 +404,6 @@ export const BankImportView: React.FC<BankImportViewProps> = ({
                             </>
                           )}
                         </div>
-                        {/* Category selection for expense transactions */}
-                        {pendingCategorySelection && pendingCategorySelection.transactionId === tx.id && (
-                          renderCategorySelection(pendingCategorySelection.agentId)
-                        )}
                       </div>
 
                       {/* Mobile layout */}
