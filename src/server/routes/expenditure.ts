@@ -421,14 +421,19 @@ router.put('/transactions/:id', (req, res) => {
   // Compute effective final state after applying updates
   const effectiveStatus = reconciliationStatus !== undefined ? reconciliationStatus : transaction.reconciliationStatus;
   const effectiveAgentId = assignedAgentId !== undefined ? assignedAgentId : transaction.assignedAgentId;
-  const effectiveCategory = category !== undefined && category !== null ? category : transaction.category;
+  const effectiveCategory = (category !== undefined && category !== null) ? category : transaction.category;
 
   // Validation: if effective state is 'existing' with expense transaction, require valid category
   if (effectiveStatus === 'existing' &&
       transaction.transactionType === 'expense') {
 
-    // Check for empty string category
-    if (!effectiveCategory || effectiveCategory.trim() === '') {
+    // Reject if category is explicitly sent as null
+    if (category === null) {
+      return res.status(400).json({ error: 'category required for expense transactions' });
+    }
+
+    // Check for invalid type or empty string category
+    if (typeof effectiveCategory !== 'string' || effectiveCategory.trim() === '') {
       return res.status(400).json({ error: 'category required for expense transactions' });
     }
 

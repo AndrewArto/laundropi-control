@@ -1000,6 +1000,90 @@ describe('Expenditure API', { timeout: 30000 }, () => {
       expect(response.body.transaction.assignedAgentId).toBe('brandoa1');
       expect(response.body.transaction.category).toBe('water');
     });
+
+    it('rejects PUT with category: null on existing expense', async () => {
+      const app = await setupApp();
+
+      const csvContent = createCsvContent([
+        { date: '15/01/2026', description: 'Expense for null category test', amount: '65,00' },
+      ]);
+
+      const uploadResponse = await request(app)
+        .post('/api/expenditure/imports')
+        .set('Content-Type', 'text/csv')
+        .set('X-Filename', 'null-category-test.csv')
+        .send(csvContent)
+        .expect(200);
+
+      const transactionId = uploadResponse.body.transactions[0].id;
+
+      const response = await request(app)
+        .put(`/api/expenditure/transactions/${transactionId}`)
+        .send({
+          reconciliationStatus: 'existing',
+          assignedAgentId: 'brandoa1',
+          category: null,
+        })
+        .expect(400);
+
+      expect(response.body.error).toBe('category required for expense transactions');
+    });
+
+    it('rejects PUT with category: 123 (number) on existing expense', async () => {
+      const app = await setupApp();
+
+      const csvContent = createCsvContent([
+        { date: '15/01/2026', description: 'Expense for number category test', amount: '55,00' },
+      ]);
+
+      const uploadResponse = await request(app)
+        .post('/api/expenditure/imports')
+        .set('Content-Type', 'text/csv')
+        .set('X-Filename', 'number-category-test.csv')
+        .send(csvContent)
+        .expect(200);
+
+      const transactionId = uploadResponse.body.transactions[0].id;
+
+      const response = await request(app)
+        .put(`/api/expenditure/transactions/${transactionId}`)
+        .send({
+          reconciliationStatus: 'existing',
+          assignedAgentId: 'brandoa1',
+          category: 123,
+        })
+        .expect(400);
+
+      expect(response.body.error).toBe('category required for expense transactions');
+    });
+
+    it('rejects PUT with category: true (boolean) on existing expense', async () => {
+      const app = await setupApp();
+
+      const csvContent = createCsvContent([
+        { date: '15/01/2026', description: 'Expense for boolean category test', amount: '45,00' },
+      ]);
+
+      const uploadResponse = await request(app)
+        .post('/api/expenditure/imports')
+        .set('Content-Type', 'text/csv')
+        .set('X-Filename', 'boolean-category-test.csv')
+        .send(csvContent)
+        .expect(200);
+
+      const transactionId = uploadResponse.body.transactions[0].id;
+
+      const response = await request(app)
+        .put(`/api/expenditure/transactions/${transactionId}`)
+        .send({
+          reconciliationStatus: 'existing',
+          assignedAgentId: 'brandoa1',
+          category: true,
+        })
+        .expect(400);
+
+      expect(response.body.error).toBe('category required for expense transactions');
+    });
   });
 
   describe('Auto-Match Category Preservation', () => {
@@ -1185,11 +1269,11 @@ describe('Expenditure API', { timeout: 30000 }, () => {
         })
         .expect(200);
 
-      // Invalid category-only update (brandoa1 doesn't have rent category - that's General only)
+      // Invalid category-only update (brandoa1 doesn't have rent_br1 category - that's General only)
       await request(app)
         .put(`/api/expenditure/transactions/${transactionId}`)
         .send({
-          category: 'rent', // Invalid for brandoa1, should fail
+          category: 'rent_br1', // Invalid for brandoa1, should fail
         })
         .expect(400);
     });
