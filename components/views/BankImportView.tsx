@@ -568,10 +568,6 @@ export const BankImportView: React.FC<BankImportViewProps> = ({
                             </>
                           )}
                         </div>
-                        {/* Category selection for expense transactions */}
-                        {pendingCategorySelection && pendingCategorySelection.transactionId === tx.id && (
-                          renderCategorySelection(pendingCategorySelection.agentId)
-                        )}
                       </div>
 
                       {/* Mobile layout */}
@@ -627,11 +623,12 @@ export const BankImportView: React.FC<BankImportViewProps> = ({
                             )}
                           </div>
                         )}
-                        {/* Category selection for expense transactions (mobile) */}
-                        {pendingCategorySelection && pendingCategorySelection.transactionId === tx.id && (
-                          renderCategorySelection(pendingCategorySelection.agentId)
-                        )}
                       </div>
+
+                      {/* Category selection - full width below transaction (desktop + mobile) */}
+                      {pendingCategorySelection && pendingCategorySelection.transactionId === tx.id && (
+                        renderCategorySelection(pendingCategorySelection.agentId)
+                      )}
                     </div>
                   );
                 })}
