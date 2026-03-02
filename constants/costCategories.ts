@@ -20,7 +20,6 @@ export const FIXED_COST_CATEGORIES: CostCategory[] = [
   { id: 'rent_br1', label: 'Rent Br1', group: 'fixed' },
   { id: 'rent_br2', label: 'Rent Br2', group: 'fixed' },
   { id: 'accounting', label: 'Accounting', group: 'fixed' },
-  { id: 'vendomat_rent', label: 'Vendomat rent', group: 'fixed' },
   { id: 'maintenance', label: 'Maintenance, materials and repair', group: 'fixed' },
   { id: 'cleaning', label: 'Cleaning', group: 'fixed' },
   { id: 'insurance', label: 'Insurance', group: 'fixed' },

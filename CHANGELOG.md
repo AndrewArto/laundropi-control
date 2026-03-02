@@ -4,6 +4,13 @@
 
 <!-- Entries below -->
 
+## 2026-03-02 #003 fix: UI improvements for expense categories
+
+**UI Fixes:**
+- **FIXED**: Removed pre-selected laundry button for expense transactions - all buttons now start grey/unselected until user clicks
+- **REMOVED**: 'Vendomat rent' cost category from fixed costs (vendomat has been returned)
+- **IMPROVED**: Cleaner expense assignment flow requiring explicit user selection
+
 ## 2026-03-02 #002 feat: Add expense cost categories to bank reconciliation
 
 **New Feature: Expense Cost Categories**
