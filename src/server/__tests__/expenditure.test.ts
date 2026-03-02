@@ -291,7 +291,7 @@ describe('Expenditure API', { timeout: 30000 }, () => {
 
       const response = await request(app)
         .post(`/api/expenditure/transactions/${transactionId}/assign`)
-        .send({ agentId })
+        .send({ agentId, category: 'detergents' })
         .expect(200);
 
       expect(response.body.transaction.reconciliationStatus).toBe('existing');
@@ -323,11 +323,73 @@ describe('Expenditure API', { timeout: 30000 }, () => {
 
       const response = await request(app)
         .post(`/api/expenditure/transactions/${transactionId}/assign`)
-        .send({ agentId, entryDate: customDate, comment: customComment })
+        .send({ agentId, entryDate: customDate, comment: customComment, category: 'water' })
         .expect(200);
 
       expect(response.body.revenueEntry.entryDate).toBe(customDate);
       expect(response.body.revenueEntry.deductions[0].comment).toBe(customComment);
+    });
+
+    it('assigns transaction with expense category', async () => {
+      const app = await setupApp();
+
+      const csvContent = createCsvContent([
+        { date: '15/01/2026', description: 'Laundry detergent', amount: '45,50' },
+      ]);
+
+      const uploadResponse = await request(app)
+        .post('/api/expenditure/imports')
+        .set('Content-Type', 'text/csv')
+        .set('X-Filename', 'category-assign-test.csv')
+        .send(csvContent)
+        .expect(200);
+
+      const transactionId = uploadResponse.body.transactions[0].id;
+      const agentId = 'brandoa1';
+      const category = 'detergents';
+
+      const response = await request(app)
+        .post(`/api/expenditure/transactions/${transactionId}/assign`)
+        .send({ agentId, category })
+        .expect(200);
+
+      expect(response.body.transaction.reconciliationStatus).toBe('existing');
+      expect(response.body.transaction.assignedAgentId).toBe(agentId);
+      expect(response.body.transaction.category).toBe(category);
+      expect(response.body.revenueEntry).toBeDefined();
+      expect(response.body.revenueEntry.deductions).toHaveLength(1);
+      expect(response.body.revenueEntry.deductions[0].amount).toBe(45.5);
+    });
+
+    it('assigns transaction with fixed cost category to General agent', async () => {
+      const app = await setupApp();
+
+      const csvContent = createCsvContent([
+        { date: '15/01/2026', description: 'Accounting services', amount: '120,00' },
+      ]);
+
+      const uploadResponse = await request(app)
+        .post('/api/expenditure/imports')
+        .set('Content-Type', 'text/csv')
+        .set('X-Filename', 'fixed-category-assign-test.csv')
+        .send(csvContent)
+        .expect(200);
+
+      const transactionId = uploadResponse.body.transactions[0].id;
+      const agentId = 'General';
+      const category = 'accounting';
+
+      const response = await request(app)
+        .post(`/api/expenditure/transactions/${transactionId}/assign`)
+        .send({ agentId, category })
+        .expect(200);
+
+      expect(response.body.transaction.reconciliationStatus).toBe('existing');
+      expect(response.body.transaction.assignedAgentId).toBe(agentId);
+      expect(response.body.transaction.category).toBe(category);
+      expect(response.body.revenueEntry).toBeDefined();
+      expect(response.body.revenueEntry.deductions).toHaveLength(1);
+      expect(response.body.revenueEntry.deductions[0].amount).toBe(120);
     });
 
     it('rejects duplicate assignment of the same expense transaction', async () => {
@@ -349,12 +411,12 @@ describe('Expenditure API', { timeout: 30000 }, () => {
 
       await request(app)
         .post(`/api/expenditure/transactions/${transactionId}/assign`)
-        .send({ agentId })
+        .send({ agentId, category: 'gas' })
         .expect(200);
 
       await request(app)
         .post(`/api/expenditure/transactions/${transactionId}/assign`)
-        .send({ agentId })
+        .send({ agentId, category: 'gas' })
         .expect(409);
 
       const revenue = await request(app)
@@ -516,7 +578,7 @@ describe('Expenditure API', { timeout: 30000 }, () => {
       // Assign to a laundry
       await request(app)
         .post(`/api/expenditure/transactions/${txId}/assign`)
-        .send({ agentId: 'Laundry-1' })
+        .send({ agentId: 'Laundry-1', category: 'electricity' })
         .expect(200);
 
       // Second import: same transaction appears again (same reference, different file)
@@ -559,7 +621,7 @@ describe('Expenditure API', { timeout: 30000 }, () => {
 
       await request(app)
         .post(`/api/expenditure/transactions/${upload1.body.transactions[0].id}/assign`)
-        .send({ agentId: 'Laundry-2' })
+        .send({ agentId: 'Laundry-2', category: 'electricity' })
         .expect(200);
 
       // Second import: same transaction by date+desc+amount
@@ -644,7 +706,7 @@ describe('Expenditure API', { timeout: 30000 }, () => {
       // Assign the transaction
       await request(app)
         .post(`/api/expenditure/transactions/${transactionId}/assign`)
-        .send({ agentId: 'Laundry-1' })
+        .send({ agentId: 'Laundry-1', category: 'vendomat_materials' })
         .expect(200);
 
       // Complete the import
@@ -759,7 +821,7 @@ describe('Expenditure API', { timeout: 30000 }, () => {
 
       await request(app)
         .post(`/api/expenditure/transactions/${transactionId}/assign`)
-        .send({ agentId: 'Laundry-1' })
+        .send({ agentId: 'Laundry-1', category: 'detergents' })
         .expect(200);
 
       const detailsResponse = await request(app)
@@ -799,6 +861,449 @@ describe('Expenditure API', { timeout: 30000 }, () => {
 
       const ignoreAudit = detailsResponse.body.audit.find((a: any) => a.action === 'TRANSACTION_IGNORED');
       expect(ignoreAudit).toBeDefined();
+    });
+  });
+
+  describe('Category Validation', () => {
+    it('rejects expense assignment without category', async () => {
+      const app = await setupApp();
+
+      const csvContent = createCsvContent([
+        { date: '15/01/2026', description: 'Expense without category', amount: '50,00' },
+      ]);
+
+      const uploadResponse = await request(app)
+        .post('/api/expenditure/imports')
+        .set('Content-Type', 'text/csv')
+        .set('X-Filename', 'no-category-test.csv')
+        .send(csvContent)
+        .expect(200);
+
+      const transactionId = uploadResponse.body.transactions[0].id;
+      const agentId = 'brandoa1';
+
+      const response = await request(app)
+        .post(`/api/expenditure/transactions/${transactionId}/assign`)
+        .send({ agentId })
+        .expect(400);
+
+      expect(response.body.error).toBe('category required for expense transactions');
+    });
+
+    it('rejects expense assignment with invalid category', async () => {
+      const app = await setupApp();
+
+      const csvContent = createCsvContent([
+        { date: '15/01/2026', description: 'Expense with invalid category', amount: '45,50' },
+      ]);
+
+      const uploadResponse = await request(app)
+        .post('/api/expenditure/imports')
+        .set('Content-Type', 'text/csv')
+        .set('X-Filename', 'invalid-category-test.csv')
+        .send(csvContent)
+        .expect(200);
+
+      const transactionId = uploadResponse.body.transactions[0].id;
+      const agentId = 'brandoa1';
+      const invalidCategory = 'nonexistent_category';
+
+      const response = await request(app)
+        .post(`/api/expenditure/transactions/${transactionId}/assign`)
+        .send({ agentId, category: invalidCategory })
+        .expect(400);
+
+      expect(response.body.error).toBe('invalid category for this agent');
+    });
+
+    it('rejects expense assignment with wrong agent category', async () => {
+      const app = await setupApp();
+
+      const csvContent = createCsvContent([
+        { date: '15/01/2026', description: 'Expense with wrong agent category', amount: '120,00' },
+      ]);
+
+      const uploadResponse = await request(app)
+        .post('/api/expenditure/imports')
+        .set('Content-Type', 'text/csv')
+        .set('X-Filename', 'wrong-agent-category-test.csv')
+        .send(csvContent)
+        .expect(200);
+
+      const transactionId = uploadResponse.body.transactions[0].id;
+      const agentId = 'brandoa1'; // Variable cost agent
+      const fixedCategory = 'accounting'; // Fixed cost category, should be rejected
+
+      const response = await request(app)
+        .post(`/api/expenditure/transactions/${transactionId}/assign`)
+        .send({ agentId, category: fixedCategory })
+        .expect(400);
+
+      expect(response.body.error).toBe('invalid category for this agent');
+    });
+  });
+
+  describe('PUT Transaction Category Validation', () => {
+    it('rejects PUT setting reconciliationStatus=existing with assignedAgentId on expense without category', async () => {
+      const app = await setupApp();
+
+      const csvContent = createCsvContent([
+        { date: '15/01/2026', description: 'Expense for PUT test', amount: '75,00' },
+      ]);
+
+      const uploadResponse = await request(app)
+        .post('/api/expenditure/imports')
+        .set('Content-Type', 'text/csv')
+        .set('X-Filename', 'put-validation-test.csv')
+        .send(csvContent)
+        .expect(200);
+
+      const transactionId = uploadResponse.body.transactions[0].id;
+
+      const response = await request(app)
+        .put(`/api/expenditure/transactions/${transactionId}`)
+        .send({
+          reconciliationStatus: 'existing',
+          assignedAgentId: 'brandoa1',
+        })
+        .expect(400);
+
+      expect(response.body.error).toBe('category required for expense transactions');
+    });
+
+    it('allows PUT setting reconciliationStatus=existing with category', async () => {
+      const app = await setupApp();
+
+      const csvContent = createCsvContent([
+        { date: '15/01/2026', description: 'Expense for PUT with category', amount: '85,00' },
+      ]);
+
+      const uploadResponse = await request(app)
+        .post('/api/expenditure/imports')
+        .set('Content-Type', 'text/csv')
+        .set('X-Filename', 'put-with-category-test.csv')
+        .send(csvContent)
+        .expect(200);
+
+      const transactionId = uploadResponse.body.transactions[0].id;
+
+      const response = await request(app)
+        .put(`/api/expenditure/transactions/${transactionId}`)
+        .send({
+          reconciliationStatus: 'existing',
+          assignedAgentId: 'brandoa1',
+          category: 'water',
+        })
+        .expect(200);
+
+      expect(response.body.transaction.reconciliationStatus).toBe('existing');
+      expect(response.body.transaction.assignedAgentId).toBe('brandoa1');
+      expect(response.body.transaction.category).toBe('water');
+    });
+
+    it('rejects PUT with category: null on existing expense', async () => {
+      const app = await setupApp();
+
+      const csvContent = createCsvContent([
+        { date: '15/01/2026', description: 'Expense for null category test', amount: '65,00' },
+      ]);
+
+      const uploadResponse = await request(app)
+        .post('/api/expenditure/imports')
+        .set('Content-Type', 'text/csv')
+        .set('X-Filename', 'null-category-test.csv')
+        .send(csvContent)
+        .expect(200);
+
+      const transactionId = uploadResponse.body.transactions[0].id;
+
+      const response = await request(app)
+        .put(`/api/expenditure/transactions/${transactionId}`)
+        .send({
+          reconciliationStatus: 'existing',
+          assignedAgentId: 'brandoa1',
+          category: null,
+        })
+        .expect(400);
+
+      expect(response.body.error).toBe('category required for expense transactions');
+    });
+
+    it('rejects PUT with category: 123 (number) on existing expense', async () => {
+      const app = await setupApp();
+
+      const csvContent = createCsvContent([
+        { date: '15/01/2026', description: 'Expense for number category test', amount: '55,00' },
+      ]);
+
+      const uploadResponse = await request(app)
+        .post('/api/expenditure/imports')
+        .set('Content-Type', 'text/csv')
+        .set('X-Filename', 'number-category-test.csv')
+        .send(csvContent)
+        .expect(200);
+
+      const transactionId = uploadResponse.body.transactions[0].id;
+
+      const response = await request(app)
+        .put(`/api/expenditure/transactions/${transactionId}`)
+        .send({
+          reconciliationStatus: 'existing',
+          assignedAgentId: 'brandoa1',
+          category: 123,
+        })
+        .expect(400);
+
+      expect(response.body.error).toBe('category required for expense transactions');
+    });
+
+    it('rejects PUT with category: true (boolean) on existing expense', async () => {
+      const app = await setupApp();
+
+      const csvContent = createCsvContent([
+        { date: '15/01/2026', description: 'Expense for boolean category test', amount: '45,00' },
+      ]);
+
+      const uploadResponse = await request(app)
+        .post('/api/expenditure/imports')
+        .set('Content-Type', 'text/csv')
+        .set('X-Filename', 'boolean-category-test.csv')
+        .send(csvContent)
+        .expect(200);
+
+      const transactionId = uploadResponse.body.transactions[0].id;
+
+      const response = await request(app)
+        .put(`/api/expenditure/transactions/${transactionId}`)
+        .send({
+          reconciliationStatus: 'existing',
+          assignedAgentId: 'brandoa1',
+          category: true,
+        })
+        .expect(400);
+
+      expect(response.body.error).toBe('category required for expense transactions');
+    });
+
+    it('rejects PUT setting reconciliationStatus=existing on expense without assignedAgentId', async () => {
+      const app = await setupApp();
+
+      const csvContent = createCsvContent([
+        { date: '15/01/2026', description: 'Expense without agent test', amount: '30,00' },
+      ]);
+
+      const uploadResponse = await request(app)
+        .post('/api/expenditure/imports')
+        .set('Content-Type', 'text/csv')
+        .set('X-Filename', 'no-agent-test.csv')
+        .send(csvContent)
+        .expect(200);
+
+      const transactionId = uploadResponse.body.transactions[0].id;
+
+      const response = await request(app)
+        .put(`/api/expenditure/transactions/${transactionId}`)
+        .send({
+          reconciliationStatus: 'existing',
+          category: 'detergents',
+          // no assignedAgentId provided
+        })
+        .expect(400);
+
+      expect(response.body.error).toBe('assignedAgentId required for existing expense transactions');
+    });
+  });
+
+  describe('Auto-Match Category Preservation', () => {
+    it('preserves category when auto-matching expense transactions on re-import', async () => {
+      const app = await setupApp();
+
+      // First import: upload and assign with category
+      const csv1 = createCsvContent([
+        { date: '15/01/2026', description: 'Detergent purchase', amount: '45,50', reference: 'DET-001' },
+      ]);
+
+      const upload1 = await request(app)
+        .post('/api/expenditure/imports')
+        .set('Content-Type', 'text/csv')
+        .set('X-Filename', 'auto-match-category-1.csv')
+        .send(csv1)
+        .expect(200);
+
+      const txId = upload1.body.transactions[0].id;
+
+      // Assign with category
+      await request(app)
+        .post(`/api/expenditure/transactions/${txId}/assign`)
+        .send({ agentId: 'brandoa1', category: 'detergents' })
+        .expect(200);
+
+      // Second import: same transaction appears again (same reference)
+      const csv2 = createCsvContent([
+        { date: '15/01/2026', description: 'Detergent purchase', amount: '45,50', reference: 'DET-001' },
+        { date: '20/01/2026', description: 'New expense', amount: '100,00', reference: 'NEW-001' },
+      ]);
+
+      const upload2 = await request(app)
+        .post('/api/expenditure/imports')
+        .set('Content-Type', 'text/csv')
+        .set('X-Filename', 'auto-match-category-2.csv')
+        .send(csv2)
+        .expect(200);
+
+      const matchedTx = upload2.body.transactions.find((t: any) => t.bankReference === 'DET-001');
+      const newTx = upload2.body.transactions.find((t: any) => t.bankReference === 'NEW-001');
+
+      expect(matchedTx.reconciliationStatus).toBe('existing');
+      expect(matchedTx.assignedAgentId).toBe('brandoa1');
+      expect(matchedTx.category).toBe('detergents');
+      expect(matchedTx.reconciliationNotes).toContain('Auto-matched');
+      expect(newTx.reconciliationStatus).toBe('new');
+      expect(newTx.category).toBeNull();
+      expect(upload2.body.autoExistingCount).toBe(1);
+    });
+
+    it('preserves category when auto-matching by date+description+amount', async () => {
+      const app = await setupApp();
+
+      // First import: upload and assign with category
+      const csv1 = createCsvContent([
+        { date: '10/01/2026', description: 'Monthly water bill', amount: '89,99' },
+      ]);
+
+      const upload1 = await request(app)
+        .post('/api/expenditure/imports')
+        .set('Content-Type', 'text/csv')
+        .set('X-Filename', 'auto-match-no-ref-1.csv')
+        .send(csv1)
+        .expect(200);
+
+      await request(app)
+        .post(`/api/expenditure/transactions/${upload1.body.transactions[0].id}/assign`)
+        .send({ agentId: 'brandoa2', category: 'water' })
+        .expect(200);
+
+      // Second import: same transaction by date+desc+amount
+      const csv2 = createCsvContent([
+        { date: '10/01/2026', description: 'Monthly water bill', amount: '89,99' },
+        { date: '11/01/2026', description: 'Gas bill', amount: '45,00' },
+      ]);
+
+      const upload2 = await request(app)
+        .post('/api/expenditure/imports')
+        .set('Content-Type', 'text/csv')
+        .set('X-Filename', 'auto-match-no-ref-2.csv')
+        .send(csv2)
+        .expect(200);
+
+      const matchedTx = upload2.body.transactions.find((t: any) => t.description === 'Monthly water bill');
+      const newTx = upload2.body.transactions.find((t: any) => t.description === 'Gas bill');
+
+      expect(matchedTx.reconciliationStatus).toBe('existing');
+      expect(matchedTx.assignedAgentId).toBe('brandoa2');
+      expect(matchedTx.category).toBe('water');
+      expect(newTx.reconciliationStatus).toBe('new');
+      expect(newTx.category).toBeNull();
+    });
+  });
+
+  describe('PUT Edge Cases', () => {
+    it('rejects empty string category on expense in existing state', async () => {
+      const app = await setupApp();
+
+      // Create an import with an expense transaction
+      const csvContent = createCsvContent([
+        { date: '15/01/2026', description: 'Test expense', amount: '50,00' },
+      ]);
+
+      const upload = await request(app)
+        .post('/api/expenditure/imports')
+        .set('Content-Type', 'text/csv')
+        .send(csvContent)
+        .expect(200);
+
+      const transactionId = upload.body.transactions[0].id;
+
+      // Try to update with empty string category in existing state - should fail
+      await request(app)
+        .put(`/api/expenditure/transactions/${transactionId}`)
+        .send({
+          reconciliationStatus: 'existing',
+          assignedAgentId: 'brandoa1',
+          category: '', // Empty string should be rejected
+        })
+        .expect(400);
+    });
+
+    it('rejects PUT changing assignedAgentId to agent without matching category', async () => {
+      const app = await setupApp();
+
+      // Create an expense transaction and assign it
+      const csvContent = createCsvContent([
+        { date: '15/01/2026', description: 'Rent expense', amount: '500,00' },
+      ]);
+
+      const upload = await request(app)
+        .post('/api/expenditure/imports')
+        .set('Content-Type', 'text/csv')
+        .send(csvContent)
+        .expect(200);
+
+      const transactionId = upload.body.transactions[0].id;
+
+      // First assign to General with rent category (fixed cost)
+      await request(app)
+        .post(`/api/expenditure/transactions/${transactionId}/assign`)
+        .send({ agentId: 'General', category: 'rent_br1' })
+        .expect(200);
+
+      // Try to change agent to brandoa1 without updating category
+      // brandoa1 doesn't have 'rent_br1' category (General only), so should fail
+      await request(app)
+        .put(`/api/expenditure/transactions/${transactionId}`)
+        .send({
+          assignedAgentId: 'brandoa1', // Change agent without updating category
+        })
+        .expect(400);
+    });
+
+    it('validates category against current assignedAgentId in category-only update', async () => {
+      const app = await setupApp();
+
+      // Create an expense transaction and assign it
+      const csvContent = createCsvContent([
+        { date: '15/01/2026', description: 'Test expense', amount: '50,00' },
+      ]);
+
+      const upload = await request(app)
+        .post('/api/expenditure/imports')
+        .set('Content-Type', 'text/csv')
+        .send(csvContent)
+        .expect(200);
+
+      const transactionId = upload.body.transactions[0].id;
+
+      // First assign to brandoa1 with detergents category
+      await request(app)
+        .post(`/api/expenditure/transactions/${transactionId}/assign`)
+        .send({ agentId: 'brandoa1', category: 'detergents' })
+        .expect(200);
+
+      // Valid category-only update (brandoa1 has gas category)
+      await request(app)
+        .put(`/api/expenditure/transactions/${transactionId}`)
+        .send({
+          category: 'gas', // Valid for brandoa1
+        })
+        .expect(200);
+
+      // Invalid category-only update (brandoa1 doesn't have rent_br1 category - that's General only)
+      await request(app)
+        .put(`/api/expenditure/transactions/${transactionId}`)
+        .send({
+          category: 'rent_br1', // Invalid for brandoa1, should fail
+        })
+        .expect(400);
     });
   });
 });

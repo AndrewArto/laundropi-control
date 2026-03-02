@@ -1,9 +1,10 @@
 import React, { useState, useCallback, useRef, useMemo } from 'react';
 import { Upload, FileText, Check, ChevronDown, ChevronRight, Trash2, ArrowLeft, Ban, Loader2, Undo2 } from 'lucide-react';
 import type { ExpenditureImport, ExpenditureTransaction, Laundry } from '../../types';
-import { GENERAL_LAUNDRY } from '../../types';
+import { GENERAL_LAUNDRY, GENERAL_AGENT_ID } from '../../types';
 import type { ReconciliationSummary, PendingChange } from '../../hooks/useReconciliation';
 import { formatTimestamp } from '../../utils/formatting';
+import { getCategoriesForAgent } from '../../constants/costCategories';
 
 interface BankImportViewProps {
   laundries: Laundry[];
@@ -21,7 +22,7 @@ interface BankImportViewProps {
 
   onUploadCsv: (file: File) => Promise<{ success: boolean; error?: string; warnings?: string[] }>;
   onLoadImport: (importId: string) => Promise<void>;
-  onAssignTransaction: (transactionId: string, agentId: string, entryDate?: string, comment?: string) => void;
+  onAssignTransaction: (transactionId: string, agentId: string, entryDate?: string, comment?: string, category?: string) => void;
   onAssignStripeCredit: (transactionId: string, agentId: string, entryDate?: string) => void;
   onIgnoreTransaction: (transactionId: string, notes?: string) => void;
   onUnignoreTransaction: (transactionId: string) => void;
@@ -81,8 +82,21 @@ export const BankImportView: React.FC<BankImportViewProps> = ({
   // Track items being assigned with three phases: selected -> animating -> flyingOut
   const [assigningItems, setAssigningItems] = useState<Map<string, { agentId: string; type: 'expense' | 'stripe'; phase: 'selected' | 'animating' | 'flyingOut' }>>(new Map());
 
-  // Handle expense assignment with three-phase animation
+  // Track transaction awaiting category selection: { transactionId: { agentId } }
+  const [pendingCategorySelection, setPendingCategorySelection] = useState<{ transactionId: string; agentId: string } | null>(null);
+
+  // Handle expense assignment with category selection first
   const handleAssignExpense = useCallback((txId: string, agentId: string) => {
+    setPendingCategorySelection({ transactionId: txId, agentId });
+  }, []);
+
+  // Handle category selection and proceed with assignment
+  const handleCategorySelection = useCallback((category: string) => {
+    if (!pendingCategorySelection) return;
+
+    const { transactionId: txId, agentId } = pendingCategorySelection;
+    setPendingCategorySelection(null);
+
     // Phase 1: Show selected button (400ms)
     setAssigningItems(prev => new Map(prev).set(txId, { agentId, type: 'expense', phase: 'selected' }));
     setTimeout(() => {
@@ -92,7 +106,7 @@ export const BankImportView: React.FC<BankImportViewProps> = ({
         // Phase 3: Fly out animation (400ms)
         setAssigningItems(prev => new Map(prev).set(txId, { agentId, type: 'expense', phase: 'flyingOut' }));
         setTimeout(() => {
-          onAssignTransaction(txId, agentId);
+          onAssignTransaction(txId, agentId, undefined, undefined, category);
           setAssigningItems(prev => {
             const next = new Map(prev);
             next.delete(txId);
@@ -101,7 +115,50 @@ export const BankImportView: React.FC<BankImportViewProps> = ({
         }, 400);
       }, 600);
     }, 400);
-  }, [onAssignTransaction]);
+  }, [pendingCategorySelection, onAssignTransaction]);
+
+  // Cancel category selection
+  const handleCancelCategorySelection = useCallback(() => {
+    setPendingCategorySelection(null);
+  }, []);
+
+  // Get category label by ID
+  const getCategoryLabel = useCallback((categoryId: string | null, agentId: string | null) => {
+    if (!categoryId || !agentId) return null;
+    const categories = getCategoriesForAgent(agentId);
+    const category = categories.find(c => c.id === categoryId);
+    return category?.label || categoryId;
+  }, []);
+
+  // Render category selection dropdown
+  const renderCategorySelection = (agentId: string) => {
+    const categories = getCategoriesForAgent(agentId);
+
+    return (
+      <div className="mt-2 p-3 bg-slate-800 rounded border border-slate-600">
+        <div className="text-sm text-slate-300 mb-2">
+          Select expense category for {agentId === GENERAL_AGENT_ID ? GENERAL_LAUNDRY.name : `${agentId}`}:
+        </div>
+        <div className="grid gap-2">
+          {categories.map((category) => (
+            <button
+              key={category.id}
+              onClick={() => handleCategorySelection(category.id)}
+              className="px-3 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded text-sm font-medium text-left transition-colors"
+            >
+              {category.label}
+            </button>
+          ))}
+          <button
+            onClick={handleCancelCategorySelection}
+            className="px-3 py-2 bg-slate-600 hover:bg-slate-500 text-white rounded text-sm font-medium transition-colors"
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+    );
+  };
 
   // Handle Stripe assignment with three-phase animation
   const handleAssignStripe = useCallback((txId: string, agentId: string) => {
@@ -426,24 +483,6 @@ export const BankImportView: React.FC<BankImportViewProps> = ({
                 <span className="w-2 h-2 rounded-full bg-amber-400 flex-shrink-0"></span>
                 <span>New Expenses ({newExpenses.length})</span>
               </button>
-              {!isReadOnly && (
-                <button
-                  onClick={() => {
-                    // Assign all to default laundry (first laundry for expenses)
-                    const defaultLaundry = allLaundries[0];
-                    if (defaultLaundry) {
-                      newExpenses.forEach(tx => {
-                        if (!pendingChanges.has(tx.id) && !assigningItems.has(tx.id)) {
-                          onAssignTransaction(tx.id, defaultLaundry.id);
-                        }
-                      });
-                    }
-                  }}
-                  className="w-full sm:w-auto px-3 py-1.5 bg-purple-600 hover:bg-purple-500 text-white rounded text-sm font-medium whitespace-nowrap"
-                >
-                  Process All → {allLaundries[0]?.name || 'Default'}
-                </button>
-              )}
             </div>
             {showExpenses && (
               <div className="space-y-2">
@@ -529,6 +568,10 @@ export const BankImportView: React.FC<BankImportViewProps> = ({
                             </>
                           )}
                         </div>
+                        {/* Category selection for expense transactions */}
+                        {pendingCategorySelection && pendingCategorySelection.transactionId === tx.id && (
+                          renderCategorySelection(pendingCategorySelection.agentId)
+                        )}
                       </div>
 
                       {/* Mobile layout */}
@@ -583,6 +626,10 @@ export const BankImportView: React.FC<BankImportViewProps> = ({
                             )}
                           </div>
                         )}
+                        {/* Category selection for expense transactions (mobile) */}
+                        {pendingCategorySelection && pendingCategorySelection.transactionId === tx.id && (
+                          renderCategorySelection(pendingCategorySelection.agentId)
+                        )}
                       </div>
                     </div>
                   );
@@ -624,7 +671,12 @@ export const BankImportView: React.FC<BankImportViewProps> = ({
                         </span>
                         {isStripe && <span className="text-xs px-1.5 py-0.5 bg-blue-500/20 text-blue-400 rounded">STRIPE</span>}
                         <span className="text-slate-500">→</span>
-                        <span className="text-slate-300 text-sm">{laundryName}</span>
+                        <span className="text-slate-300 text-sm">
+                          {laundryName}
+                          {!isStripe && tx.category && (
+                            <span className="text-slate-400"> → {getCategoryLabel(tx.category, tx.assignedAgentId)}</span>
+                          )}
+                        </span>
                         <span className="text-slate-500 text-sm truncate flex-1">{tx.description}</span>
                         {hasPending && !isCompleted && !isCancelled && !isReadOnly && (
                           <button
@@ -661,7 +713,12 @@ export const BankImportView: React.FC<BankImportViewProps> = ({
                         </div>
                         <div className="flex items-center gap-1 text-xs">
                           <span className="text-slate-500">→</span>
-                          <span className="text-slate-300">{laundryName}</span>
+                          <span className="text-slate-300">
+                            {laundryName}
+                            {!isStripe && tx.category && (
+                              <span className="text-slate-400"> → {getCategoryLabel(tx.category, tx.assignedAgentId)}</span>
+                            )}
+                          </span>
                         </div>
                         <p className="text-slate-500 text-xs line-clamp-1">{tx.description}</p>
                       </div>

@@ -409,7 +409,7 @@ interface RevenueViewProps {
   bankHasUnsavedChanges: boolean;
   onBankUploadCsv: (file: File) => Promise<{ success: boolean; error?: string; warnings?: string[] }>;
   onBankLoadImport: (importId: string) => Promise<void>;
-  onBankAssignTransaction: (transactionId: string, agentId: string, entryDate?: string, comment?: string) => void;
+  onBankAssignTransaction: (transactionId: string, agentId: string, entryDate?: string, comment?: string, category?: string) => void;
   onBankAssignStripeCredit: (transactionId: string, agentId: string, entryDate?: string) => void;
   onBankIgnoreTransaction: (transactionId: string, notes?: string) => void;
   onBankUnignoreTransaction: (transactionId: string) => void;
