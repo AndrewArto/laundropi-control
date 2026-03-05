@@ -236,8 +236,9 @@ export class MachineEventCollector {
         this.baselineStatusById.set(mapping.speedqueenId, currentStatusId);
       }
     } else {
-      // For REST snapshots, always log current status with isTransition=0
-      this.logMachineEvent(mapping, currentStatusId, prevStatusId, statusData, source, 0);
+      // For REST snapshots: log transition if status changed, snapshot if same
+      const isTransition = (prevStatusId !== undefined && prevStatusId !== currentStatusId) ? 1 : 0;
+      this.logMachineEvent(mapping, currentStatusId, prevStatusId ?? null, statusData, source, isTransition);
       this.baselineStatusById.set(mapping.speedqueenId, currentStatusId);
     }
   }
