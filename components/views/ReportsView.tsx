@@ -125,11 +125,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ authUser, laundries })
   const locationOptions = ['All', ...laundries.map(l => l.id)];
   const machineOptions = [...Array.from({ length: 10 }, (_, i) => `w${i + 1}`), ...Array.from({ length: 8 }, (_, i) => `d${i + 1}`)];
 
-  // Filter out initial snapshots (no previousStatusId) unless toggle is on
-  const displayedEvents = useMemo(() => {
-    if (showInitialSnapshots) return events;
-    return events.filter(e => e.previousStatusId !== null && e.previousStatusId !== '');
-  }, [events, showInitialSnapshots]);
+  const displayedEvents = events;
 
   const fetchEvents = useCallback(async (append = false) => {
     setLoading(true);
@@ -139,6 +135,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ authUser, laundries })
       if (locationFilter !== 'All') params.set('agentId', locationFilter);
       if (machineFilter.length > 0) params.set('machineId', machineFilter.join(','));
       if (statusFilter !== 'All') params.set('statusId', statusFilter);
+      if (!showInitialSnapshots) params.set('transitionsOnly', '1');
       if (dateFrom) params.set('from', `${dateFrom}T00:00:00.000Z`);
       if (dateTo) params.set('to', `${dateTo}T23:59:59.999Z`);
       const currentOffset = append ? offset : 0;
@@ -164,13 +161,13 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ authUser, laundries })
     } finally {
       setLoading(false);
     }
-  }, [locationFilter, machineFilter, statusFilter, dateFrom, dateTo, offset]);
+  }, [locationFilter, machineFilter, statusFilter, showInitialSnapshots, dateFrom, dateTo, offset]);
 
   // Fetch on mount and when filters change
   useEffect(() => {
     setOffset(0);
     fetchEvents(false);
-  }, [locationFilter, machineFilter, statusFilter, dateFrom, dateTo]);
+  }, [locationFilter, machineFilter, statusFilter, showInitialSnapshots, dateFrom, dateTo]);
 
   const handleLoadMore = () => {
     fetchEvents(true);

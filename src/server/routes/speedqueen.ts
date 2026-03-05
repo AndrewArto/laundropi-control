@@ -145,7 +145,7 @@ export function createSpeedQueenRouter(deps: SpeedQueenRouterDeps): express.Rout
 
   // Machine events log
   router.get('/machine-events', deps.requireUiAuth, (req, res) => {
-    const { agentId, machineId, statusId, from, to, limit } = req.query;
+    const { agentId, machineId, statusId, transitionsOnly, from, to, limit } = req.query;
     try {
       const events = listMachineEvents({
         agentId: agentId as string | undefined,
@@ -154,6 +154,7 @@ export function createSpeedQueenRouter(deps: SpeedQueenRouterDeps): express.Rout
         from: from as string | undefined,
         to: to as string | undefined,
         limit: limit ? Number(limit) : undefined,
+        transitionsOnly: transitionsOnly === '1',
       });
       res.json(events);
     } catch (err: any) {
