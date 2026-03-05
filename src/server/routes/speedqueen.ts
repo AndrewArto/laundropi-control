@@ -145,11 +145,12 @@ export function createSpeedQueenRouter(deps: SpeedQueenRouterDeps): express.Rout
 
   // Machine events log
   router.get('/machine-events', deps.requireUiAuth, (req, res) => {
-    const { agentId, machineId, from, to, limit } = req.query;
+    const { agentId, machineId, statusId, from, to, limit } = req.query;
     try {
       const events = listMachineEvents({
         agentId: agentId as string | undefined,
         machineId: machineId as string | undefined,
+        statusId: statusId as string | undefined,
         from: from as string | undefined,
         to: to as string | undefined,
         limit: limit ? Number(limit) : undefined,

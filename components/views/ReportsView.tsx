@@ -31,7 +31,7 @@ interface ReportsViewProps {
   laundries: Laundry[];
 }
 
-const STATUS_OPTIONS = ['All', 'AVAILABLE', 'IN_USE', 'END_OF_CYCLE', 'DIAGNOSTIC', 'OUT_OF_ORDER', 'ERROR'];
+const STATUS_OPTIONS = ['All', 'AVAILABLE', 'IN_USE', 'COMPLETE', 'END_OF_CYCLE', 'READY_TO_START', 'PARTIAL_VEND', 'OUT_OF_ORDER', 'ERROR', 'NETWORK_ERROR', 'DIAGNOSTIC'];
 const PAGE_SIZE = 200;
 
 const statusColor = (statusId: string): string => {
@@ -138,6 +138,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ authUser, laundries })
       const params = new URLSearchParams();
       if (locationFilter !== 'All') params.set('agentId', locationFilter);
       if (machineFilter.length > 0) params.set('machineId', machineFilter.join(','));
+      if (statusFilter !== 'All') params.set('statusId', statusFilter);
       if (dateFrom) params.set('from', `${dateFrom}T00:00:00.000Z`);
       if (dateTo) params.set('to', `${dateTo}T23:59:59.999Z`);
       const currentOffset = append ? offset : 0;
@@ -151,15 +152,10 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ authUser, laundries })
       const hasMoreResults = data.length > PAGE_SIZE;
       const pageData = hasMoreResults ? data.slice(0, PAGE_SIZE) : data;
 
-      // Apply client-side status filter
-      const filtered = statusFilter !== 'All'
-        ? pageData.filter(e => e.statusId === statusFilter)
-        : pageData;
-
       if (append) {
-        setEvents(prev => [...prev, ...filtered]);
+        setEvents(prev => [...prev, ...pageData]);
       } else {
-        setEvents(filtered);
+        setEvents(pageData);
       }
       setHasMore(hasMoreResults);
       setOffset(currentOffset + pageData.length);

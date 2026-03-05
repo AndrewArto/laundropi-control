@@ -1808,6 +1808,7 @@ export function insertMachineEvent(row: MachineEventRow) {
 export function listMachineEvents(options: {
   agentId?: string;
   machineId?: string;
+  statusId?: string;
   from?: string;
   to?: string;
   limit?: number;
@@ -1831,6 +1832,10 @@ export function listMachineEvents(options: {
       conditions.push(`${col} IN (${ids.map(() => '?').join(',')})`);
       params.push(...ids);
     }
+  }
+  if (options.statusId) {
+    conditions.push('statusId = ?');
+    params.push(options.statusId);
   }
   if (options.from) {
     conditions.push('timestamp >= ?');
