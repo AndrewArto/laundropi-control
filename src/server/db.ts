@@ -1821,8 +1821,16 @@ export function listMachineEvents(options: {
     params.push(options.agentId);
   }
   if (options.machineId) {
-    conditions.push('machineId = ?');
-    params.push(options.machineId);
+    const ids = options.machineId.split(',').map(s => s.trim()).filter(Boolean);
+    const isLocalId = ids.every(id => /^[wd]\d+$/i.test(id));
+    const col = isLocalId ? 'localId' : 'machineId';
+    if (ids.length === 1) {
+      conditions.push(`${col} = ?`);
+      params.push(ids[0]);
+    } else {
+      conditions.push(`${col} IN (${ids.map(() => '?').join(',')})`);
+      params.push(...ids);
+    }
   }
   if (options.from) {
     conditions.push('timestamp >= ?');

@@ -102,15 +102,28 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ authUser, laundries })
   const [offset, setOffset] = useState(0);
 
   // Filters
+  const [machineDropdownOpen, setMachineDropdownOpen] = useState(false);
+  const machineDropdownRef = React.useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (machineDropdownRef.current && !machineDropdownRef.current.contains(e.target as Node)) {
+        setMachineDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
   const [locationFilter, setLocationFilter] = useState('All');
-  const [machineFilter, setMachineFilter] = useState('All');
+  const [machineFilter, setMachineFilter] = useState<string[]>([]);
   const [statusFilter, setStatusFilter] = useState('All');
   const [dateFrom, setDateFrom] = useState(sevenDaysAgoStr);
   const [dateTo, setDateTo] = useState(todayStr);
   const [showInitialSnapshots, setShowInitialSnapshots] = useState(false);
 
   const locationOptions = ['All', ...laundries.map(l => l.id)];
-  const machineOptions = ['All', ...Array.from({ length: 10 }, (_, i) => `w${i + 1}`), ...Array.from({ length: 8 }, (_, i) => `d${i + 1}`)];
+  const machineOptions = [...Array.from({ length: 10 }, (_, i) => `w${i + 1}`), ...Array.from({ length: 8 }, (_, i) => `d${i + 1}`)];
 
   // Filter out initial snapshots (no previousStatusId) unless toggle is on
   const displayedEvents = useMemo(() => {
@@ -124,7 +137,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ authUser, laundries })
     try {
       const params = new URLSearchParams();
       if (locationFilter !== 'All') params.set('agentId', locationFilter);
-      if (machineFilter !== 'All') params.set('machineId', machineFilter);
+      if (machineFilter.length > 0) params.set('machineId', machineFilter.join(','));
       if (dateFrom) params.set('from', `${dateFrom}T00:00:00.000Z`);
       if (dateTo) params.set('to', `${dateTo}T23:59:59.999Z`);
       const currentOffset = append ? offset : 0;
@@ -210,18 +223,46 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ authUser, laundries })
           </div>
         </div>
 
-        {/* Machine */}
-        <div>
-          <label className="block text-[10px] text-slate-500 mb-1">Machine</label>
+        {/* Machine (multi-select) */}
+        <div ref={machineDropdownRef}>
+          <label className="block text-[10px] text-slate-500 mb-1">
+            Machine{machineFilter.length > 0 ? ` (${machineFilter.length})` : ''}
+          </label>
           <div className="relative">
-            <select
-              value={machineFilter}
-              onChange={e => setMachineFilter(e.target.value)}
-              className="w-full bg-slate-800 border border-slate-700 rounded px-2 py-1.5 text-xs text-slate-300 appearance-none pr-6"
+            <button
+              type="button"
+              onClick={() => setMachineDropdownOpen(v => !v)}
+              className="w-full bg-slate-800 border border-slate-700 rounded px-2 py-1.5 text-xs text-slate-300 text-left pr-6"
             >
-              {machineOptions.map(o => <option key={o} value={o}>{o === 'All' ? 'All Machines' : o}</option>)}
-            </select>
+              {machineFilter.length === 0 ? 'All Machines' : machineFilter.join(', ')}
+            </button>
             <ChevronDown className="w-3 h-3 absolute right-1.5 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" />
+            {machineDropdownOpen && (
+              <div className="absolute z-50 mt-1 left-0 w-full max-h-48 overflow-y-auto bg-slate-800 border border-slate-700 rounded shadow-lg">
+                <button
+                  type="button"
+                  onClick={() => { setMachineFilter([]); setMachineDropdownOpen(false); }}
+                  className={`w-full text-left px-2 py-1 text-xs hover:bg-slate-700 ${machineFilter.length === 0 ? 'text-cyan-400 font-medium' : 'text-slate-400'}`}
+                >
+                  All Machines
+                </button>
+                {machineOptions.map(o => (
+                  <label key={o} className="flex items-center gap-1.5 px-2 py-1 text-xs text-slate-300 hover:bg-slate-700 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={machineFilter.includes(o)}
+                      onChange={() => {
+                        setMachineFilter(prev =>
+                          prev.includes(o) ? prev.filter(m => m !== o) : [...prev, o]
+                        );
+                      }}
+                      className="w-3 h-3 rounded border-slate-600 bg-slate-700 text-cyan-500"
+                    />
+                    {o}
+                  </label>
+                ))}
+              </div>
+            )}
           </div>
         </div>
 
