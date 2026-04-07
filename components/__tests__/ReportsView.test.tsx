@@ -133,7 +133,7 @@ describe('ReportsView', () => {
     const { container } = render(<ReportsView authUser={mockAdminUser} laundries={mockLaundries} />);
 
     await waitFor(() => {
-      expect(screen.getByText('w1')).toBeTruthy();
+      expect(screen.getAllByText('w1').length).toBeGreaterThan(0);
     });
 
     // Lock icon for isDoorOpen=0, Unlock for isDoorOpen=1
@@ -223,70 +223,85 @@ describe('ReportsView', () => {
   });
 
   it('should filter out initial snapshots by default', async () => {
-    const eventsWithSnapshot: MachineEvent[] = [
-      ...mockEvents,
-      {
-        id: 3,
-        timestamp: '2026-02-18T08:00:00.000Z',
-        locationId: 'loc1',
-        locationName: 'Brandoa1',
-        machineId: 'sq-w2',
-        localId: 'w2',
-        agentId: 'Brandoa1',
-        machineType: 'washer',
-        statusId: 'AVAILABLE',
-        previousStatusId: null,
-        remainingSeconds: null,
-        remainingVend: null,
-        isDoorOpen: null,
-        cycleId: null,
-        cycleName: null,
-        linkQuality: null,
-        receivedAt: null,
-        source: 'rest_poll',
-        initiator: null,
-        initiatorUser: null,
-        commandType: null,
-      },
-    ];
-    globalThis.fetch = createFetchMock(eventsWithSnapshot);
+    const snapshotEvent: MachineEvent = {
+      id: 3,
+      timestamp: '2026-02-18T08:00:00.000Z',
+      locationId: 'loc1',
+      locationName: 'Brandoa1',
+      machineId: 'sq-w2',
+      localId: 'w2',
+      agentId: 'Brandoa1',
+      machineType: 'washer',
+      statusId: 'AVAILABLE',
+      previousStatusId: null,
+      remainingSeconds: null,
+      remainingVend: null,
+      isDoorOpen: null,
+      cycleId: null,
+      cycleName: null,
+      linkQuality: null,
+      receivedAt: null,
+      source: 'rest_poll',
+      initiator: null,
+      initiatorUser: null,
+      commandType: null,
+    };
+    // Server-side filtering: when transitionsOnly=1 (default), server omits snapshots
+    globalThis.fetch = vi.fn((url: string) => {
+      const hasTransitionsOnly = url.includes('transitionsOnly=1');
+      const data = hasTransitionsOnly ? mockEvents : [...mockEvents, snapshotEvent];
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve(data),
+      });
+    }) as any;
     render(<ReportsView authUser={mockAdminUser} laundries={mockLaundries} />);
 
     await waitFor(() => {
-      // Only 2 transitions shown (the initial snapshot is hidden)
+      // Only 2 transitions shown (server filters out initial snapshots when transitionsOnly=1)
       expect(screen.getByText(/2 transition/)).toBeTruthy();
-      expect(screen.getByText(/1 initial snapshot hidden/)).toBeTruthy();
     });
+
+    // Verify fetch was called with transitionsOnly param
+    const lastCall = (globalThis.fetch as any).mock.calls[0][0];
+    expect(lastCall).toContain('transitionsOnly=1');
   });
 
   it('should show initial snapshots when toggle is on', async () => {
-    const eventsWithSnapshot: MachineEvent[] = [
-      ...mockEvents,
-      {
-        id: 3,
-        timestamp: '2026-02-18T08:00:00.000Z',
-        locationId: 'loc1',
-        locationName: 'Brandoa1',
-        machineId: 'sq-w2',
-        localId: 'w2',
-        agentId: 'Brandoa1',
-        machineType: 'washer',
-        statusId: 'AVAILABLE',
-        previousStatusId: null,
-        remainingSeconds: null,
-        remainingVend: null,
-        isDoorOpen: null,
-        cycleId: null,
-        cycleName: null,
-        linkQuality: null,
-        receivedAt: null,
-        source: 'rest_poll',
-        initiator: null,
-        initiatorUser: null,
-        commandType: null,
-      },
-    ];
-    globalThis.fetch = createFetchMock(eventsWithSnapshot);
+    const snapshotEvent: MachineEvent = {
+      id: 3,
+      timestamp: '2026-02-18T08:00:00.000Z',
+      locationId: 'loc1',
+      locationName: 'Brandoa1',
+      machineId: 'sq-w2',
+      localId: 'w2',
+      agentId: 'Brandoa1',
+      machineType: 'washer',
+      statusId: 'AVAILABLE',
+      previousStatusId: null,
+      remainingSeconds: null,
+      remainingVend: null,
+      isDoorOpen: null,
+      cycleId: null,
+      cycleName: null,
+      linkQuality: null,
+      receivedAt: null,
+      source: 'rest_poll',
+      initiator: null,
+      initiatorUser: null,
+      commandType: null,
+    };
+    // Server-side filtering: transitionsOnly=1 omits snapshots; without it, all events returned
+    globalThis.fetch = vi.fn((url: string) => {
+      const hasTransitionsOnly = url.includes('transitionsOnly=1');
+      const data = hasTransitionsOnly ? mockEvents : [...mockEvents, snapshotEvent];
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve(data),
+      });
+    }) as any;
     render(<ReportsView authUser={mockAdminUser} laundries={mockLaundries} />);
 
     await waitFor(() => {
